@@ -1,0 +1,17 @@
+{
+  "name": "lirbox",
+  "description": "liemle3893's personal Claude Code plugins.",
+  "owner": {
+    "name": "liemle3893",
+    "email": "websliem@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "lirbox",
+      "source": "./plugins/lirbox",
+      "description": "lirbox — personal developer toolkit. First skill: pr-writeup — generate a self-contained HTML write-up explaining any pull request to a reviewer.",
+      "category": "productivity",
+      "keywords": ["pr", "pull-request", "code-review", "html", "writeup", "lirbox"]
+    }
+  ]
+}

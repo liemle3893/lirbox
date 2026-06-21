@@ -1,0 +1,12 @@
+{
+  "name": "lirbox",
+  "description": "lirbox — liemle3893's personal developer toolkit; a growing collection of skills and agents. First skill: pr-writeup, which turns any pull request into a polished, self-contained HTML write-up (TL;DR, motivation, file-by-file, focus areas, test plan, rollout).",
+  "author": {
+    "name": "liemle3893",
+    "email": "websliem@gmail.com"
+  },
+  "homepage": "https://github.com/liemle3893/lirbox",
+  "repository": "https://github.com/liemle3893/lirbox",
+  "license": "MIT",
+  "keywords": ["pr", "pull-request", "code-review", "html", "writeup", "lirbox"]
+}

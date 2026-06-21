@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<!--
+  CODEWALK TEMPLATE — self-contained, single file, no external assets, no JS
+  (expand/collapse uses native <details>). HOW TO USE: copy this file, replace every
+  {{PLACEHOLDER}} and marked region with data traced from the REAL codebase. Keep the
+  <style> block byte-for-byte. Every file path, line range, and code excerpt MUST come
+  from the actual repo — never invent them. Delete sections/panels that don't apply and
+  keep section ids in sync with the TOC. Component snippets live in references/components.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codewalk — {{WALK_TITLE}}</title>
+<style>
+  :root{
+    --ivory:#FAF9F5; --paper:#FFFFFF; --slate:#141413; --slate-soft:#3A3A37;
+    --muted:#6B6B66; --line:#E7E4DC; --line-soft:#F0EEE7;
+    --clay:#D97757; --clay-deep:#B04A3F; --clay-soft:#FBEDE7;
+    --olive:#788C5D; --olive-soft:#EEF1E7; --oat:#E3DACC;
+    --code-bg:#1F1E1B; --code-line:#2E2C28;
+    --kw:#E0A08A; --str:#A6BE83; --com:#6B6B66; --fn:#D8C99B; --num:#C9B98F;
+    --radius:14px; --maxw:1180px;
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--ivory);color:var(--slate);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:var(--clay);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--line-soft);
+    padding:.1em .4em;border-radius:5px;color:var(--slate-soft)}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 32px}
+
+  /* Header */
+  header.hero{border-bottom:1px solid var(--line)}
+  .hero-inner{padding:52px 0 34px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 14px}
+  h1.title{font-family:var(--serif);font-weight:600;font-size:36px;line-height:1.18;
+    margin:0 0 16px;letter-spacing:-.01em}
+  .summary{font-size:17px;color:var(--slate-soft);max-width:68ch;margin:0}
+  .summary b{color:var(--slate)}
+
+  /* Layout */
+  .layout{display:grid;grid-template-columns:1fr 268px;gap:52px;padding:40px 0 110px;align-items:start}
+  main{min-width:0}
+  aside{position:sticky;top:24px;display:flex;flex-direction:column;gap:22px}
+
+  nav.toc{font-size:13.5px;border-left:1px solid var(--line);padding-left:16px}
+  nav.toc .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:10px}
+  nav.toc a{display:block;color:var(--slate-soft);padding:3px 0}
+  nav.toc a:hover{color:var(--clay);text-decoration:none}
+
+  /* Sidebar panels */
+  .side-panel{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .side-panel .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 12px}
+  .kf{padding:8px 0;border-top:1px solid var(--line-soft)} .kf:first-of-type{border-top:none}
+  .kf .path{font-family:var(--mono);font-size:12px;color:var(--slate);word-break:break-all}
+  .kf .role{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .side-panel.gotchas{border-left:3px solid var(--clay)}
+  .gotcha{font-size:13px;color:var(--slate-soft);padding:7px 0;border-top:1px solid var(--line-soft)}
+  .gotcha:first-of-type{border-top:none}
+  .gotcha b{color:var(--clay-deep)}
+
+  /* Sections */
+  section{margin-bottom:44px;scroll-margin-top:24px}
+  h2.h{font-family:var(--serif);font-weight:600;font-size:24px;margin:0 0 14px;letter-spacing:-.01em}
+  section p{margin:0 0 14px;color:var(--slate-soft)}
+
+  /* Path diagram (CSS nodes + arrows; no SVG) */
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--paper);
+    border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .node{font-family:var(--mono);font-size:12.5px;background:var(--ivory);border:1px solid var(--line);
+    border-radius:9px;padding:8px 12px;color:var(--slate)}
+  .node .sub{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+  .node.critical{border-color:var(--clay);background:var(--clay-soft);color:var(--clay-deep)}
+  .node.critical .sub{color:var(--clay)}
+  .arrow{color:var(--muted);font-family:var(--mono)}
+  .arrow .albl{display:block;font-size:10px;color:var(--muted)}
+  .arrow.async{color:var(--clay)}
+
+  /* Callstack walkthrough */
+  .step{display:flex;gap:16px;padding:18px 0;border-top:1px solid var(--line)}
+  .step:first-of-type{border-top:none}
+  .step .num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--slate);color:#fff;
+    font-family:var(--mono);font-size:14px;display:flex;align-items:center;justify-content:center}
+  .step.critical .num{background:var(--clay)}
+  .step .body{min-width:0;flex:1}
+  .loc{font-family:var(--mono);font-size:12px;color:var(--muted);margin:0 0 6px}
+  .step.critical .loc{color:var(--clay-deep)}
+  .badge{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+    background:var(--clay-soft);color:var(--clay-deep);border-radius:20px;padding:2px 8px;margin-left:8px}
+  details.snip{margin-top:10px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--paper)}
+  details.snip>summary{cursor:pointer;list-style:none;padding:9px 13px;font-family:var(--mono);
+    font-size:12px;color:var(--slate-soft);background:var(--line-soft);user-select:none}
+  details.snip>summary::-webkit-details-marker{display:none}
+  details.snip>summary::before{content:"▸ ";color:var(--muted)}
+  details.snip[open]>summary::before{content:"▾ "}
+  details.snip pre{margin:0;border-radius:0;border:none}
+
+  pre{background:var(--code-bg);color:#E9E6DE;border-radius:10px;padding:15px 16px;overflow:auto;
+    font-family:var(--mono);font-size:12.5px;line-height:1.6;margin:0;border:1px solid var(--code-line)}
+  pre .kw{color:var(--kw)} pre .str{color:var(--str)} pre .com{color:var(--com)}
+  pre .fn{color:var(--fn)} pre .num{color:var(--num)}
+
+  footer{border-top:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:12px;padding:22px 0 40px}
+
+  @media(max-width:960px){
+    .layout{grid-template-columns:1fr;gap:0} aside{display:none} h1.title{font-size:29px}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap hero-inner">
+    <p class="eyebrow">Codewalk · {{REPO_OR_SUBSYSTEM}}</p>
+    <h1 class="title">{{WALK_TITLE — e.g. "How authentication flows through the codebase"}}</h1>
+    <p class="summary">{{2_4_SENTENCE_SUMMARY: the path being traced and the one idea the reader should leave with — name the single point of control / trust boundary / hot path. Use <b> on the key term.}}</p>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <main>
+
+    <!-- PATH — the request/data/call path as nodes + arrows. Highlight the ONE
+         critical node (trust boundary / hot path / single point of control) with
+         class="node critical". Use arrow.async for queue/event/background hops. -->
+    <section id="path">
+      <h2 class="h">{{PATH_HEADING — e.g. "Request path"}}</h2>
+      <div class="flow">
+        <span class="node">{{NODE_A}}<span class="sub">{{WHERE}}</span></span>
+        <span class="arrow"><span class="albl">{{STEP_LABEL}}</span>→</span>
+        <span class="node critical">{{CRITICAL_NODE}}<span class="sub">{{FILE}}</span></span>
+        <span class="arrow"><span class="albl">{{STEP_LABEL}}</span>→</span>
+        <span class="node">{{NODE_C}}<span class="sub">{{WHERE}}</span></span>
+      </div>
+    </section>
+
+    <!-- WALKTHROUGH — the call path, step by step. Each step: real file:line location,
+         an explanation of what happens (and why), and an expandable REAL code excerpt.
+         Mark the trust-boundary / critical step with class="step critical" + a badge.
+         Every loc and every snippet must match the actual repo. -->
+    <section id="walkthrough">
+      <h2 class="h">{{WALKTHROUGH_HEADING — e.g. "Callstack walkthrough"}}</h2>
+
+      <div class="step">
+        <div class="num">1</div>
+        <div class="body">
+          <p class="loc">{{src/path/file.ts:12–40}}</p>
+          <p>{{WHAT_HAPPENS_HERE — entry point: what triggers it, what it does next}}</p>
+          <details class="snip"><summary>{{file.ts · functionName()}}</summary>
+<pre><span class="kw">export async function</span> <span class="fn">handler</span>(req) {
+  <span class="com">// real excerpt, trimmed to the relevant lines</span>
+}</pre>
+          </details>
+        </div>
+      </div>
+
+      <div class="step critical">
+        <div class="num">2</div>
+        <div class="body">
+          <p class="loc">{{src/middleware/auth.ts:18–46}} <span class="badge">trust boundary</span></p>
+          <p>{{WHY_THIS_IS_THE_CRITICAL_STEP — the single place the invariant is enforced}}</p>
+          <details class="snip"><summary>{{auth.ts · verifyToken()}}</summary>
+<pre><span class="kw">function</span> <span class="fn">verifyToken</span>(req) {
+  <span class="com">// the load-bearing lines</span>
+}</pre>
+          </details>
+        </div>
+      </div>
+
+      <!-- repeat .step as needed (typically 3–6 steps) -->
+    </section>
+
+  </main>
+
+  <aside>
+    <nav class="toc">
+      <p class="lbl">On this page</p>
+      <a href="#path">{{PATH_HEADING}}</a>
+      <a href="#walkthrough">{{WALKTHROUGH_HEADING}}</a>
+    </nav>
+
+    <!-- KEY FILES — the handful of files that matter, each with a one-line role. -->
+    <div class="side-panel">
+      <p class="lbl">Key files</p>
+      <div class="kf"><div class="path">{{src/path/a.ts}}</div><div class="role">{{role}}</div></div>
+      <div class="kf"><div class="path">{{src/path/b.ts}}</div><div class="role">{{role}}</div></div>
+      <div class="kf"><div class="path">{{db/migrations/00x.sql}}</div><div class="role">{{role}}</div></div>
+    </div>
+
+    <!-- GOTCHAS — real, non-obvious traps in THIS path (caches, races, edge cases).
+         Delete the panel if there are none worth flagging. -->
+    <div class="side-panel gotchas">
+      <p class="lbl">Gotchas</p>
+      <div class="gotcha"><b>{{TRAP}}</b> — {{WHY_IT_BITES}}</div>
+      <div class="gotcha"><b>{{TRAP}}</b> — {{WHY_IT_BITES}}</div>
+    </div>
+  </aside>
+</div>
+
+<footer class="wrap">
+  Codewalk · {{REPO}} · traced {{DATE}}
+</footer>
+
+</body>
+</html>

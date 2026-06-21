@@ -1,0 +1,120 @@
+# Optional Delivery Phases — PR + Ticket
+
+The conductor harness is **generic** — it does not create PRs or touch trackers by
+default. The generator emits these phases automatically via flags
+(`--ticket`, `--pr`, `--enforce-code`, `--enforce-tests`, `--enforce-docs`, or `--profile
+delivery`) — prefer that. This file documents what those generated phases contain and how to
+customize them by hand (Jira/Linear/PR specifics, gate behavior).
+
+Workers get the tracker MCP via `ToolSearch` and `gh` via `Bash` automatically — no change to
+the skill's `allowed-tools` is needed. **Jira** tools (`mcp__atlassian__*`) are available in
+this environment. **Linear** is supported only if a Linear MCP server is connected; the
+snippets note where to substitute it.
+
+These read/write extra state fields: `ticket`, `baseBranch`, `prUrl`. Include them in the
+`checkpoint()` payload and the final return so resume and the report pick them up.
+
+---
+
+## A. Ticket → brief (when `args.ticket` is set)
+
+Place right after `Setup`. Derives the goal from the ticket instead of free text.
+
+```js
+const TICKET = (args && args.ticket) ? args.ticket : null
+
+phase('Brief')
+if (!TICKET) {
+  log('No ticket — goal came from the invocation text')
+} else if (done.has('Brief')) {
+  log('Brief already complete (resumed)')
+} else {
+  results.brief = await agent(
+    `Fetch tracker ticket ${TICKET} and write a concise goal + acceptance criteria.
+Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase AC/DoD):
+- Jira:   mcp__atlassian__getJiraIssue  (issueIdOrKey: "${TICKET}")
+- Linear: the Linear MCP get-issue tool, ONLY if a Linear server is connected.
+Return the title, the acceptance criteria, and a one-paragraph goal.`,
+    { label: 'brief', phase: 'Brief',
+      schema: { type: 'object', additionalProperties: false, required: ['goal'],
+        properties: { title: { type: 'string' }, goal: { type: 'string' },
+          acceptanceCriteria: { type: 'array', items: { type: 'string' } } } } },
+  )
+  done.add('Brief')
+  await checkpoint('Brief')
+}
+```
+
+Feed `results.brief.goal` / `acceptanceCriteria` into the work phases' prompts.
+
+---
+
+## B. PR phase (push branch + open PR)
+
+Place near the end, after the work + verify phases. `BASE` is the worktree's base branch —
+default it to the repo's real default branch (e.g. `main`, or `uat` on this project); do NOT
+hardcode across projects.
+
+```js
+phase('PR')
+if (done.has('PR')) {
+  log('PR already complete (resumed)')
+} else {
+  results.pr = await agent(
+    `${IN_WORKTREE}
+
+Push the branch and open a PR with the GitHub CLI. Run:
+git push -u origin ${BRANCH}
+gh pr create --base ${BASE || 'main'} --head ${BRANCH} \\
+  --title "<concise title from the goal/ticket>" \\
+  --body "<what changed + why${TICKET ? `; refs ${TICKET}` : ''}>"
+Print the PR URL. If a PR for this branch already exists, return its URL instead of erroring.`,
+    { label: 'pr', phase: 'PR',
+      schema: { type: 'object', additionalProperties: false, required: ['prUrl'],
+        properties: { prUrl: { type: 'string' } } } },
+  )
+  done.add('PR')
+  await checkpoint('PR')
+}
+```
+
+---
+
+## C. Ticket update (transition + comment with PR link)
+
+Place after the PR phase. Skips cleanly when there is no ticket.
+
+```js
+phase('TicketUpdate')
+if (!TICKET) {
+  log('No ticket — nothing to update')
+} else if (done.has('TicketUpdate')) {
+  log('TicketUpdate already complete (resumed)')
+} else {
+  results.ticketUpdate = await agent(
+    `Update tracker ticket ${TICKET}. Use ToolSearch to load the tracker tools.
+Jira:
+  1. getTransitionsForJiraIssue(issueIdOrKey: "${TICKET}")
+  2. transitionJiraIssue to the review state (match the name case-insensitively,
+     e.g. "In Review" / "Code Review"; if none matches, skip the transition).
+  3. addCommentToJiraIssue with the PR link: ${results.pr && results.pr.prUrl}
+Linear: use the Linear MCP update/comment tools instead, ONLY if connected.
+Return what was transitioned and whether the comment was added.`,
+    { label: 'ticket-update', phase: 'TicketUpdate',
+      schema: { type: 'object', additionalProperties: false, required: ['updated'],
+        properties: { updated: { type: 'boolean' }, transition: { type: 'string' } } } },
+  )
+  done.add('TicketUpdate')
+  await checkpoint('TicketUpdate')
+}
+```
+
+---
+
+## Wiring summary
+
+- Constants near the top: `const TICKET = (args && args.ticket) ? args.ticket : null`.
+- `meta.phases`: add `Brief` (after Setup), `PR` and `TicketUpdate` (at the end) as needed.
+- `checkpoint()` payload + final `return`: include `ticket: TICKET`, `baseBranch: BASE`,
+  `prUrl: results.pr && results.pr.prUrl` so the state file and report capture them.
+- Non-destructive default still holds: opening a PR is fine, but do NOT auto-merge.

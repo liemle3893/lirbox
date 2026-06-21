@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Enforce the liemle3893 PERSONAL identity on every commit.
+# This repo lives on a machine whose *global* git identity is a work account
+# (liemlhd_msn / crownx). Without this guard, commits silently leak that identity.
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+set -euo pipefail
+
+EXPECTED_EMAIL="33980597+liemle3893@users.noreply.github.com"
+EXPECTED_NAME="liemle3893"
+
+email="$(git config user.email || true)"
+name="$(git config user.name || true)"
+
+fail() {
+  echo "✋ commit blocked — $1" >&2
+  echo "   Set the personal identity for this repo:" >&2
+  echo "     git config user.name  \"$EXPECTED_NAME\"" >&2
+  echo "     git config user.email \"$EXPECTED_EMAIL\"" >&2
+  exit 1
+}
+
+# Hard block on any known work-identity fingerprint, whatever the config says.
+# (lowercased via tr for bash 3.2 compatibility — no ${var,,})
+fingerprint="$(printf '%s %s' "$email" "$name" | tr '[:upper:]' '[:lower:]')"
+case "$fingerprint" in
+  *liemlhd_msn*|*crownx*|*masangroup*) fail "work identity detected (${name} <${email}>)";;
+esac
+
+[ "$email" = "$EXPECTED_EMAIL" ] || fail "author email is '${email:-<unset>}', expected '$EXPECTED_EMAIL'"
+[ "$name"  = "$EXPECTED_NAME"  ] || fail "author name is '${name:-<unset>}', expected '$EXPECTED_NAME'"
+
+exit 0

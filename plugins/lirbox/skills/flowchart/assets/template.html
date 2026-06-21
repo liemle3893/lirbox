@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<!--
+  FLOWCHART TEMPLATE — single HTML file. Renders a branching process diagram with
+  Mermaid (loaded from CDN) + a clickable per-node detail panel.
+  NOTE: this file needs internet to render (Mermaid is fetched from a CDN). It is the
+  one lirbox skill that is NOT fully offline — by design.
+
+  HOW TO USE:
+  1. Replace the whole graph inside <pre class="mermaid"> … </pre> (between the
+     %% TEMPLATE-GRAPH-START / END markers) with the real process. Use Mermaid
+     `flowchart TD` syntax. Both markers MUST be gone in the final file.
+  2. Replace the STEPS object (between // TEMPLATE-STEPS-START / END) — one entry per
+     node id, with title/meta/body/code. Both markers MUST be gone.
+  3. Replace every {{PLACEHOLDER}} in the header/legend.
+  4. Set DEFAULT_NODE to the node selected on load.
+  Keep the <style> block and the Mermaid init/JS wiring intact.
+  Component + syntax guide: references/components.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowchart — {{FLOW_TITLE}}</title>
+<style>
+  :root{
+    --ivory:#FAF9F5; --paper:#FFFFFF; --slate:#141413; --slate-soft:#3A3A37;
+    --muted:#6B6B66; --line:#E7E4DC; --line-soft:#F0EEE7;
+    --clay:#D97757; --clay-deep:#B04A3F; --clay-soft:#FBEDE7;
+    --olive:#788C5D; --olive-soft:#EEF1E7; --oat:#E3DACC; --oat-soft:#F3EFE6;
+    --code-bg:#1F1E1B; --code-line:#2E2C28; --kw:#E0A08A; --str:#A6BE83; --com:#6B6B66; --fn:#D8C99B;
+    --radius:14px; --maxw:1180px;
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ivory);color:var(--slate);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  code{font-family:var(--mono);font-size:.86em;background:var(--line-soft);padding:.1em .4em;border-radius:5px}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 32px}
+
+  header.hero{border-bottom:1px solid var(--line)}
+  .hero-inner{padding:50px 0 32px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+  h1.title{font-family:var(--serif);font-weight:600;font-size:36px;line-height:1.18;margin:0 0 14px;letter-spacing:-.01em}
+  .lead{font-size:17px;color:var(--slate-soft);max-width:70ch;margin:0}
+  .lead code{font-size:.9em}
+
+  .layout{display:grid;grid-template-columns:1fr 340px;gap:40px;padding:34px 0 90px;align-items:start}
+  .chart{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px;overflow:auto}
+  .mermaid{font-family:var(--sans)}
+  aside{position:sticky;top:24px;display:flex;flex-direction:column;gap:20px}
+
+  /* Legend */
+  .legend{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .legend .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+  .leg{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--slate-soft);padding:4px 0}
+  .swatch{width:22px;height:14px;border-radius:4px;border:1px solid var(--line);flex:none}
+  .swatch.proc{background:var(--paper)} .swatch.dec{background:var(--oat-soft);border-color:var(--oat)}
+  .swatch.ok{background:var(--olive-soft);border-color:var(--olive)} .swatch.fail{background:var(--clay-soft);border-color:var(--clay)}
+  .swatch.line{height:0;border:none;border-top:2px solid var(--muted)}
+  .swatch.yes{height:0;border:none;border-top:2px solid var(--olive)} .swatch.no{height:0;border:none;border-top:2px solid var(--clay)}
+
+  /* Detail panel */
+  .detail{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px}
+  .detail .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--clay);margin:0 0 8px}
+  .detail h3{font-family:var(--serif);font-size:20px;margin:0 0 8px}
+  .detail .meta{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+  .detail .tag{font-family:var(--mono);font-size:11px;color:var(--slate-soft);background:var(--oat-soft);border:1px solid var(--oat);border-radius:20px;padding:2px 9px}
+  .detail p{margin:0 0 12px;color:var(--slate-soft);font-size:14.5px}
+  .detail pre{background:var(--code-bg);color:#E9E6DE;border-radius:10px;padding:13px 14px;overflow:auto;
+    font-family:var(--mono);font-size:12px;line-height:1.55;margin:0;border:1px solid var(--code-line)}
+  .detail pre .kw{color:var(--kw)} .detail pre .str{color:var(--str)} .detail pre .com{color:var(--com)} .detail pre .fn{color:var(--fn)}
+  .hint{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:10px}
+
+  footer{border-top:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:12px;padding:20px 0 40px}
+  @media(max-width:960px){.layout{grid-template-columns:1fr;gap:24px} aside{position:static}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap hero-inner">
+    <p class="eyebrow">Flowchart · {{PROJECT_OR_SUBSYSTEM}}</p>
+    <h1 class="title">{{FLOW_TITLE — e.g. "What happens when you git push"}}</h1>
+    <p class="lead">{{1_3_SENTENCE_LEAD — the process this traces and what the branches mean. Click any node for detail.}}</p>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <main>
+    <div class="chart">
+<pre class="mermaid">
+%% TEMPLATE-GRAPH-START — replace this entire graph with the real process, then delete both markers.
+flowchart TD
+  start([git push]):::term --> lint[lint & typecheck]
+  lint --> gate{checks pass?}:::dec
+  gate -->|no| failed[status: failed]:::fail
+  gate -->|yes| test[unit + e2e]:::crit
+  test --> build[build image] --> canary[deploy 5% canary]
+  canary --> slo{SLO healthy?}:::dec
+  slo -->|no| rollback[auto rollback]:::fail
+  slo -->|yes| prod[ramp to 100%]:::ok
+
+  classDef term fill:#E3DACC,stroke:#C9BCA3,color:#141413;
+  classDef dec fill:#F3EFE6,stroke:#E3DACC,color:#141413;
+  classDef ok fill:#EEF1E7,stroke:#788C5D,color:#3A3A37;
+  classDef fail fill:#FBEDE7,stroke:#D97757,color:#B04A3F;
+  classDef crit fill:#FBEDE7,stroke:#D97757,stroke-width:2px,color:#B04A3F;
+
+  click start selectNode "details"
+  click lint selectNode "details"
+  click gate selectNode "details"
+  click test selectNode "details"
+  click build selectNode "details"
+  click canary selectNode "details"
+  click slo selectNode "details"
+  click prod selectNode "details"
+  click failed selectNode "details"
+  click rollback selectNode "details"
+%% TEMPLATE-GRAPH-END
+</pre>
+    </div>
+  </main>
+
+  <aside>
+    <div class="detail" id="detail">
+      <p class="lbl">Step detail</p>
+      <h3 id="d-title">—</h3>
+      <div class="meta" id="d-meta"></div>
+      <div id="d-body"></div>
+      <p class="hint">Click a node in the chart to inspect it.</p>
+    </div>
+
+    <div class="legend">
+      <p class="lbl">Legend</p>
+      <div class="leg"><span class="swatch proc"></span> process step</div>
+      <div class="leg"><span class="swatch dec"></span> decision (diamond)</div>
+      <div class="leg"><span class="swatch ok"></span> success / done</div>
+      <div class="leg"><span class="swatch fail"></span> failure / rollback</div>
+      <div class="leg"><span class="swatch yes"></span> "yes" branch</div>
+      <div class="leg"><span class="swatch no"></span> "no" branch</div>
+    </div>
+  </aside>
+</div>
+
+<footer class="wrap">Flowchart · {{PROJECT}} · {{DATE}}</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js"
+        integrity="sha384-yQ4mmBBT+vhTAwjFH0toJXNYJ6O4usWnt6EPIdWwrRvx2V/n5lXuDZQwQFeSFydF"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+  // Per-node detail. One entry per node id used in the graph above.
+  // body is HTML (escape <,>,& in prose); code is optional (HTML with span.kw/.str/.com/.fn).
+  const STEPS = {
+    // TEMPLATE-STEPS-START — replace with one entry per real node, then delete both markers.
+    start:    { title: "git push", meta: ["trigger", "GitHub"], body: "<p>A push to <code>main</code> fires the deploy workflow.</p>" },
+    lint:     { title: "Lint & typecheck", meta: ["~40s"], body: "<p>ESLint + tsc gate the pipeline early.</p>" },
+    gate:     { title: "Checks pass?", meta: ["decision"], body: "<p>Any failure stops here and reports status.</p>" },
+    test:     { title: "Unit + e2e", meta: ["~6m", "critical"], body: "<p>The load-bearing gate — the suite that must be green to ship.</p>",
+                code: "<pre><span class='com'># the gate</span>\nyarn test && yarn e2e:run</pre>" },
+    build:    { title: "Build image", meta: ["~3m", "Docker"], body: "<p>Builds and pushes the container image.</p>" },
+    canary:   { title: "Canary 5%", meta: ["~5m"], body: "<p>Routes 5% of traffic to the new revision.</p>" },
+    slo:      { title: "SLO healthy?", meta: ["decision"], body: "<p>Error-rate + latency must stay within budget.</p>" },
+    rollback: { title: "Auto rollback", meta: ["failure"], body: "<p>Unhealthy canary is rolled back automatically.</p>" },
+    prod:     { title: "Ramp to 100%", meta: ["success"], body: "<p>Progressive rollout to full production.</p>" },
+    failed:   { title: "Status: failed", meta: ["failure"], body: "<p>Checks failed; the commit is marked red.</p>" },
+    // TEMPLATE-STEPS-END
+  };
+  const DEFAULT_NODE = "start";
+
+  function selectNode(id){
+    const s = STEPS[id]; if(!s) return;
+    document.getElementById('d-title').textContent = s.title;
+    document.getElementById('d-meta').innerHTML = (s.meta||[]).map(m=>`<span class="tag">${m}</span>`).join('');
+    document.getElementById('d-body').innerHTML = (s.body||'') + (s.code||'');
+  }
+  window.selectNode = selectNode;
+
+  mermaid.initialize({ startOnLoad:false, securityLevel:'loose', theme:'base', flowchart:{ curve:'basis' },
+    themeVariables:{ fontFamily:'-apple-system,Segoe UI,Roboto,sans-serif', primaryColor:'#FFFFFF',
+      primaryBorderColor:'#E7E4DC', primaryTextColor:'#141413', lineColor:'#9A968C',
+      secondaryColor:'#F3EFE6', tertiaryColor:'#FAF9F5' } });
+  mermaid.run({ querySelector:'.mermaid' }).then(()=>selectNode(DEFAULT_NODE));
+</script>
+</body>
+</html>

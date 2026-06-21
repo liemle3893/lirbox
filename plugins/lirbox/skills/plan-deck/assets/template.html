@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<!--
+  IMPLEMENTATION-PLAN TEMPLATE — self-contained, single file, no external assets.
+  HOW TO USE: copy this file, replace every {{PLACEHOLDER}} and the marked content
+  regions with data from the planning request + codebase. Keep the <style> block
+  byte-for-byte (it is the design system). Delete any <section> that does not apply
+  (e.g. a backend-only plan has no "Mockups"). Keep section ids in sync with the TOC
+  and renumber the section badges (01, 02, …) after deleting/reordering.
+  Component snippets for variable-length lists live in references/components.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implementation plan — {{PLAN_TITLE}}</title>
+<style>
+  :root{
+    --ivory:#FAF9F5; --paper:#FFFFFF; --slate:#141413; --slate-soft:#3A3A37;
+    --muted:#6B6B66; --line:#E7E4DC; --line-soft:#F0EEE7;
+    --clay:#D97757; --clay-soft:#FBEDE7; --olive:#788C5D; --olive-soft:#EEF1E7;
+    --oat:#E3DACC; --oat-soft:#F3EFE6;
+    --sev-high:#F3D9CC; --sev-med:#EAE0CC; --sev-low:#E4E9DC;
+    --code-bg:#1F1E1B; --code-line:#2E2C28;
+    --kw:#E0A08A; --str:#A6BE83; --com:#6B6B66; --fn:#D8C99B;
+    --radius:14px; --maxw:1120px;
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--ivory);color:var(--slate);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:var(--clay);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--line-soft);
+    padding:.1em .4em;border-radius:5px;color:var(--slate-soft)}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 32px}
+
+  /* Header */
+  header.hero{border-bottom:1px solid var(--line)}
+  .hero-inner{padding:56px 0 36px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 14px}
+  h1.title{font-family:var(--serif);font-weight:600;font-size:40px;line-height:1.16;
+    margin:0 0 18px;letter-spacing:-.01em}
+  .prompt{background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--clay);
+    border-radius:var(--radius);padding:16px 20px;color:var(--slate-soft);font-size:15px;margin-bottom:26px}
+  .prompt .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--clay);display:block;margin-bottom:6px}
+  /* Summary stat grid */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .stat{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .stat .k{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .stat .v{font-family:var(--serif);font-size:22px;font-weight:600;margin-top:6px;line-height:1.2}
+
+  /* Layout */
+  .layout{display:grid;grid-template-columns:1fr 220px;gap:56px;padding:44px 0 120px;align-items:start}
+  main{min-width:0}
+  aside{position:sticky;top:28px}
+  nav.toc{font-size:13.5px;border-left:1px solid var(--line);padding-left:18px}
+  nav.toc .toc-lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:12px}
+  nav.toc a{display:block;color:var(--slate-soft);padding:4px 0}
+  nav.toc a:hover{color:var(--clay);text-decoration:none}
+
+  /* Sections + numbered badge */
+  section{margin-bottom:52px;scroll-margin-top:24px}
+  .sec-head{display:flex;align-items:center;gap:12px;margin:0 0 16px}
+  .sec-num{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--slate-soft);
+    background:var(--oat);border-radius:7px;padding:4px 9px}
+  h2.h{font-family:var(--serif);font-weight:600;font-size:26px;margin:0;letter-spacing:-.01em}
+  section p{margin:0 0 14px;color:var(--slate-soft)}
+  .lead{font-size:18px;color:var(--slate)}
+
+  /* Milestone timeline */
+  .timeline{position:relative;margin:0;padding:0}
+  .milestone{position:relative;padding:0 0 26px 34px}
+  .milestone::before{content:"";position:absolute;left:9px;top:22px;bottom:-4px;width:2px;background:var(--line)}
+  .milestone:last-child::before{display:none}
+  .dot{position:absolute;left:0;top:2px;width:20px;height:20px;border-radius:50%;
+    border:3px solid var(--clay);background:var(--ivory)}
+  .dot.done{background:var(--olive);border-color:var(--olive)}
+  .m-when{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .m-title{font-weight:600;font-size:17px;margin:2px 0 6px}
+  .tags{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}
+  .tag{font-family:var(--mono);font-size:11px;color:var(--slate-soft);background:var(--oat-soft);
+    border:1px solid var(--oat);border-radius:20px;padding:2px 9px}
+
+  /* Data-flow diagram (CSS nodes + arrows; no SVG needed) */
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--paper);
+    border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .node{font-family:var(--mono);font-size:12.5px;background:var(--ivory);border:1px solid var(--line);
+    border-radius:9px;padding:8px 12px;color:var(--slate)}
+  .node .sub{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+  .arrow{color:var(--muted);font-family:var(--mono)}
+  .arrow.async{color:var(--clay)}
+  .flow-note{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:10px}
+
+  /* Mockups */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .mockup{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px}
+  .mockup .cap{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 12px}
+  .ui-row{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line-soft)}
+  .ui-row:first-of-type{border-top:none}
+  .ui-row.unread{border-left:2px solid var(--clay);padding-left:10px}
+  .avatar{flex:none;width:26px;height:26px;border-radius:50%;background:var(--oat);font-family:var(--mono);
+    font-size:11px;display:flex;align-items:center;justify-content:center;color:var(--slate-soft)}
+  .ui-name{font-weight:600;font-size:14px} .ui-snip{font-size:13px;color:var(--muted)}
+  .ui-reply{margin-left:36px}
+  .composer{display:flex;gap:8px;margin-top:12px}
+  .composer .field{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--muted);font-size:13px}
+  .composer .btn{background:var(--clay);color:#fff;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600}
+
+  /* Code blocks */
+  pre{background:var(--code-bg);color:#E9E6DE;border-radius:10px;padding:16px 18px;overflow:auto;
+    font-family:var(--mono);font-size:12.5px;line-height:1.6;margin:0;border:1px solid var(--code-line)}
+  pre .kw{color:var(--kw)} pre .str{color:var(--str)} pre .com{color:var(--com)} pre .fn{color:var(--fn)}
+  pre .add{color:var(--str)} pre .rem{color:var(--kw)}
+  .code-cap{font-family:var(--mono);font-size:11px;color:var(--muted);margin:0 0 8px}
+
+  /* Risks table */
+  table.risks{width:100%;border-collapse:collapse;font-size:14.5px}
+  table.risks th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);text-align:left;padding:0 12px 10px;border-bottom:1px solid var(--line)}
+  table.risks td{padding:14px 12px;border-bottom:1px solid var(--line-soft);color:var(--slate-soft);vertical-align:top}
+  .sev{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+    padding:3px 9px;border-radius:20px;white-space:nowrap;color:var(--slate)}
+  .sev.high{background:var(--sev-high)} .sev.med{background:var(--sev-med)} .sev.low{background:var(--sev-low)}
+
+  /* Open questions */
+  .question{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px 20px;margin-bottom:12px}
+  .question .q{font-weight:600;margin:0 0 6px}
+  .question .owner{font-family:var(--mono);font-size:12px;color:var(--clay)}
+
+  footer{border-top:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:12px;padding:22px 0 40px}
+
+  @media(max-width:900px){
+    .layout{grid-template-columns:1fr;gap:0} aside{display:none}
+    .stats{grid-template-columns:1fr 1fr} .grid2{grid-template-columns:1fr} h1.title{font-size:31px}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap hero-inner">
+    <p class="eyebrow">Implementation plan · {{PROJECT_OR_TEAM}}</p>
+    <h1 class="title">{{PLAN_TITLE}}</h1>
+    <div class="prompt">
+      <span class="lbl">The ask</span>
+      {{ORIGINAL_REQUIREMENT — the request/spec this plan delivers, in the asker's words}}
+    </div>
+    <!-- Summary stats: 2–4 cards. Use only numbers you can justify; omit a card rather than guess. -->
+    <div class="stats">
+      <div class="stat"><div class="k">Effort</div><div class="v">{{EFFORT}}</div></div>
+      <div class="stat"><div class="k">Surfaces touched</div><div class="v">{{SURFACES}}</div></div>
+      <div class="stat"><div class="k">New tables</div><div class="v">{{TABLES}}</div></div>
+      <div class="stat"><div class="k">Feature flag</div><div class="v">{{FLAG}}</div></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <main>
+
+    <!-- 01 MILESTONES — always. Independently shippable slices, in sequence.
+         Mark a dot `done` only if that slice is genuinely complete. -->
+    <section id="milestones">
+      <div class="sec-head"><span class="sec-num">01</span><h2 class="h">Milestones</h2></div>
+      <p>{{ONE_LINE_FRAMING — e.g. "Four slices, each shippable behind the flag."}}</p>
+      <div class="timeline">
+        <div class="milestone">
+          <span class="dot done"></span>
+          <div class="m-when">{{WHEN_1}}</div>
+          <div class="m-title">{{MILESTONE_1_TITLE}}</div>
+          <p>{{WHAT_THIS_SLICE_DELIVERS}}</p>
+          <div class="tags"><span class="tag">{{PKG_OR_FILE}}</span><span class="tag">{{ARTIFACT}}</span></div>
+        </div>
+        <div class="milestone">
+          <span class="dot"></span>
+          <div class="m-when">{{WHEN_2}}</div>
+          <div class="m-title">{{MILESTONE_2_TITLE}}</div>
+          <p>{{WHAT_THIS_SLICE_DELIVERS}}</p>
+          <div class="tags"><span class="tag">{{PKG_OR_FILE}}</span></div>
+        </div>
+        <!-- repeat .milestone as needed -->
+      </div>
+    </section>
+
+    <!-- 02 DATA FLOW — how the pieces talk. Use solid arrows → for request/response,
+         clay async arrows ⇢ for queues/realtime/background. Delete if the plan has no
+         meaningful flow (e.g. a pure refactor). -->
+    <section id="dataflow">
+      <div class="sec-head"><span class="sec-num">02</span><h2 class="h">Data flow</h2></div>
+      <div class="flow">
+        <span class="node">{{NODE_A}}<span class="sub">{{WHERE}}</span></span>
+        <span class="arrow">→</span>
+        <span class="node">{{NODE_B}}<span class="sub">{{WHERE}}</span></span>
+        <span class="arrow async">⇢</span>
+        <span class="node">{{NODE_C}}<span class="sub">{{WHERE}}</span></span>
+      </div>
+      <p class="flow-note">→ synchronous · ⇢ async (queue/realtime). {{ONE_LINE_RECONCILIATION_NOTE}}</p>
+    </section>
+
+    <!-- 03 MOCKUPS — OPTIONAL. Include only for user-facing UI work. Delete for
+         backend/infra/refactor plans (and remove the TOC link + renumber). -->
+    <section id="mockups">
+      <div class="sec-head"><span class="sec-num">03</span><h2 class="h">Mockups</h2></div>
+      <div class="grid2">
+        <div class="mockup">
+          <p class="cap">A · {{MOCKUP_A_CAPTION}}</p>
+          <div class="ui-row"><span class="avatar">{{IN}}</span><div><div class="ui-name">{{NAME}}</div><div class="ui-snip">{{SNIPPET}}</div></div></div>
+          <div class="ui-row ui-reply"><span class="avatar">{{IN}}</span><div><div class="ui-name">{{NAME}}</div><div class="ui-snip">{{SNIPPET}}</div></div></div>
+          <div class="composer"><div class="field">{{PLACEHOLDER_TEXT}}</div><div class="btn">{{ACTION}}</div></div>
+        </div>
+        <div class="mockup">
+          <p class="cap">B · {{MOCKUP_B_CAPTION}}</p>
+          <div class="ui-row unread"><span class="avatar">{{IN}}</span><div><div class="ui-name">{{NAME}}</div><div class="ui-snip">{{SNIPPET}}</div></div></div>
+          <div class="ui-row unread"><span class="avatar">{{IN}}</span><div><div class="ui-name">{{NAME}}</div><div class="ui-snip">{{SNIPPET}}</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 KEY CODE — the 1–2 snippets that pin down the hard part (schema, the tricky
+         hook, the algorithm). Illustrative, not exhaustive. HTML-escape <, >, &. -->
+    <section id="code">
+      <div class="sec-head"><span class="sec-num">04</span><h2 class="h">Key code</h2></div>
+      <div class="grid2">
+        <div>
+          <p class="code-cap">{{FILE_A}}</p>
+<pre><span class="com">-- {{WHAT_THIS_SHOWS}}</span>
+<span class="kw">create table</span> {{table}} (
+  id uuid <span class="kw">primary key</span>,
+  ...
+);</pre>
+        </div>
+        <div>
+          <p class="code-cap">{{FILE_B}}</p>
+<pre><span class="kw">function</span> <span class="fn">{{name}}</span>() {
+  <span class="com">// the subtle bit worth pinning down</span>
+}</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 05 RISKS & MITIGATIONS — the real hazards, severity-tagged, each with a mitigation.
+         Don't pad with generic risks; name the ones specific to THIS plan. -->
+    <section id="risks">
+      <div class="sec-head"><span class="sec-num">05</span><h2 class="h">Risks &amp; mitigations</h2></div>
+      <table class="risks">
+        <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>{{RISK_1}}</td><td><span class="sev high">High</span></td><td>{{MITIGATION_1}}</td></tr>
+          <tr><td>{{RISK_2}}</td><td><span class="sev med">Med</span></td><td>{{MITIGATION_2}}</td></tr>
+          <tr><td>{{RISK_3}}</td><td><span class="sev low">Low</span></td><td>{{MITIGATION_3}}</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 06 OPEN QUESTIONS — genuine unknowns that need a human decision, each with an
+         owner and a decide-by point. Omit the section if there are none (don't invent). -->
+    <section id="questions">
+      <div class="sec-head"><span class="sec-num">06</span><h2 class="h">Open questions</h2></div>
+      <div class="question">
+        <p class="q">{{QUESTION_1}}</p>
+        <span class="owner">{{DECIDE_WITH_WHOM · BY_WHEN}}</span>
+      </div>
+      <div class="question">
+        <p class="q">{{QUESTION_2}}</p>
+        <span class="owner">{{DECIDE_WITH_WHOM · BY_WHEN}}</span>
+      </div>
+    </section>
+
+  </main>
+
+  <aside>
+    <nav class="toc">
+      <p class="toc-lbl">On this page</p>
+      <a href="#milestones">01 · Milestones</a>
+      <a href="#dataflow">02 · Data flow</a>
+      <a href="#mockups">03 · Mockups</a>
+      <a href="#code">04 · Key code</a>
+      <a href="#risks">05 · Risks</a>
+      <a href="#questions">06 · Open questions</a>
+    </nav>
+  </aside>
+</div>
+
+<footer class="wrap">
+  Implementation plan · {{PROJECT}} · {{DATE}}
+</footer>
+
+</body>
+</html>

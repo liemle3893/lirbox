@@ -1,0 +1,7 @@
+# OS / editor junk
+.DS_Store
+*.swp
+
+# Runtime artifacts from the pr-writeup skill (if ever run inside the repo)
+.pr-writeup/
+*-writeup.html
