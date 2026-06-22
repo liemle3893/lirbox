@@ -64,8 +64,9 @@ Workflow `args` the conductor reads (resume only):
 ```jsonc
 { "phasesDone": ["Setup","PhaseA"], "results": { } }   // both read from state.json
 ```
-Worktree branches from current HEAD by default. Only if the invocation explicitly asks for a
-different base/branch, pass the conductor's optional `args.base` / `args.branch`.
+Worktree branches from the remote's default branch — `git fetch origin` first, then branch from
+`origin/<default>` — so it's never built on a stale local ref. Only if the invocation explicitly
+asks for a different base/branch, pass the conductor's optional `args.base` / `args.branch`.
 
 Examples:
 ```
@@ -118,44 +119,60 @@ symlink, per-phase resume guards, optional Brief/PR/TicketUpdate, finalize):
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
-  [--ticket] [--pr] [--base <ref>] [--desc "..."]
+  [--ticket] [--pr] [--merge-gates] [--base <ref>] [--desc "..."]
 ```
+
+**Size the workflow to the task — do NOT default to the full profile.** More phases = more
+subagent round-trips; reserve them for work that warrants them:
+- **Small / one-shot change** → bare (`--name x`, default single `Work` phase) or just a couple
+  of `--phases`. Merge related steps into one phase rather than splitting mechanically.
+- **Routine delivery (small/low-risk PR)** → `--profile lite` (= `--ticket --pr --merge-gates`,
+  one work phase, gates collapsed into a single **Review** phase): ~6 phases, not ~12.
+- **Substantial / risky work** → `--profile delivery` (full TDD cycle + every gate). Only here.
 
 - `--phases` — comma-list of work phase titles.
 - `--ticket` — adds a **Brief** phase (fetch the ticket → goal) and a **TicketUpdate** phase.
 - `--pr` — adds a **PR** phase (push branch + `gh pr create`).
-- `--base` — worktree branch point (default current HEAD; don't hardcode across projects).
-- `--enforce-code` — adds a **CodeGate**: review+fix loop (≤3) via `lirbox-code-reviewer`;
+- `--merge-gates` — collapse CodeGate + TestGate into ONE **Review** phase (review+fix+build,
+  ensure warranted tests green, ≤3 loop, hard-fail). Fewer steps for small tasks. Ignored under
+  `--cycle`. Implied by `--profile lite`.
+- `--base` — worktree branch point (default: the remote's default branch, fetched fresh from
+  `origin` so it's never stale; don't hardcode across projects).
+- `--enforce-code` — adds a **CodeGate**: review+fix loop (≤3) via `lirbox:lirbox-code-reviewer`;
   **hard-fails** (conductor throws → run `failed`) on unresolved Critical/High.
 - `--enforce-tests` — adds a **TestGate** that first *assesses* whether the change needs
   `tryve-e2e` / `unit` / `none` (it does NOT enforce blindly — a non-behavioral change passes
-  with no new tests), then enforces+loops (≤3) via `lirbox-tryve-enhancer`; hard-fails if not green.
+  with no new tests), then enforces+loops (≤3) via `lirbox:lirbox-tryve-enhancer`; hard-fails if not green.
 - `--enforce-docs` — adds a **DocsGate**: writes an implementation summary to `docs/changes/`
-  via `lirbox-docs-writer`, folding in the `implementation-notes/` fragments; hard-fails if missing.
+  via `lirbox:lirbox-docs-writer`, folding in the `implementation-notes/` fragments; hard-fails if missing.
 - `--cycle` — enforces the full TDD cycle, reordering the core to
   **RED → GREEN(work) → Verify → PathGap → IMPROVE/SIMPLIFY(CodeGate) → ReVerify**:
-  - **RED** (`lirbox-test-writer`) writes AC tests first and confirms they fail.
+  - **RED** (`lirbox:lirbox-test-writer`) writes AC tests first and confirms they fail.
   - work phases implement to **GREEN**; **Verify** requires the suite green.
   - **PathGap** closes coverage for code paths the ACs never specified: branch coverage ∩ the
     diff → every uncovered changed branch must be **tested or explicitly justified** (in
     `implementation-notes/pathgap.html`) — hard-fail on any silent gap.
   - **CodeGate** then improves/simplifies; **ReVerify** re-runs the suite to catch refactor
     regressions. (Supersedes the standalone TestGate.)
-- `--profile delivery` — shorthand for `--cycle --ticket --pr --enforce-docs`.
+- `--profile delivery` — shorthand for `--cycle --ticket --pr --enforce-docs` (full, big tasks).
+- `--profile lite` — shorthand for `--ticket --pr --merge-gates` (routine, small tasks).
 
-**Swapping the gate agents.** Each gate defaults to a generic agent bundled with this plugin
-(in `agents/`) but is overridable: `--agent-red` (default `lirbox-test-writer`), `--agent-code`
-(default `lirbox-code-reviewer`), `--agent-tests` (default `lirbox-tryve-enhancer`), `--agent-docs`
-(default `lirbox-docs-writer`). Pass your own `agentType`, or `none` to drop the `agentType`
+**Swapping the gate agents.** Each gate defaults to an agent bundled with this plugin (in
+`agents/`), referenced by its **plugin-namespaced** type, and is overridable: `--agent-red`
+(default `lirbox:lirbox-test-writer`), `--agent-code` (default `lirbox:lirbox-code-reviewer`),
+`--agent-tests` (default `lirbox:lirbox-tryve-enhancer`), `--agent-docs` (default
+`lirbox:lirbox-docs-writer`). Pass your own `agentType`, or `none` to drop the `agentType`
 so that gate uses a **generic built-in subagent** (the prompt still runs — no agent
 dependency at all). Example: `--agent-code my-team-reviewer --agent-docs none`.
 
-Every work/gate worker also maintains a per-worker `implementation-notes/<slot>.html` in the
-worktree (design decisions / deviations / tradeoffs / open questions) — unique per slot so
-parallel agents never clobber.
+Work/gate workers may keep a per-worker `implementation-notes/<slot>.html` in the worktree
+(unique per slot so parallel agents never clobber) — but only **when there's something a
+reviewer genuinely needs**: a non-trivial design decision, an intentional deviation, a real
+tradeoff, or an open question. Mechanical steps (e.g. the PR push) make no notes at all; no-
+decision work skips the file rather than emitting boilerplate.
 
-**Agent dependency.** The default gate agents (`lirbox-test-writer`, `lirbox-code-reviewer`,
-`lirbox-tryve-enhancer`, `lirbox-docs-writer`) ship with this plugin, so the gates work out of the
+**Agent dependency.** The default gate agents (`lirbox:lirbox-test-writer`, `lirbox:lirbox-code-reviewer`,
+`lirbox:lirbox-tryve-enhancer`, `lirbox:lirbox-docs-writer`) ship with this plugin, so the gates work out of the
 box once the plugin is installed. Override any gate with your own agent (`--agent-*`) or pass
 `--agent-*=none` to run it on a generic built-in subagent — no bundled-agent dependency.
 

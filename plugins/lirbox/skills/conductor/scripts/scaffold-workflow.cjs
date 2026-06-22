@@ -12,9 +12,12 @@
  *   --name <slug>        required; drives state/branch/worktree paths
  *   --phases <a,b,c>     work phase titles (default: "Work")
  *   --desc <text>        meta.description (default derived from name)
- *   --base <ref>         worktree branch point (default: current HEAD)
+ *   --base <ref>         worktree branch point (default: remote's default branch, fetched fresh)
  *   --ticket             include Brief (fetch ticket) + TicketUpdate phases
  *   --pr                 include a PR phase (push branch + gh pr create)
+ *   --merge-gates        collapse CodeGate + TestGate into ONE Review phase (fewer steps)
+ *   --profile lite       routine small-task delivery: --ticket --pr --merge-gates, 1 work phase
+ *   --profile delivery   full TDD cycle + all gates (--cycle --ticket --pr --enforce-docs)
  *   --out <path>         output file (default: .workflows/<name>.js)
  *   --force              overwrite an existing output file
  */
@@ -35,22 +38,29 @@ if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a
 const phases = String(arg('phases', 'Work')).split(',').map((s) => s.trim()).filter(Boolean);
 const desc = arg('desc', `Durable workflow: ${name}`);
 const base = arg('base', '');
-const profileDelivery = arg('profile', false) === 'delivery';
+const profile = arg('profile', false);
+const profileDelivery = profile === 'delivery';
+// `lite`: routine delivery with the gates collapsed into ONE Review phase — fewer steps for
+// small/low-risk tasks. = --ticket --pr --merge-gates, single work phase, no full TDD cycle.
+const profileLite = profile === 'lite';
 const withCycle = profileDelivery || arg('cycle', false) === true;
-const withTicket = profileDelivery || arg('ticket', false) === true || typeof arg('ticket', false) === 'string';
-const withPR = profileDelivery || arg('pr', false) === true;
+const withTicket = profileDelivery || profileLite || arg('ticket', false) === true || typeof arg('ticket', false) === 'string';
+const withPR = profileDelivery || profileLite || arg('pr', false) === true;
 const enforceCode = profileDelivery || arg('enforce-code', false) === true;
 const enforceTests = profileDelivery || arg('enforce-tests', false) === true;
 const enforceDocs = profileDelivery || arg('enforce-docs', false) === true;
+// One combined Review phase (review+fix+build+warranted-tests-green) instead of separate
+// CodeGate + TestGate. Implied by --profile lite; ignored under --cycle (the cycle has its own).
+const mergeGates = profileLite || arg('merge-gates', false) === true;
 const out = arg('out', path.join('.workflows', name + '.js'));
 const force = arg('force', false) === true;
 
 // Agent overrides — default to the bundled lirbox agents, override per gate, or `none` for a
 // generic built-in subagent (no agent dependency).
-const agentRed = arg('agent-red', 'lirbox-test-writer');
-const agentCode = arg('agent-code', 'lirbox-code-reviewer');
-const agentTests = arg('agent-tests', 'lirbox-tryve-enhancer');
-const agentDocs = arg('agent-docs', 'lirbox-docs-writer');
+const agentRed = arg('agent-red', 'lirbox:lirbox-test-writer');
+const agentCode = arg('agent-code', 'lirbox:lirbox-code-reviewer');
+const agentTests = arg('agent-tests', 'lirbox:lirbox-tryve-enhancer');
+const agentDocs = arg('agent-docs', 'lirbox:lirbox-docs-writer');
 // Emits the `agentType: '...',` fragment, or '' when set to none/empty (→ generic subagent).
 const at = (a) => (a && a !== 'none' && a !== true) ? `agentType: '${a}',` : '';
 
@@ -66,7 +76,9 @@ const SCHEMA = (props, req) =>
 // --cycle: RED → GREEN(work) → Verify → PathGap → IMPROVE/SIMPLIFY(CodeGate) → ReVerify.
 const coreOrder = withCycle
   ? ['RED', ...phases, 'Verify', 'PathGap', 'CodeGate', 'ReVerify']
-  : [...phases, ...(enforceCode ? ['CodeGate'] : []), ...(enforceTests ? ['TestGate'] : [])];
+  : mergeGates
+    ? [...phases, 'Review']
+    : [...phases, ...(enforceCode ? ['CodeGate'] : []), ...(enforceTests ? ['TestGate'] : [])];
 const phaseOrder = ['Setup',
   ...(withTicket ? ['Brief'] : []),
   ...coreOrder,
@@ -118,7 +130,7 @@ if (done.has('PR')) {
   log('PR already complete (resumed)')
 } else {
   results.pr = await agent(
-    \`\${inWorktree('pr')}
+    \`\${inWorktree('pr', { notes: false })}
 
 Push the branch and open a PR with the GitHub CLI:
 git push -u origin \${BRANCH}
@@ -212,6 +224,35 @@ Do NOT change source to game coverage. Commit new tests.\`,
   }
   done.add('TestGate')
   await checkpoint('TestGate')
+}`;
+
+// Review = CodeGate + TestGate collapsed into ONE phase (--merge-gates / --profile lite).
+// Fewer steps for small/low-risk tasks: a single review+fix loop that also ensures warranted
+// tests are green. Not emitted under --cycle (the cycle has its own gates).
+const reviewBlock = (!mergeGates || withCycle) ? '' : `
+phase('Review')
+if (done.has('Review')) {
+  log('Review already complete (resumed)')
+} else {
+  let passed = false, last = null
+  for (let round = 1; round <= 3 && !passed; round++) {
+    last = await agent(
+      \`\${inWorktree('review')}
+
+Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}) in ONE pass:
+1. Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality).
+2. Decide what testing the change warrants (none for docs/config/non-behavioral; unit for pure logic; e2e for new/changed behavior or endpoints) and ensure those tests EXIST and PASS — do NOT change source to game coverage, do NOT fake a pass if an integration env is unavailable (say so).
+3. Re-run build + tests after fixes and commit them.
+Return whether the gate passed.\`,
+      { label: \`review:r\${round}\`, phase: 'Review', ${at(agentCode)}
+        schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed'])} },
+    )
+    passed = last && last.gatePassed
+  }
+  if (!passed) throw new Error('Review failed: unresolved Critical/High or tests not green after 3 rounds — ' + (last && last.summary || ''))
+  results.review = last
+  done.add('Review')
+  await checkpoint('Review')
 }`;
 
 const docsGateBlock = !enforceDocs ? '' : `
@@ -313,7 +354,9 @@ RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branc
 // Assemble the core (work + gates/cycle) in the right order.
 const coreBlocks = withCycle
   ? [redBlock, workBlocks, verifyBlock, pathGapBlock, codeGateBlock, reVerifyBlock].join('\n')
-  : [workBlocks, codeGateBlock, testGateBlock].join('\n');
+  : mergeGates
+    ? [workBlocks, reviewBlock].join('\n')
+    : [workBlocks, codeGateBlock, testGateBlock].join('\n');
 
 const src = `// AUTO-GENERATED by scaffold-workflow.cjs — DO NOT edit the boilerplate.
 // Edit ONLY the \`TODO:\` agent prompts in the work phases below.
@@ -343,14 +386,18 @@ const results = { ...prior }
 
 // Per-worker instruction. \`slot\` makes the notes file UNIQUE so parallel / multiple agents
 // never clobber each other. For a parallel fan-out, pass a slot unique per item (e.g. \`phase-\${i}\`).
-function inWorktree(slot) {
-  return \`Work ONLY inside the git worktree at \${WORKTREE} (run \\\`cd \${WORKTREE}\\\` first; it is on \` +
-    \`branch \${BRANCH}). Do NOT edit any file outside \${WORKTREE}. Commit your changes there.\\n\\n\` +
-    \`As you work, maintain a notes file UNIQUE to you at implementation-notes/\${slot}.html in the \` +
-    \`worktree (mkdir -p the dir; create the file if missing; APPEND — never clobber). Capture what a \` +
-    \`reviewer should know about how the implementation interprets or diverges from the spec: Design \` +
-    \`decisions (where the spec was ambiguous), Deviations (intentional departures + why), Tradeoffs \` +
-    \`(alternatives considered + why this one), Open questions (anything to confirm or revise).\`
+// Pass { notes: false } for mechanical steps (PR push, etc.) that make no design decisions —
+// they should NOT create a notes file at all. Where notes ARE offered they are judgment-gated:
+// write one ONLY if there is something a reviewer genuinely needs.
+function inWorktree(slot, opts) {
+  const base = \`Work ONLY inside the git worktree at \${WORKTREE} (run \\\`cd \${WORKTREE}\\\` first; it is on \` +
+    \`branch \${BRANCH}). Do NOT edit any file outside \${WORKTREE}. Commit your changes there.\`
+  if (opts && opts.notes === false) return base
+  return base + \`\\n\\nIf — and ONLY if — this step involved a non-trivial design decision, an \` +
+    \`intentional deviation from the spec, a tradeoff between real alternatives, or an open question a \` +
+    \`reviewer must confirm, append it to a notes file UNIQUE to you at implementation-notes/\${slot}.html \` +
+    \`in the worktree (mkdir -p the dir; create if missing; APPEND — never clobber). For mechanical or \` +
+    \`no-decision work, SKIP the file — do not create empty or boilerplate notes.\`
 }
 
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
@@ -390,7 +437,20 @@ if git worktree list --porcelain | grep -q "/\${WORKTREE}\$"; then
 elif git show-ref --verify --quiet "refs/heads/\${BRANCH}"; then
   git worktree add "\${WORKTREE}" "\${BRANCH}"
 else
-  git worktree add "\${WORKTREE}" -b "\${BRANCH}" \${BASE}
+  # Branch from the FRESH remote tip, not a possibly-stale local ref.
+  git fetch origin --quiet 2>/dev/null || echo "WARN: git fetch origin failed — using local refs (may be stale)"
+  BASEREF="\${BASE}"
+  # Auto-detect the remote's default branch when no --base was given.
+  [ -n "\$BASEREF" ] || BASEREF="\$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+  if [ -n "\$BASEREF" ] && git show-ref --verify --quiet "refs/remotes/origin/\$BASEREF"; then
+    START="origin/\$BASEREF"
+  elif [ -n "\$BASEREF" ]; then
+    echo "WARN: origin/\$BASEREF not found — branching from local \$BASEREF (may be stale)"; START="\$BASEREF"
+  else
+    echo "WARN: could not detect remote default branch — branching from current HEAD (may be stale)"; START="HEAD"
+  fi
+  echo "Branching \${BRANCH} from \$START"
+  git worktree add "\${WORKTREE}" -b "\${BRANCH}" "\$START"
 fi
 [ -e "\${WORKTREE}/node_modules" ] || [ ! -d "\$ROOT/node_modules" ] || ln -s "\$ROOT/node_modules" "\${WORKTREE}/node_modules"
 test -d "\${WORKTREE}" && echo OK\`,

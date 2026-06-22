@@ -75,12 +75,18 @@ task-specific bit (the `TODO:` agent prompts).
 
 ```
 node scripts/scaffold-workflow.cjs --name <slug> [--phases "A,B"] \
-  [--ticket] [--pr] [--enforce-code] [--enforce-tests] [--enforce-docs] \
-  [--profile delivery] [--base <ref>] [--desc "..."] [--out <path>] [--force]
+  [--ticket] [--pr] [--merge-gates] [--enforce-code] [--enforce-tests] [--enforce-docs] \
+  [--profile lite|delivery] [--base <ref>] [--desc "..."] [--out <path>] [--force]
 ```
 
 Phase order it emits: `Setup → [Brief] → <work phases> → [CodeGate] → [TestGate] → [DocsGate]
 → [PR] → [TicketUpdate]`.
+
+**Size it to the task.** `--merge-gates` collapses CodeGate + TestGate into ONE **Review**
+phase (review+fix+build, ensure warranted tests green, ≤3 loop). `--profile lite`
+(= `--ticket --pr --merge-gates`, single work phase) is the ~6-phase path for small/low-risk
+delivery: `Setup → Brief → <work> → Review → PR → TicketUpdate`. Reserve `--profile delivery`
+(full cycle + every gate) for substantial work — don't default every task to 12 steps.
 
 With **`--cycle`** (implied by `--profile delivery`) the core reorders into a true TDD loop:
 `Setup → [Brief] → RED → <work=GREEN> → Verify → PathGap → CodeGate(IMPROVE+SIMPLIFY) →
@@ -117,11 +123,13 @@ heredoc clobber — see the merge node one-liner in the generated `checkpoint()`
 ## Enforcement gates
 
 Opt-in, **hard-fail** (conductor `throw` → run `failed`, state preserved → resume re-runs the
-failed gate onward). They use the **generic agents bundled with this plugin** (`agents/`) via `agent({ agentType })`:
-- CodeGate → `lirbox-code-reviewer` (review+fix loop ≤3).
+failed gate onward). They use the **agents bundled with this plugin** (`agents/`), referenced by
+their **plugin-namespaced** type via `agent({ agentType })`:
+- CodeGate → `lirbox:lirbox-code-reviewer` (review+fix loop ≤3). With `--merge-gates` this becomes
+  a single **Review** phase that also ensures warranted tests are green.
 - TestGate → **triages first** (`tryve-e2e`/`unit`/`none` — never enforces blindly) →
-  `lirbox-tryve-enhancer` (loop ≤3).
-- DocsGate → `lirbox-docs-writer` (summary → `docs/changes/`).
+  `lirbox:lirbox-tryve-enhancer` (loop ≤3).
+- DocsGate → `lirbox:lirbox-docs-writer` (summary → `docs/changes/`).
 
 **Swappable.** Each gate agent is a flag — `--agent-red`/`--agent-code`/`--agent-tests`/
 `--agent-docs` — defaulting to the bundled agents above. Pass your own `agentType`, or `none`
@@ -129,8 +137,10 @@ to drop `agentType` so the gate runs on a generic built-in subagent. The generat
 helper emits the `agentType: '…',` fragment or `''` when `none`. So the bundled agents are the
 default, not a hard requirement — override or `none` removes the dependency.
 
-Every work/gate worker keeps a per-worker `implementation-notes/<slot>.html` (design decisions,
-deviations, tradeoffs, open questions) — unique slot so parallel agents never clobber.
+Work/gate workers keep a per-worker `implementation-notes/<slot>.html` (design decisions,
+deviations, tradeoffs, open questions) — unique slot so parallel agents never clobber — but only
+when there's something a reviewer genuinely needs. Mechanical steps (e.g. the PR push) write no
+notes; no-decision work skips the file instead of emitting boilerplate.
 
 ## Design decisions & boundaries
 
