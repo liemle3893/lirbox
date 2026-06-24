@@ -8,6 +8,7 @@ allowed-tools:
   - Edit
   - Bash
   - Workflow
+  - AskUserQuestion
 ---
 
 $ARGUMENTS
@@ -103,14 +104,35 @@ phases must share the one from Setup.
 - otherwise treat the arg as a candidate `<name>` and read its state (this skill runs in the
   main session, so read directly): `Read .workflows/state/<name>.json` (or `test -f … && cat`).
   - **file exists, `status: "running"`/`"failed"`** → **resume**. Goal comes from the file.
-    Go to step 2 (review existing script) → step 4.
-  - **no file (arg is a goal)** → **fresh run**. Derive a kebab `<name>` slug from the goal,
-    tell the user the slug, go to step 2 → step 3.
+    Go **straight to step 4** (relaunch with args). Do NOT regenerate or re-read the script if
+    it already exists unchanged — only re-run the generator (`--force`) if a phase's structure
+    must change.
+  - **no file (arg is a goal)** → **fresh run**. Derive a kebab `<name>` slug, tell the user
+    the slug, run **triage (step 1b)**; if not declined, go to step 2 → step 3.
   - **file exists, `status: "complete"`** → tell the user it's already done (offer the report
     via `node <skill-dir>/scripts/workflow-report.cjs <name>`); start fresh only if they meant
     a new run.
 
-### 2. Generate the conductor (do NOT hand-write boilerplate)
+### 1b. Triage a new run — size it or decline (new goals only)
+
+Before generating, classify the goal and pick ONE. Skip this for `list` and for `resume` (a
+resume's profile is already fixed). Bias **down** — do not reach for a bigger profile than the
+work earns:
+
+- **decline** — trivial / one-shot / single-file; finishes in one pass and won't span sessions.
+  Conductor is overkill: say so, do it inline or call the Workflow tool directly, and **STOP**.
+- **bare** — multi-step but low-risk, no PR/ticket/gates → generator with just `--phases` (or
+  the default single `Work`).
+- **lite** — routine delivery, small/low-risk PR → `--profile lite`.
+- **delivery** — substantial or risky: broad surface, migration, behavioral change, must not
+  regress → `--profile delivery`.
+
+Signals that push **up** a tier: spans sessions · losing progress is costly · many files
+touched · behavioral/endpoint change · needs review/tests/docs/PR/ticket. With none present,
+pick the lowest tier. When the signals are genuinely ambiguous, ask the user **one**
+`AskUserQuestion` (decline / bare / lite / delivery) rather than guessing big.
+
+### 2. Generate the conductor (pass prompts as data; do NOT hand-edit)
 
 Generate the conductor deterministically from params — never copy/author it by hand (that
 reintroduces drift). The generator emits all mechanical boilerplate correctly (NAME/STATE/
@@ -119,6 +141,7 @@ symlink, per-phase resume guards, optional Brief/PR/TicketUpdate, finalize):
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
+  --prompts-file <prompts.json> \
   [--ticket] [--pr] [--merge-gates] [--base <ref>] [--desc "..."]
 ```
 
@@ -131,6 +154,15 @@ subagent round-trips; reserve them for work that warrants them:
 - **Substantial / risky work** → `--profile delivery` (full TDD cycle + every gate). Only here.
 
 - `--phases` — comma-list of work phase titles.
+- `--prompt <text>` — the prompt for the sole work phase (errors if there are several).
+- `--prompts-file <json>` — `{ "<PhaseTitle>": "<prompt text>", … }`; fills each work phase's
+  prompt from **data** so you never read back or hand-edit the generated script. A phase with no
+  entry keeps a `TODO:` stub (fill it by regenerating, not by editing).
+- `--spec <json>` — superset of the flags for **per-phase overrides** (file or inline JSON):
+  `{ "phases": { "<Title>": "<prompt>", "<Title>.schema": "<schema source>", "<Title>.agent": "<id|none>" } }`.
+  Every flag keeps working unchanged; `--spec` only *adds* per-phase customization (a richer return
+  `schema`, a phase-specific `agent`, or the prompt). Reach for it only when a phase needs a return
+  shape beyond the default `{ summary }`; otherwise `--prompt`/`--prompts-file` suffice.
 - `--ticket` — adds a **Brief** phase (fetch the ticket → goal) and a **TicketUpdate** phase.
 - `--pr` — adds a **PR** phase (push branch + `gh pr create`).
 - `--merge-gates` — collapse CodeGate + TestGate into ONE **Review** phase (review+fix+build,
@@ -176,9 +208,14 @@ decision work skips the file rather than emitting boilerplate.
 box once the plugin is installed. Override any gate with your own agent (`--agent-*`) or pass
 `--agent-*=none` to run it on a generic built-in subagent — no bundled-agent dependency.
 
-Then edit **ONLY** the `TODO:` agent prompts (and their schemas) inside the generated work
-phases — that is the one task-specific part. Do NOT touch the generated boilerplate; to change
-structure, re-run the generator with `--force`. Review before launching.
+**Pass the work-phase prompts as DATA via `--prompt` / `--prompts-file` — do NOT read the
+generated script back and edit it by hand.** The prompt text is the one task-specific part;
+write it straight into the generator inputs and it splices each into the matching work phase,
+emitting a launch-ready script. You authored the prompts, so there's no need to re-ingest the
+boilerplate — glance at the printed phase order to confirm structure, then launch. To change
+structure (or fill a prompt left empty), re-run the generator with `--force`; never hand-edit.
+(Work phases return `{ summary }` by default; if a phase needs a richer return shape or a
+phase-specific agent, pass it via `--spec` — not by editing the generated file.)
 
 ### 3. Launch (fresh)
 
@@ -244,6 +281,11 @@ durable audit trail.
 - The conductor cannot write files, timestamps, or randomness — push all of that into
   workers; vary worker labels by index, not random IDs.
 - Every phase needs a skip-if-done guard, or resume re-runs completed work.
+- Phases are **at-least-once** on resume: the checkpoint is written *after* the side-effect, so a
+  crash between them re-runs that phase. Every phase body must be **idempotent**. The generated
+  conductor also self-validates on entry that `phasesDone` is a **contiguous prefix** of the phase
+  order (unknown or mid-skip phases throw) — so a corrupt/forged resume state fails loudly instead
+  of silently skipping Setup.
 - `.filter(Boolean)` after `parallel()` — dead agents return `null`.
 - Durable ≠ unattended. The Workflow tool runs inside a live session and cannot be
   triggered by cron or run headless. For unattended execution a different mechanism is
@@ -261,3 +303,6 @@ durable audit trail.
   default; `--all` for completed). Used in list mode (step 1).
 - `scripts/workflow-report.cjs` — duration + tokens + estimated cost for one run, written to
   `.workflows/reports/<name>.md`. Used at finalize (step 5). Rates editable / `RATES_JSON`.
+- `scripts/test-scaffold.cjs` — regression net for the generator: emits a representative matrix of
+  flag/profile combos, `node --check`s each, and asserts the emitted `phase('…')` order equals the
+  reported order. Run after any change to `scaffold-workflow.cjs`.
