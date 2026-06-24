@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Implementation notes — test-optimize.cjs (prospector regression net)</title>
+<h1>test-optimize.cjs — implementation notes</h1>
+
+<h2>Decision: "representative configs" became representative <em>slugs</em></h2>
+<p>
+Conductor's <code>test-scaffold.cjs</code> varies flags/profiles because conductor bakes the
+phase sequence into the template. Prospector's <code>scaffold-optimize.cjs</code> deliberately
+does NOT bake the run config — goal/surface/metric/gate/budgets are passed in via Workflow
+<code>args.config</code> at launch — so the emitted loop body is BYTE-IDENTICAL for every run
+except the baked-in slug (<code>meta.name</code> / <code>NAME</code>). The generator also takes
+only <code>--name/--out/--force</code>, no <code>--config</code>. So the "matrix" varies the slug
+(and exercises the kebab validator's edges: hyphenated, numeric, single-char) and the structural
+assertions do the real work. This is an intentional deviation from conductor's flag-matrix shape,
+forced by the data-in design.
+</p>
+
+<h2>Decision: isBetter boundary is <code>&gt;= minDelta</code>, so equal ties through at minDelta=0</h2>
+<p>
+My first draft asserted that an EQUAL metric with <code>minDelta=0</code> should NOT keep (strict
+improvement). The harness caught this against the real implementation: <code>isBetter</code> is
+documented and coded as "beat best by AT LEAST minDelta", i.e. <code>metric - best &gt;= d</code>.
+With the default <code>minDelta=0</code> that is <code>0 &gt;= 0 = true</code>, so an equal metric
+is a (harmless) keep; strict improvement requires a positive <code>minDelta</code>. I changed the
+TEST to pin this documented boundary rather than touch the generator — the generator is the source
+of truth and the <code>&gt;=</code> semantics match the spec's "ignore moves BELOW minDelta" (a tie
+is not below). Reviewer confirm: equal-metric keeps at <code>minDelta=0</code> are acceptable
+(they only ever replace <code>best</code> with an equal-value commit; monotonicity in criterion 3
+holds with <code>&lt;=/&gt;=</code>, not strict).
+</p>
+
+<h2>Decision: a string-scan "no-fs guard" beyond node --check</h2>
+<p>
+<code>node --check</code> only proves the emitted loop parses; it cannot prove the conductor layer
+obeys the restricted-layer rule (no <code>fs</code>/<code>require</code>/<code>Date.now</code>/
+<code>Math.random</code>/<code>new Date</code> — every side-effect must live inside an
+<code>agent()</code> worker prompt string). I added Gate D: strip the <code>agent(`…`)</code>
+template literals (worker instructions are data, not executed conductor code), then forbid the
+restricted primitives in what remains. This is the prospector analog of conductor's
+"<code>meta.</code> at runtime" guard — a class of bug node --check is blind to.
+Caveat: the template-literal stripper is a regex (<code>/`(?:[^`\\]|\\.)*`/g</code>); it is correct
+for the currently-generated prompts (no nested unescaped backticks at the top level) but would need
+revisiting if the generator ever emits nested template literals inside a worker prompt.
+</p>
+
+<h2>Cross-check of the spec's 9 Verifiable success criteria</h2>
+<p>What this build satisfies now (static / unit level) vs. what needs a LIVE optimization run.</p>
+<table border="1" cellpadding="4" cellspacing="0">
+<tr><th>#</th><th>Criterion</th><th>Coverage in this build</th></tr>
+<tr><td>1</td><td>Config derivation (metric/parse/direction/gate run; halts for confirm)</td>
+  <td><b>LIVE — out of scope.</b> Requires a real repo + the §1b auto-propose agent + AskUserQuestion. No static surrogate; not the generator's job.</td></tr>
+<tr><td>2</td><td>Keep rule: KEPT iff gate passed AND metric beat best by ≥ minDelta; else discard + clean worktree</td>
+  <td><b>Partial (decision half, statically).</b> The metric half is unit-tested via <code>isBetter</code> (both directions, minDelta boundary, non-finite). Structure asserts the <code>keep = gatePassed && beats && surfaceOk</code> conjunction and the discard <code>git checkout -- $SURFACE</code> revert exist. The actual gate/commit/clean behavior is <b>LIVE</b> (worker side-effects).</td></tr>
+<tr><td>3</td><td>Monotonic best; checking out opt/&lt;name&gt; reproduces best.metric</td>
+  <td><b>LIVE — out of scope.</b> Monotonicity follows from the keep rule (best only advances when isBetter), which is unit-tested; reproducing the metric on a real checkout needs a live run.</td></tr>
+<tr><td>4</td><td>Per-experiment bound: propose ≤ agentCapSec, eval ≤ evalCapSec; timeout ⇒ discard</td>
+  <td><b>Partial.</b> <code>deriveEvalCap</code> (≈3×, floor, override, junk input) is unit-tested. Structure asserts the propose/eval workers and the <code>EVALCAP</code>/<code>AGENTCAP</code> wiring exist. Enforcing the actual timeout is a <b>LIVE</b> worker behavior.</td></tr>
+<tr><td>5</td><td>Surface lock: out-of-surface edit is discarded</td>
+  <td><b>Partial.</b> Structure asserts both <code>surfaceAllows(diffFiles, SURFACE)</code> call and the <code>surfaceAllows</code> pure-glob helper exist. The helper itself is pure JS and could be unit-tested directly, but the generator does NOT export it (it is emitted as a string), so a direct unit test isn't wired here. End-to-end "inject an out-of-surface edit ⇒ discard" is <b>LIVE</b>.</td></tr>
+<tr><td>6</td><td>Stop conditions: first of {experiments, wallclock, tokens, plateau}; status reflects why</td>
+  <td><b>Satisfied at unit level.</b> <code>shouldStop</code> is unit-tested on each budget, plateau on/off, and precedence (experiments first). Structure asserts the in-loop <code>shouldStop(</code> call and the <code>stopReason</code> in finalize.</td></tr>
+<tr><td>7</td><td>Resume: re-invoke continues from ledger, KEPT commits intact, no repeats</td>
+  <td><b>Partial.</b> Structure asserts the resume reachability guard (<code>Unreachable resume:</code>). Full resume (ledger replay, no repeated experiments) is <b>LIVE</b>.</td></tr>
+<tr><td>8</td><td>Non-destructive: main byte-unchanged; no auto-merge</td>
+  <td><b>LIVE — out of scope.</b> A property of worktree isolation + the absence of any merge step; verifiable only by a real run.</td></tr>
+<tr><td>9</td><td>Report: optimize-report.cjs outputs baseline→best %, runs/kept, duration, tokens, cost</td>
+  <td><b>Out of scope for THIS harness</b> (covered by node --check on optimize-report.cjs here; a report-content test belongs to that script's own net, not the generator net).</td></tr>
+</table>
+<p>
+<b>Summary:</b> criteria 6 is satisfiable at unit level and is; 2/4/5/7 are partially satisfied
+statically (their pure decision halves are unit-tested, their structure markers asserted) but their
+side-effecting halves require a LIVE run. Criteria 1, 3, 8 require a LIVE optimization run (real
+repo + real metric + real worktree/git) and are therefore out of scope for this generator
+regression net. Criterion 9 is exercised only via <code>node --check</code> here.
+</p>

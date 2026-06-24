@@ -397,11 +397,12 @@ const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
 const results = { ...prior }
 
 // --- Resume reachability guard: phasesDone MUST be a contiguous prefix ---
-// Canonical order is self-contained in meta.phases. A durable state that marks a
-// phase done while an earlier phase is not is unreachable (corrupt/forged) — reject
-// it loudly instead of silently skipping required setup work.
+// Canonical order is baked in as a literal — the Workflow runtime consumes \`meta\` as
+// metadata, so it is NOT a runtime binding in this body. A durable state that marks a
+// phase done while an earlier phase is not is unreachable (corrupt/forged) — reject it
+// loudly instead of silently skipping required setup work.
 ;(() => {
-  const order = meta.phases.map((p) => p.title)
+  const order = ${JSON.stringify(phaseOrder)}
   for (const title of done) {
     if (!order.includes(title)) {
       throw new Error(\`Unreachable resume: phasesDone has unknown phase '\${title}' (not in order: \${order.join(' → ')})\`)
