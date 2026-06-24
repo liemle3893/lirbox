@@ -6,7 +6,9 @@
  *   1. shells out to the generator to emit a workflow script,
  *   2. runs `node --check` on the emitted script (syntax/escaping gate),
  *   3. asserts the phase('…') titles in the emitted script exactly equal the
- *      generator's reported "Phases:" order — same set AND same order.
+ *      generator's reported "Phases:" order — same set AND same order,
+ *   4. asserts the emitted body has no runtime `meta.` access — the Workflow engine
+ *      consumes `export const meta` as metadata, so `meta` is not a runtime binding.
  *
  * Exits non-zero on the first failure (or summarises all and exits 1).
  *
@@ -75,6 +77,16 @@ for (const [label, extra] of MATRIX) {
       console.error(`FAIL [${label}] phase-order mismatch`);
       console.error(`  emitted:  ${emitted.join(' → ')}`);
       console.error(`  reported: ${reported.join(' → ')}`);
+      failures++;
+      continue;
+    }
+
+    // Gate 3: the emitted body must not reference `meta.` at runtime. The Workflow engine
+    // consumes `export const meta` as metadata, so `meta` is NOT a binding in the executing
+    // body — any `meta.<x>` access throws "meta is not defined" at launch (node --check can't
+    // catch it). The phase order is baked in as a literal instead.
+    if (/meta\./.test(fs.readFileSync(out, 'utf8'))) {
+      console.error(`FAIL [${label}] generated body references \`meta.\` at runtime (would throw in the Workflow engine)`);
       failures++;
       continue;
     }
