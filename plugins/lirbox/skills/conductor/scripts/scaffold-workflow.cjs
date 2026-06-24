@@ -4,13 +4,16 @@
  * Replaces "copy a template and hope the LLM fills it correctly" — all the mechanical
  * boilerplate (NAME/STATE/BRANCH consts, checkpoint() with startedAt-preserving merge,
  * Setup worktree+node_modules, resume guards, optional Brief/PR/TicketUpdate, finalize)
- * is emitted here. The LLM then edits ONLY the `TODO:` agent prompts in the work phases.
+ * is emitted here. The work-phase prompts are passed in as DATA (--prompt/--prompts-file),
+ * so the caller never reads back or hand-edits the generated script.
  *
  * Usage:
  *   node scaffold-workflow.cjs --name <slug> [options]
  * Options:
  *   --name <slug>        required; drives state/branch/worktree paths
  *   --phases <a,b,c>     work phase titles (default: "Work")
+ *   --prompt <text>      prompt for the sole work phase (data-in; errors if >1 work phase)
+ *   --prompts-file <j>   JSON { "<PhaseTitle>": "<prompt>" } filling work-phase prompts from data
  *   --desc <text>        meta.description (default derived from name)
  *   --base <ref>         worktree branch point (default: remote's default branch, fetched fresh)
  *   --ticket             include Brief (fetch ticket) + TicketUpdate phases
@@ -64,6 +67,40 @@ const agentDocs = arg('agent-docs', 'lirbox:lirbox-docs-writer');
 // Emits the `agentType: '...',` fragment, or '' when set to none/empty (→ generic subagent).
 const at = (a) => (a && a !== 'none' && a !== true) ? `agentType: '${a}',` : '';
 
+// --- work-phase prompts passed as DATA (so the caller never reads/edits the generated script) ---
+// --prompt <text>      : prompt for the sole work phase (errors if there are several work phases)
+// --prompts-file <json>: { "<PhaseTitle>": "<prompt text>", ... } — fills each work phase's prompt
+const promptMap = {};
+const promptsFile = arg('prompts-file', '');
+if (promptsFile && promptsFile !== true) {
+  let raw;
+  try { raw = fs.readFileSync(promptsFile, 'utf8'); }
+  catch (e) { console.error('ERROR: --prompts-file not readable: ' + e.message); process.exit(1); }
+  try { Object.assign(promptMap, JSON.parse(raw)); }
+  catch (e) { console.error('ERROR: --prompts-file is not valid JSON: ' + e.message); process.exit(1); }
+}
+const promptInline = arg('prompt', '');
+if (promptInline && promptInline !== true) {
+  if (phases.length !== 1) { console.error('ERROR: --prompt needs exactly one work phase; use --prompts-file for multiple'); process.exit(1); }
+  promptMap[phases[0]] = promptInline;
+}
+// --- optional --spec <json>: a superset of the flags allowing per-phase overrides ---
+// { "phases": { "<Title>": "<prompt>", "<Title>.schema": "<schema source>", "<Title>.agent": "<id|none>" } }
+// Existing flags keep working unchanged; --spec only ADDS per-phase customization for work phases.
+const spec = {};
+const specFile = arg('spec', '');
+if (specFile && specFile !== true) {
+  let raw;
+  try { raw = fs.readFileSync(specFile, 'utf8'); }
+  catch (e) { console.error('ERROR: --spec not readable: ' + e.message); process.exit(1); }
+  try { Object.assign(spec, JSON.parse(raw)); }
+  catch (e) { console.error('ERROR: --spec is not valid JSON: ' + e.message); process.exit(1); }
+}
+
+// Escape so the data text is embedded LITERALLY inside the generated template literal
+// (no accidental backtick-close or ${...} interpolation).
+const escTpl = (s) => String(s).replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+
 if (fs.existsSync(out) && !force) { console.error(`ERROR: ${out} exists (use --force to overwrite)`); process.exit(1); }
 
 const camel = (s) => s.replace(/[^a-zA-Z0-9]+/g, ' ').trim().split(' ')
@@ -72,124 +109,165 @@ const camel = (s) => s.replace(/[^a-zA-Z0-9]+/g, ' ').trim().split(' ')
 const SCHEMA = (props, req) =>
   `{ type: 'object', additionalProperties: false, required: ${JSON.stringify(req)}, properties: ${JSON.stringify(props)} }`;
 
-// ---- phase order (shared by meta + summary print) ----
-// --cycle: RED → GREEN(work) → Verify → PathGap → IMPROVE/SIMPLIFY(CodeGate) → ReVerify.
-const coreOrder = withCycle
-  ? ['RED', ...phases, 'Verify', 'PathGap', 'CodeGate', 'ReVerify']
-  : mergeGates
-    ? [...phases, 'Review']
-    : [...phases, ...(enforceCode ? ['CodeGate'] : []), ...(enforceTests ? ['TestGate'] : [])];
-const phaseOrder = ['Setup',
-  ...(withTicket ? ['Brief'] : []),
-  ...coreOrder,
-  ...(enforceDocs ? ['DocsGate'] : []),
-  ...(withPR ? ['PR'] : []),
-  ...(withTicket ? ['TicketUpdate'] : [])];
-const metaPhases = phaseOrder.map((t) => `    { title: '${t}' },`).join('\n');
+// ============================================================================
+// SINGLE SOURCE OF TRUTH: one ordered table of phase descriptors. BOTH the
+// meta/phase order AND the emitted code blocks are derived from this list, so
+// the two can never drift. Each descriptor: { title, enabledWhen, build(ctx) }.
+//   - enabledWhen: boolean — keep this phase for the current flag combo.
+//   - build(ctx): returns the emitted block STRING (via the emitPhase/gateLoop
+//     helpers below), or an array of {title, src} when it expands to several
+//     phases (the work phases). Work phases splice in at their table position.
+// Setup is unconditionally first and emitted verbatim in the template tail.
+// ============================================================================
 
-// ---- work phase blocks (stubbed prompts for the LLM to fill) ----
-const workBlocks = phases.map((p) => {
-  const key = camel(p);
+let pendingTodos = 0;
+
+// Common skeleton: phase('T') / if(<guard>){log(<resumed>)} else { <body> done.add('T'); checkpoint }.
+// `body` is emitted VERBATIM (already indented for the `} else {` block by the builders below) —
+// emitPhase must NOT re-indent it, since interior prompt template-literal lines are column-0 and
+// whitespace there is significant. `extraGuard` prepends an `if(<cond>){log} else ...` branch.
+function emitPhase(title, body, opts = {}) {
+  const resumed = opts.resumed || `${title} already complete (resumed)`;
+  const head = opts.extraGuard
+    ? `if (${opts.extraGuard.cond}) {\n  log('${opts.extraGuard.msg}')\n} else if (done.has('${title}')) {`
+    : `if (done.has('${title}')) {`;
   return `
-phase('${p}')
-if (done.has('${p}')) {
-  log('${p} already complete (resumed)')
+phase('${title}')
+${head}
+  log('${resumed}')
 } else {
-  results.${key} = await agent(
-    \`\${inWorktree('${p}')}
-${withCycle ? '\nGREEN: implement until the RED tests pass; never weaken or delete tests to go green.\n' : ''}
-TODO: describe the ${p} work here. (This is the ONLY part to edit by hand.)\`,
-    { label: '${key}', phase: '${p}', schema: ${SCHEMA({ summary: { type: 'string' } }, ['summary'])} },
-  )
-  done.add('${p}')
-  await checkpoint('${p}')
+${body}
+  done.add('${title}')
+  await checkpoint('${title}')
 }`;
-}).join('\n');
+}
 
-const briefBlock = !withTicket ? '' : `
-phase('Brief')
-if (!TICKET) {
-  log('No ticket — goal came from the invocation text')
-} else if (done.has('Brief')) {
-  log('Brief already complete (resumed)')
-} else {
-  results.brief = await agent(
-    \`Fetch tracker ticket \${TICKET} and write a concise goal + acceptance criteria.
-Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase AC/DoD):
-- Jira:   mcp__atlassian__getJiraIssue (issueIdOrKey: "\${TICKET}")
-- Linear: the Linear MCP get-issue tool, ONLY if a Linear server is connected.\`,
-    { label: 'brief', phase: 'Brief', schema: ${SCHEMA({ title: { type: 'string' }, goal: { type: 'string' }, acceptanceCriteria: { type: 'array', items: { type: 'string' } } }, ['goal'])} },
-  )
-  done.add('Brief')
-  await checkpoint('Brief')
-}`;
-
-const prBlock = !withPR ? '' : `
-phase('PR')
-if (done.has('PR')) {
-  log('PR already complete (resumed)')
-} else {
-  results.pr = await agent(
-    \`\${inWorktree('pr', { notes: false })}
-
-Push the branch and open a PR with the GitHub CLI:
-git push -u origin \${BRANCH}
-gh pr create --base \${BASE || 'main'} --head \${BRANCH} --title "TODO title" --body "TODO summary\${TICKET ? '; refs ' + TICKET : ''}"
-If a PR for this branch already exists, return its URL instead of erroring.\`,
-    { label: 'pr', phase: 'PR', schema: ${SCHEMA({ prUrl: { type: 'string' } }, ['prUrl'])} },
-  )
-  done.add('PR')
-  await checkpoint('PR')
-}`;
-
-const ticketUpdateBlock = !withTicket ? '' : `
-phase('TicketUpdate')
-if (!TICKET) {
-  log('No ticket — nothing to update')
-} else if (done.has('TicketUpdate')) {
-  log('TicketUpdate already complete (resumed)')
-} else {
-  results.ticketUpdate = await agent(
-    \`Update tracker ticket \${TICKET}. Use ToolSearch to load the tracker tools.
-Jira: getTransitionsForJiraIssue → transitionJiraIssue to the review state (match name case-insensitively; skip if none) → addCommentToJiraIssue with the PR link \${results.pr && results.pr.prUrl}.
-Linear: use the Linear MCP update/comment tools instead, ONLY if connected.\`,
-    { label: 'ticket-update', phase: 'TicketUpdate', schema: ${SCHEMA({ updated: { type: 'boolean' }, transition: { type: 'string' } }, ['updated'])} },
-  )
-  done.add('TicketUpdate')
-  await checkpoint('TicketUpdate')
-}`;
-
-// ---- enforcement gates (hard-fail; use bundled agents via agentType) ----
-// CodeGate = IMPROVE+SIMPLIFY; emitted when --enforce-code OR --cycle (cycle always reviews).
-const codeGateBlock = (!enforceCode && !withCycle) ? '' : `
-phase('CodeGate')
-if (done.has('CodeGate')) {
-  log('CodeGate already complete (resumed)')
-} else {
-  let passed = false, last = null
+// A bounded 3-round gate: run the agent up to 3× until `flag` is truthy, else throw.
+// `prompt`/`schema` are template-literal source fragments; `agentFrag` is the optional
+// `agentType: '...',` (or '' for a generic subagent). Output is indented for the else-block.
+function gateLoop({ flag, prompt, schema, agentFrag, label, phase: ph, throwMsg, resultKey }) {
+  return `  let passed = false, last = null
   for (let round = 1; round <= 3 && !passed; round++) {
     last = await agent(
-      \`\${inWorktree('codegate')}
-
-Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}). Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality). Re-run the build after fixes and commit them.\`,
-      { label: \`codegate:r\${round}\`, phase: 'CodeGate', ${at(agentCode)}
-        schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed'])} },
+      ${prompt},
+      { label: \`${label}:r\${round}\`, phase: '${ph}',${agentFrag ? ' ' + agentFrag : ''}
+        schema: ${schema} },
     )
-    passed = last && last.gatePassed
+    passed = last && last.${flag}
   }
-  if (!passed) throw new Error('CodeGate failed: unresolved Critical/High after 3 rounds — ' + (last && last.summary || ''))
-  results.codeGate = last
-  done.add('CodeGate')
-  await checkpoint('CodeGate')
-}`;
+  if (!passed) throw new Error(${throwMsg})
+  results.${resultKey} = last`;
+}
 
-// TestGate (triage-based) is the NON-cycle test enforcement; in --cycle mode RED/Verify/PathGap/ReVerify replace it.
-const testGateBlock = (!enforceTests || withCycle) ? '' : `
-phase('TestGate')
-if (done.has('TestGate')) {
-  log('TestGate already complete (resumed)')
-} else {
-  // Assess what testing the change ACTUALLY needs — do not enforce blindly.
+// A single agent call whose result is stored at results[key], with an optional hard-fail check.
+// Output is indented for the else-block; interior prompt lines stay column-0.
+function agentCall({ key, prompt, schema, agentFrag, label, phase: ph, check }) {
+  return `  results.${key} = await agent(
+    ${prompt},
+    { label: '${label}', phase: '${ph}', ${agentFrag ? agentFrag + '\n      ' : ''}schema: ${schema} },
+  )${check ? '\n  ' + check : ''}`;
+}
+
+// ---- work-phase descriptor: expands to one phase per --phases title (prompts are data-in) ----
+const workPhasesBuild = () => phases.map((p) => {
+  const key = camel(p);
+  const provided = (spec.phases && spec.phases[p]) || (promptMap[p] != null ? String(promptMap[p]) : '');
+  if (!provided) pendingTodos++;
+  const body = provided
+    ? escTpl(provided)
+    : `TODO: describe the ${p} work here. (Pass --prompt/--prompts-file to fill this from data.)`;
+  const greenLine = withCycle ? '\nGREEN: implement until the RED tests pass; never weaken or delete tests to go green.\n' : '';
+  const sch = (spec.phases && spec.phases[p] && spec.phases[p + '.schema']) || SCHEMA({ summary: { type: 'string' } }, ['summary']);
+  const agentFrag = (spec.phases && spec.phases[p + '.agent']) ? at(spec.phases[p + '.agent']) : '';
+  const src = emitPhase(p, agentCall({
+    key,
+    prompt: `\`\${inWorktree('${p}')}\n${greenLine}\n${body}\``,
+    schema: sch,
+    agentFrag,
+    label: key,
+    phase: p,
+  }));
+  return { title: p, src };
+});
+
+const PHASES = [
+  { title: 'Brief', enabledWhen: withTicket, build: () => emitPhase('Brief',
+    agentCall({
+      key: 'brief',
+      prompt: `\`Fetch tracker ticket \${TICKET} and write a concise goal + acceptance criteria.
+Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase AC/DoD):
+- Jira:   mcp__atlassian__getJiraIssue (issueIdOrKey: "\${TICKET}")
+- Linear: the Linear MCP get-issue tool, ONLY if a Linear server is connected.\``,
+      schema: SCHEMA({ title: { type: 'string' }, goal: { type: 'string' }, acceptanceCriteria: { type: 'array', items: { type: 'string' } } }, ['goal']),
+      label: 'brief', phase: 'Brief',
+    }),
+    { extraGuard: { cond: '!TICKET', msg: 'No ticket — goal came from the invocation text' } }) },
+
+  { title: 'RED', enabledWhen: withCycle, build: () => emitPhase('RED',
+    agentCall({
+      key: 'red',
+      prompt: `\`\${inWorktree('red')}
+
+RED (test-first): from the goal\${TICKET ? ' / ticket ' + TICKET : ''} and its acceptance criteria, write the tests BEFORE any implementation. Decide per behavior whether it needs a tryve E2E (tests/e2e/*.yaml) or a Jest unit test, and write them. Run them and CONFIRM THEY FAIL for the right reason — a test that already passes is not exercising the new behavior; fix it until it fails. Commit the failing tests.\``,
+      schema: SCHEMA({ red: { type: 'boolean' }, tests: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['red']),
+      agentFrag: at(agentRed), label: 'red', phase: 'RED',
+      check: `if (!results.red || !results.red.red) throw new Error('RED failed: tests did not establish a failing baseline — ' + (results.red && results.red.summary || ''))`,
+    })) },
+
+  // Work phases (one per --phases title) splice in here.
+  { title: '@work', enabledWhen: true, build: workPhasesBuild },
+
+  { title: 'Verify', enabledWhen: withCycle, build: () => emitPhase('Verify',
+    agentCall({
+      key: 'verify',
+      prompt: `\`\${inWorktree('verify')}
+
+VERIFY (GREEN): run the full relevant test suite for the changes on \${BRANCH} vs \${BASE || 'the base branch'} (Jest unit + any tryve E2E from RED). EVERYTHING must pass. If any test fails, the implementation is incomplete — STOP and report which failed; do NOT weaken tests to pass.\``,
+      schema: SCHEMA({ green: { type: 'boolean' }, failing: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['green']),
+      label: 'verify', phase: 'Verify',
+      check: `if (!results.verify || !results.verify.green) throw new Error('Verify failed: not green — ' + (results.verify && (results.verify.failing || []).join(', ')))`,
+    })) },
+
+  { title: 'PathGap', enabledWhen: withCycle, build: () => emitPhase('PathGap',
+    '  // Close test gaps for code paths the ACs never specified (decide-or-justify, hard-fail).\n' + gateLoop({
+      flag: 'closed', resultKey: 'pathGap', label: 'pathgap', phase: 'PathGap',
+      prompt: `\`\${inWorktree('pathgap')}
+
+PATH-GAP: the ACs do NOT cover every code path. Steps:
+1. Run Jest with BRANCH coverage; intersect with the CHANGED lines (git diff vs \${BASE || 'the base branch'}) to find uncovered branches introduced by this change.
+2. For EACH uncovered changed branch, do ONE: (a) add a unit/integration test that meaningfully exercises AND asserts it, or (b) if it is genuinely unreachable/defensive, record an explicit justification in implementation-notes/pathgap.html.
+3. Re-run coverage. There must be NO silent gaps — every uncovered changed branch is either tested or justified.
+Do NOT delete/alter source branches just to raise coverage. Commit new tests + notes.\``,
+      schema: SCHEMA({ closed: { type: 'boolean' }, uncovered: { type: 'number' }, tested: { type: 'number' }, justified: { type: 'number' }, summary: { type: 'string' } }, ['closed']),
+      throwMsg: `'PathGap failed: uncovered changed-code branches remain after 3 rounds — ' + (last && last.summary || '')`,
+    })) },
+
+  // CodeGate = IMPROVE+SIMPLIFY; emitted when --enforce-code OR --cycle (cycle always reviews).
+  { title: 'CodeGate', enabledWhen: enforceCode || withCycle, build: () => emitPhase('CodeGate',
+    gateLoop({
+      flag: 'gatePassed', resultKey: 'codeGate', label: 'codegate', phase: 'CodeGate', agentFrag: at(agentCode),
+      prompt: `\`\${inWorktree('codegate')}
+
+Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}). Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality). Re-run the build after fixes and commit them.\``,
+      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed']),
+      throwMsg: `'CodeGate failed: unresolved Critical/High after 3 rounds — ' + (last && last.summary || '')`,
+    })) },
+
+  // ReVerify follows CodeGate in --cycle mode.
+  { title: 'ReVerify', enabledWhen: withCycle, build: () => emitPhase('ReVerify',
+    agentCall({
+      key: 'reVerify',
+      prompt: `\`\${inWorktree('reverify')}
+
+RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branch coverage for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. Everything green before must STILL be green and coverage must not have regressed. If a refactor broke anything, STOP and report; do NOT weaken tests.\``,
+      schema: SCHEMA({ green: { type: 'boolean' }, regressions: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['green']),
+      label: 'reverify', phase: 'ReVerify',
+      check: `if (!results.reVerify || !results.reVerify.green) throw new Error('ReVerify failed: regression after improve/simplify — ' + (results.reVerify && (results.reVerify.regressions || []).join(', ')))`,
+    })) },
+
+  // TestGate (triage-based): NON-cycle test enforcement; replaced by RED/Verify/PathGap/ReVerify under --cycle.
+  { title: 'TestGate', enabledWhen: enforceTests && !withCycle, build: () => emitPhase('TestGate',
+    `  // Assess what testing the change ACTUALLY needs — do not enforce blindly.
   const assess = await agent(
     \`\${inWorktree('testgate')}
 
@@ -221,149 +299,83 @@ Do NOT change source to game coverage. Commit new tests.\`,
     }
     if (!passed) throw new Error('TestGate failed: ' + (assess && assess.level) + ' tests not green after 3 rounds — ' + (last && last.summary || ''))
     results.testGate = last
-  }
-  done.add('TestGate')
-  await checkpoint('TestGate')
-}`;
+  }`) },
 
-// Review = CodeGate + TestGate collapsed into ONE phase (--merge-gates / --profile lite).
-// Fewer steps for small/low-risk tasks: a single review+fix loop that also ensures warranted
-// tests are green. Not emitted under --cycle (the cycle has its own gates).
-const reviewBlock = (!mergeGates || withCycle) ? '' : `
-phase('Review')
-if (done.has('Review')) {
-  log('Review already complete (resumed)')
-} else {
-  let passed = false, last = null
-  for (let round = 1; round <= 3 && !passed; round++) {
-    last = await agent(
-      \`\${inWorktree('review')}
+  // Review = CodeGate + TestGate collapsed (--merge-gates / --profile lite); not under --cycle.
+  { title: 'Review', enabledWhen: mergeGates && !withCycle, build: () => emitPhase('Review',
+    gateLoop({
+      flag: 'gatePassed', resultKey: 'review', label: 'review', phase: 'Review', agentFrag: at(agentCode),
+      prompt: `\`\${inWorktree('review')}
 
 Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}) in ONE pass:
 1. Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality).
 2. Decide what testing the change warrants (none for docs/config/non-behavioral; unit for pure logic; e2e for new/changed behavior or endpoints) and ensure those tests EXIST and PASS — do NOT change source to game coverage, do NOT fake a pass if an integration env is unavailable (say so).
 3. Re-run build + tests after fixes and commit them.
-Return whether the gate passed.\`,
-      { label: \`review:r\${round}\`, phase: 'Review', ${at(agentCode)}
-        schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed'])} },
-    )
-    passed = last && last.gatePassed
-  }
-  if (!passed) throw new Error('Review failed: unresolved Critical/High or tests not green after 3 rounds — ' + (last && last.summary || ''))
-  results.review = last
-  done.add('Review')
-  await checkpoint('Review')
-}`;
+Return whether the gate passed.\``,
+      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed']),
+      throwMsg: `'Review failed: unresolved Critical/High or tests not green after 3 rounds — ' + (last && last.summary || '')`,
+    })) },
 
-const docsGateBlock = !enforceDocs ? '' : `
-phase('DocsGate')
-if (done.has('DocsGate')) {
-  log('DocsGate already complete (resumed)')
-} else {
-  results.docs = await agent(
-    \`\${inWorktree('docsgate')}
+  { title: 'DocsGate', enabledWhen: enforceDocs, build: () => emitPhase('DocsGate',
+    agentCall({
+      key: 'docs',
+      prompt: `\`\${inWorktree('docsgate')}
 
-Write an implementation summary for the changes on \${BRANCH} vs \${BASE || 'the base branch'} into docs/changes/ with proper frontmatter. Read the diff, the goal\${TICKET ? ' and ticket ' + TICKET : ''}, and ALL fragments in the implementation-notes/ directory — fold their design decisions / deviations / tradeoffs / open questions into the summary. Commit it.\`,
-    { label: 'docs', phase: 'DocsGate', ${at(agentDocs)}
-      schema: ${SCHEMA({ written: { type: 'boolean' }, docPath: { type: 'string' } }, ['written'])} },
-  )
-  if (!results.docs || !results.docs.written) throw new Error('DocsGate failed: no implementation summary written')
-  done.add('DocsGate')
-  await checkpoint('DocsGate')
-}`;
+Write an implementation summary for the changes on \${BRANCH} vs \${BASE || 'the base branch'} into docs/changes/ with proper frontmatter. Read the diff, the goal\${TICKET ? ' and ticket ' + TICKET : ''}, and ALL fragments in the implementation-notes/ directory — fold their design decisions / deviations / tradeoffs / open questions into the summary. Commit it.\``,
+      schema: SCHEMA({ written: { type: 'boolean' }, docPath: { type: 'string' } }, ['written']),
+      agentFrag: at(agentDocs), label: 'docs', phase: 'DocsGate',
+      check: `if (!results.docs || !results.docs.written) throw new Error('DocsGate failed: no implementation summary written')`,
+    })) },
 
-// ---- TDD cycle blocks (only when --cycle): RED → (work=GREEN) → Verify → PathGap → CodeGate → ReVerify ----
-const redBlock = !withCycle ? '' : `
-phase('RED')
-if (done.has('RED')) {
-  log('RED already complete (resumed)')
-} else {
-  results.red = await agent(
-    \`\${inWorktree('red')}
+  { title: 'PR', enabledWhen: withPR, build: () => emitPhase('PR',
+    agentCall({
+      key: 'pr',
+      prompt: `\`\${inWorktree('pr', { notes: false })}
 
-RED (test-first): from the goal\${TICKET ? ' / ticket ' + TICKET : ''} and its acceptance criteria, write the tests BEFORE any implementation. Decide per behavior whether it needs a tryve E2E (tests/e2e/*.yaml) or a Jest unit test, and write them. Run them and CONFIRM THEY FAIL for the right reason — a test that already passes is not exercising the new behavior; fix it until it fails. Commit the failing tests.\`,
-    { label: 'red', phase: 'RED', ${at(agentRed)}
-      schema: ${SCHEMA({ red: { type: 'boolean' }, tests: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['red'])} },
-  )
-  if (!results.red || !results.red.red) throw new Error('RED failed: tests did not establish a failing baseline — ' + (results.red && results.red.summary || ''))
-  done.add('RED')
-  await checkpoint('RED')
-}`;
+Push the branch and open a PR with the GitHub CLI:
+git push -u origin \${BRANCH}
+gh pr create --base \${BASE || 'main'} --head \${BRANCH} --title "TODO title" --body "TODO summary\${TICKET ? '; refs ' + TICKET : ''}"
+If a PR for this branch already exists, return its URL instead of erroring.\``,
+      schema: SCHEMA({ prUrl: { type: 'string' } }, ['prUrl']),
+      label: 'pr', phase: 'PR',
+    })) },
 
-const verifyBlock = !withCycle ? '' : `
-phase('Verify')
-if (done.has('Verify')) {
-  log('Verify already complete (resumed)')
-} else {
-  results.verify = await agent(
-    \`\${inWorktree('verify')}
+  { title: 'TicketUpdate', enabledWhen: withTicket, build: () => emitPhase('TicketUpdate',
+    agentCall({
+      key: 'ticketUpdate',
+      prompt: `\`Update tracker ticket \${TICKET}. Use ToolSearch to load the tracker tools.
+Jira: getTransitionsForJiraIssue → transitionJiraIssue to the review state (match name case-insensitively; skip if none) → addCommentToJiraIssue with the PR link \${results.pr && results.pr.prUrl}.
+Linear: use the Linear MCP update/comment tools instead, ONLY if connected.\``,
+      schema: SCHEMA({ updated: { type: 'boolean' }, transition: { type: 'string' } }, ['updated']),
+      label: 'ticket-update', phase: 'TicketUpdate',
+    }),
+    { extraGuard: { cond: '!TICKET', msg: 'No ticket — nothing to update' } }) },
+];
 
-VERIFY (GREEN): run the full relevant test suite for the changes on \${BRANCH} vs \${BASE || 'the base branch'} (Jest unit + any tryve E2E from RED). EVERYTHING must pass. If any test fails, the implementation is incomplete — STOP and report which failed; do NOT weaken tests to pass.\`,
-    { label: 'verify', phase: 'Verify',
-      schema: ${SCHEMA({ green: { type: 'boolean' }, failing: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['green'])} },
-  )
-  if (!results.verify || !results.verify.green) throw new Error('Verify failed: not green — ' + (results.verify && (results.verify.failing || []).join(', ')))
-  done.add('Verify')
-  await checkpoint('Verify')
-}`;
+// Derive BOTH the order (titles) and the blocks from the ONE table. Work phases expand inline.
+const activeDescriptors = PHASES.filter((d) => d.enabledWhen);
+const expanded = []; // [{ title, src }]
+for (const d of activeDescriptors) {
+  const built = d.build();
+  if (Array.isArray(built)) expanded.push(...built);
+  else expanded.push({ title: d.title, src: built });
+}
+const phaseOrder = ['Setup', ...expanded.map((e) => e.title)];
+const metaPhases = phaseOrder.map((t) => `    { title: '${t}' },`).join('\n');
+const coreBlocks = expanded.map((e) => e.src).join('\n');
 
-const pathGapBlock = !withCycle ? '' : `
-phase('PathGap')
-if (done.has('PathGap')) {
-  log('PathGap already complete (resumed)')
-} else {
-  // Close test gaps for code paths the ACs never specified (decide-or-justify, hard-fail).
-  let closed = false, last = null
-  for (let round = 1; round <= 3 && !closed; round++) {
-    last = await agent(
-      \`\${inWorktree('pathgap')}
-
-PATH-GAP: the ACs do NOT cover every code path. Steps:
-1. Run Jest with BRANCH coverage; intersect with the CHANGED lines (git diff vs \${BASE || 'the base branch'}) to find uncovered branches introduced by this change.
-2. For EACH uncovered changed branch, do ONE: (a) add a unit/integration test that meaningfully exercises AND asserts it, or (b) if it is genuinely unreachable/defensive, record an explicit justification in implementation-notes/pathgap.html.
-3. Re-run coverage. There must be NO silent gaps — every uncovered changed branch is either tested or justified.
-Do NOT delete/alter source branches just to raise coverage. Commit new tests + notes.\`,
-      { label: \`pathgap:r\${round}\`, phase: 'PathGap',
-        schema: ${SCHEMA({ closed: { type: 'boolean' }, uncovered: { type: 'number' }, tested: { type: 'number' }, justified: { type: 'number' }, summary: { type: 'string' } }, ['closed'])} },
-    )
-    closed = last && last.closed
-  }
-  if (!closed) throw new Error('PathGap failed: uncovered changed-code branches remain after 3 rounds — ' + (last && last.summary || ''))
-  results.pathGap = last
-  done.add('PathGap')
-  await checkpoint('PathGap')
-}`;
-
-const reVerifyBlock = !withCycle ? '' : `
-phase('ReVerify')
-if (done.has('ReVerify')) {
-  log('ReVerify already complete (resumed)')
-} else {
-  results.reVerify = await agent(
-    \`\${inWorktree('reverify')}
-
-RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branch coverage for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. Everything green before must STILL be green and coverage must not have regressed. If a refactor broke anything, STOP and report; do NOT weaken tests.\`,
-    { label: 'reverify', phase: 'ReVerify',
-      schema: ${SCHEMA({ green: { type: 'boolean' }, regressions: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['green'])} },
-  )
-  if (!results.reVerify || !results.reVerify.green) throw new Error('ReVerify failed: regression after improve/simplify — ' + (results.reVerify && (results.reVerify.regressions || []).join(', ')))
-  done.add('ReVerify')
-  await checkpoint('ReVerify')
-}`;
-
-// Assemble the core (work + gates/cycle) in the right order.
-const coreBlocks = withCycle
-  ? [redBlock, workBlocks, verifyBlock, pathGapBlock, codeGateBlock, reVerifyBlock].join('\n')
-  : mergeGates
-    ? [workBlocks, reviewBlock].join('\n')
-    : [workBlocks, codeGateBlock, testGateBlock].join('\n');
-
-const src = `// AUTO-GENERATED by scaffold-workflow.cjs — DO NOT edit the boilerplate.
-// Edit ONLY the \`TODO:\` agent prompts in the work phases below.
-// Regenerate with the same flags to update boilerplate (use --force).
+const src = `// AUTO-GENERATED by scaffold-workflow.cjs — do NOT hand-edit.
+// Work-phase prompts come from --prompt/--prompts-file (data-in). To change a prompt OR the
+// structure, re-run the generator with --force. A leftover \\\`TODO:\\\` means a prompt wasn't
+// supplied — fill it by regenerating, not by editing this file.
 //
 // Conductor rules: pure JS only — no fs/git, no Date.now()/Math.random().
 // All side-effects happen inside agent() subagents.
+//
+// Resume semantics: phases are AT-LEAST-ONCE on resume. We checkpoint AFTER the
+// side-effect, so a crash between side-effect and checkpoint re-runs that phase.
+// Every phase MUST therefore be idempotent. phasesDone is trusted only after the
+// entry guard below validates it is a contiguous prefix of the phase order.
 
 export const meta = {
   name: '${name}',
@@ -383,6 +395,30 @@ const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : '
 const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
 const results = { ...prior }
+
+// --- Resume reachability guard: phasesDone MUST be a contiguous prefix ---
+// Canonical order is self-contained in meta.phases. A durable state that marks a
+// phase done while an earlier phase is not is unreachable (corrupt/forged) — reject
+// it loudly instead of silently skipping required setup work.
+;(() => {
+  const order = meta.phases.map((p) => p.title)
+  for (const title of done) {
+    if (!order.includes(title)) {
+      throw new Error(\`Unreachable resume: phasesDone has unknown phase '\${title}' (not in order: \${order.join(' → ')})\`)
+    }
+  }
+  // Walk the order; once we hit the first NOT-done phase, no later phase may be done.
+  let seenGap = false
+  for (const title of order) {
+    if (done.has(title)) {
+      if (seenGap) {
+        throw new Error(\`Unreachable resume: phase '\${title}' is done but an earlier required phase is not — phasesDone must be a contiguous prefix of [\${order.join(' → ')}], got [\${[...done].join(', ')}]\`)
+      }
+    } else {
+      seenGap = true
+    }
+  }
+})()
 
 // Per-worker instruction. \`slot\` makes the notes file UNIQUE so parallel / multiple agents
 // never clobber each other. For a parallel fan-out, pass a slot unique per item (e.g. \`phase-\${i}\`).
@@ -460,11 +496,7 @@ test -d "\${WORKTREE}" && echo OK\`,
   done.add('Setup')
   await checkpoint('Setup')
 }
-${briefBlock}
 ${coreBlocks}
-${docsGateBlock}
-${prBlock}
-${ticketUpdateBlock}
 
 return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
 `;
@@ -473,4 +505,8 @@ fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, src);
 console.log(`Generated ${out}`);
 console.log(`Phases: ${phaseOrder.join(' → ')}`);
-console.log(`Next: edit the TODO agent prompts in the work phases, then launch via the Workflow tool.`);
+if (pendingTodos > 0) {
+  console.log(`${pendingTodos} work phase(s) still hold a TODO prompt — regenerate with --prompt/--prompts-file (+ --force) to fill them from data. Do NOT hand-edit. Then launch.`);
+} else {
+  console.log(`Launch-ready: all work-phase prompts filled from data. Confirm the phase order above, then launch via the Workflow tool — no need to read the script.`);
+}
