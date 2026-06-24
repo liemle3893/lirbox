@@ -177,6 +177,11 @@ for (let i = ledger.length - 1; i >= 0; i--) { if (ledger[i] && ledger[i].kept) 
 })()
 
 const results = { config: CONFIG }
+// On resume the main session re-passes the measured baseline (metric/sha/evalSec) so the loop can
+// (a) re-derive the eval cap from the measured evalSec and (b) re-persist baseline at every
+// checkpoint — otherwise the first post-resume checkpoint would overwrite it with null and the
+// report would lose baseline→best. Symmetric with how best/experiments are re-passed.
+if (args && args.baseline && typeof args.baseline === 'object') results.baseline = args.baseline
 
 // Per-worker isolation instruction. \`slot\` makes the notes file UNIQUE so parallel/sequential
 // workers never clobber each other (vary by experiment index, never randomness). Pass
@@ -263,12 +268,15 @@ test -d "\${WORKTREE}" && echo OK\`,
 // On resume \`best\` is already set from args, so the baseline is measured only on a fresh run.
 let EVALCAP
 if (best != null && results.baseline) {
-  // (defensive — results.baseline is not carried in args; kept for symmetry with resume)
-  EVALCAP = deriveEvalCap(results.baseline.evalSec, BUDGETS.evalCapFactor)
+  // Resumed WITH the baseline re-passed in args: a pinned evalCapSec wins, else derive from the
+  // measured baseline.evalSec — never re-measure (that would change best).
+  EVALCAP = (typeof BUDGETS.evalCapSec === 'number' && BUDGETS.evalCapSec > 0)
+    ? BUDGETS.evalCapSec
+    : deriveEvalCap(results.baseline.evalSec, BUDGETS.evalCapFactor)
 } else if (best != null) {
-  // Resumed: best came from args but we still need a per-experiment eval cap. Prefer a pinned
-  // evalCapSec; otherwise re-measure the baseline below would change best, so derive from a
-  // pinned value or fall back to the floor.
+  // Resumed but the baseline was NOT re-passed (older ledger): best came from args but we still
+  // need a per-experiment eval cap. Prefer a pinned evalCapSec; otherwise fall back to the floor
+  // (re-measuring the baseline would change best, so we must not).
   EVALCAP = (typeof BUDGETS.evalCapSec === 'number' && BUDGETS.evalCapSec > 0)
     ? BUDGETS.evalCapSec
     : deriveEvalCap((args && args.evalSec) || 0, BUDGETS.evalCapFactor)
@@ -353,8 +361,13 @@ conductor decides keep-or-discard). Run in order, each step under its cap:
    Run it under the SAME \${EVALCAP}s timeout. Extract the scalar with parse rule
    \\\`\${METRIC.parse || 'lastnumber'}\\\` → report \\\`metric\\\` (finite number). Timeout/parse-fail ⇒
    omit metric (a discard).
-3. SURFACE LOCK: report \\\`diffFiles\\\` = \\\`git diff --name-only\\\` (the files this edit touched), so the
-   conductor can verify they are ALL within the surface \\\`\${SURFACE}\\\` — any file outside ⇒ discard.
+3. SURFACE LOCK: report \\\`diffFiles\\\` = EVERY path this edit touched, INCLUDING new untracked files
+   (\\\`git diff --name-only\\\` alone MISSES untracked files — an out-of-surface NEW file would slip the
+   lock). Use, from the worktree root:
+       git -c core.quotepath=false status --porcelain --untracked-files=all
+   and report the path from each line (the part after the 2-char status; for a rename \\\`R  old -> new\\\`
+   report the NEW path). The conductor verifies they are ALL within the surface \\\`\${SURFACE}\\\` — any
+   file outside (or an empty list) ⇒ discard.
 4. Report \\\`sec\\\` (eval wall-clock seconds) and, if known, \\\`tokens\\\` used this experiment.\`,
     { label: \`eval:\${g}\`, phase: 'Experiments',
       schema: { type: 'object', additionalProperties: false, required: ['gatePassed', 'diffFiles'],
@@ -384,9 +397,11 @@ conductor decides keep-or-discard). Run in order, each step under its cap:
     const committed = await agent(
       \`\${inWorktree(\`keep-\${g}\`, { notes: false })}
 
-KEEP experiment \${g}: the gate passed and the metric improved within the surface. Stage and commit
-ONLY the surface files on branch \${BRANCH}:
-    git add -- \${SURFACE}
+KEEP experiment \${g}: the gate passed and the metric improved, and the surface lock already
+confirmed EVERY changed path is within the surface \${SURFACE} — so staging all changes here stages
+only surface files (this avoids fragile pathspec globbing when the surface is a multi-glob list).
+Commit on branch \${BRANCH}:
+    git add -A     # safe: surface-lock already verified all changes ⊆ the surface
     git commit -m "opt(\${NAME}) g\${g}: \${change} [metric \${metric}]"
 Report the new commit \\\`sha\\\` (git rev-parse HEAD). Do not push; do not merge.\`,
       { label: \`keep:\${g}\`, phase: 'Experiments',
@@ -401,9 +416,13 @@ Report the new commit \\\`sha\\\` (git rev-parse HEAD). Do not push; do not merg
       \`\${inWorktree(\`revert-\${g}\`, { notes: false })}
 
 DISCARD experiment \${g} (\${!gatePassed ? 'gate failed/timed out' : !surfaceOk ? 'touched files outside the surface' : 'metric did not improve'}).
-Revert the surface to the last committed state so the worktree is clean:
-    git checkout -- \${SURFACE}
-    git clean -fd -- \${SURFACE}    # drop any new untracked files the edit added inside the surface
+Drop ALL uncommitted changes so the worktree is clean for the next experiment. Reset the WHOLE
+worktree, not just the surface — the candidate may have touched files OUTSIDE the surface (that is
+itself a discard reason), and a surface-only revert would leave those behind to pollute the next
+experiment or a later KEEP. Prior KEPT commits are already on \${BRANCH}, so this only drops the
+uncommitted candidate:
+    git reset --hard HEAD     # revert tracked edits (in AND outside the surface) to the last commit
+    git clean -fd             # drop ALL new untracked files the edit added anywhere
 Then confirm \\\`git status --porcelain\\\` is EMPTY. Report \\\`clean\\\` = whether the worktree is clean.\`,
       { label: \`revert:\${g}\`, phase: 'Experiments',
         schema: { type: 'object', additionalProperties: false, required: ['clean'], properties: { clean: { type: 'boolean' } } } },

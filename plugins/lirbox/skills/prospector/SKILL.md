@@ -186,11 +186,14 @@ Setup worktree phase, the baseline phase, the experiment loop with propose → b
 keep-or-discard → surface-lock → checkpoint, the stop-condition checks, and finalize):
 
 ```
-node <skill-dir>/scripts/scaffold-optimize.cjs --config .optimize/config/<name>.json
+node <skill-dir>/scripts/scaffold-optimize.cjs --name <name>
 ```
 
-This writes `.optimize/<name>.js`. Glance at the printed structure to confirm; to change it,
-re-run with `--force` — never hand-edit (that reintroduces drift).
+This writes `.optimize/<name>.js` (the slug drives state/branch/worktree paths and the resume
+key). The config is NOT baked in — it is passed to the loop at launch via Workflow `args.config`
+(step 3), so a `resume` re-passes it unchanged (the conductor cannot read the filesystem). Glance
+at the printed structure to confirm; to overwrite an existing script, re-run with `--force` —
+never hand-edit (that reintroduces drift).
 
 ### 3. Launch (fresh)
 
@@ -219,9 +222,14 @@ no idea is repeated:
 ```
 Workflow({ scriptPath: ".optimize/<name>.js",
            args: { config: <from config/<name>.json>,
-                   experiments: <from state.json>,
-                   best: <from state.json> } })
+                   experiments: <state.experiments>,
+                   best: <state.best>,
+                   baseline: <state.baseline> } })
 ```
+
+Pass `baseline` too: the conductor re-derives the eval cap from the measured `baseline.evalSec`
+and re-persists the baseline at every checkpoint, so resume keeps the baseline→best comparison
+in the report (omitting it makes the next checkpoint overwrite the persisted baseline with null).
 
 The loop re-reads the ledger, restores `best`, and continues numbering generations from where
 it stopped. All KEPT commits on `opt/<name>` are already on the branch.
@@ -262,13 +270,19 @@ headless inside a live session.
 - **The gate is the floor.** Nothing is kept unless the deterministic gate passes; the loop
   can never "win" by breaking correctness. A KEPT entry exists **iff** the gate passed AND the
   metric beat `best` by ≥ `minDelta`; everything else is DISCARDED.
-- **Surface lock.** After each experiment, `git diff --name-only` must be ⊆ `surface`. If the
-  agent touched the metric/gate/harness/config (anything outside the surface glob), **discard**
-  the experiment — this is the anti-metric-gaming fence. Globs must allow new matching files
-  so a legitimate new file inside the surface is permitted.
+- **Surface lock.** After each experiment, EVERY changed path — including new untracked files —
+  must be ⊆ `surface`. The eval worker lists them with `git status --porcelain
+  --untracked-files=all` (bare `git diff --name-only` would miss a new out-of-surface file and let
+  it slip the lock). If the agent touched the metric/gate/harness/config (anything outside the
+  surface glob), **discard** the experiment — this is the anti-metric-gaming fence. Globs must
+  allow new matching files so a legitimate new file inside the surface is permitted; an empty
+  change set also fails the lock.
 - **Non-destructive.** KEPT commits accumulate on `opt/<name>`; **never auto-merged**.
-  Revert-on-discard (`git checkout -- <surface>`) keeps the worktree clean — `git status` must
-  be clean after every DISCARDED experiment.
+  Revert-on-discard resets the WHOLE worktree to HEAD (`git reset --hard HEAD && git clean -fd`,
+  not a surface-scoped checkout — the candidate may have touched files outside the surface, which
+  is itself a discard reason, and those must not survive into the next experiment). Prior KEPT
+  commits are on the branch, so this only drops the uncommitted candidate; `git status` must be
+  clean after every DISCARDED experiment.
 - **Idempotent / at-least-once.** The checkpoint is written *after* the commit-or-revert, so a
   crash between them re-runs that experiment. Every experiment body must be idempotent; the
   revert makes a re-run safe.

@@ -114,13 +114,19 @@ After each experiment the conductor keeps the change **iff ALL THREE hold**, els
    - `max` → keep iff `metric - best >= minDelta`.
    - A non-finite metric (failed parse / timeout) **never** beats best.
    - `minDelta` is the noise guard: metric moves below it are ignored.
-3. **Surface lock holds** — every file in `git diff --name-only` is within the `surface` glob
-   (`surfaceAllows(diffFiles, surface)`).
+3. **Surface lock holds** — every changed path is within the `surface` glob
+   (`surfaceAllows(diffFiles, surface)`). The eval worker lists changed paths with
+   `git status --porcelain --untracked-files=all` (NOT `git diff --name-only`, which misses new
+   untracked files — an out-of-surface new file would otherwise slip the lock).
 
-KEEP → a worker stages **only** the surface files and commits on `opt/<name>`; the conductor
-advances `best` and resets the plateau counter. DISCARD → a worker reverts
-(`git checkout -- <surface>` + `git clean -fd -- <surface>`) so `git status` is clean for the next
-experiment, and the plateau counter increments. **A KEPT ledger entry exists iff all three held.**
+KEEP → a worker stages the change (`git add -A`, safe because the surface lock already verified
+every changed path is ⊆ the surface) and commits on `opt/<name>`; the conductor advances `best` and
+resets the plateau counter. DISCARD → a worker resets the WHOLE worktree to HEAD
+(`git reset --hard HEAD` + `git clean -fd`, NOT a surface-scoped checkout — the candidate may have
+touched files outside the surface, which is itself a discard reason, and those must not survive;
+prior KEPT commits are on the branch, so only the uncommitted candidate is dropped) so `git status`
+is clean for the next experiment, and the plateau counter increments. **A KEPT ledger entry exists
+iff all three held.**
 
 ### Surface lock (spec §4 — the anti-metric-gaming fence)
 The loop may only ever edit the declared `surface`. If the propose agent touched the
@@ -168,10 +174,14 @@ On (re)entry with an arg that matches an existing `.optimize/state/<name>.json`:
    Workflow({ scriptPath: ".optimize/<name>.js",
               args: { config: <config/<name>.json>,
                       experiments: <state.experiments>,
-                      best: <state.best> } })
+                      best: <state.best>,
+                      baseline: <state.baseline> } })
    ```
    The conductor:
-   - rebuilds `ledger` from `args.experiments` and restores `best` from `args.best`;
+   - rebuilds `ledger` from `args.experiments`, restores `best` from `args.best`, and restores the
+     measured `baseline` from `args.baseline` (so it re-derives the eval cap from `baseline.evalSec`
+     and re-persists `baseline` at every checkpoint — omitting it overwrites the saved baseline with
+     null and the report loses baseline→best);
    - reconstructs the plateau counter `sinceKept` by scanning back from the ledger tail;
    - **skips the Baseline phase** (best is already set) and continues numbering generations from
      `experiments.length + 1` — so **no idea is repeated** (the propose agent is fed the ledger

@@ -147,9 +147,11 @@ The baseline metric becomes `best` (experiment `0`); every later experiment is j
 ## 7. Surface lock (spec §4)
 
 `surface` is the **train.py analog**: a file or glob (`src/search/**`, or a comma/newline-separated
-list) that is the **ONLY** thing the loop may edit. After each experiment, `git diff --name-only`
-must be a subset of `surface`; any file outside ⇒ **discard** (the anti-metric-gaming fence — it
-stops the loop from editing the benchmark, the gate, the harness, or unrelated code).
+list) that is the **ONLY** thing the loop may edit. After each experiment, every changed path
+(tracked edits **and** new untracked files — the eval worker uses `git status --porcelain
+--untracked-files=all`, not bare `git diff --name-only`) must be a subset of `surface`; any file
+outside ⇒ **discard** (the anti-metric-gaming fence — it stops the loop from editing the benchmark,
+the gate, the harness, or unrelated code).
 
 When proposing `surface`:
 - Make it **tight enough** that the metric+gate genuinely fence the change (don't include the
