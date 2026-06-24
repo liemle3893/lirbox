@@ -39,7 +39,9 @@ If tracing a codebase, read the files to get this right.
 
 ### 2. Write the graph + detail
 Read `references/components.md` (Mermaid shape/edge syntax, classes, click wiring, the
-`STEPS` map). Copy `assets/template.html`, then:
+`STEPS` map). **Read the "Escaping labels" section closely** — code-derived labels with raw
+`( ) { } [ ] "`, `\n`, HTML entities, or non-ASCII edge text silently break Mermaid; the rules
+there are required, not optional. Copy `assets/template.html`, then:
 - Replace the graph between the `TEMPLATE-GRAPH` markers with the real `flowchart TD`.
 - Replace the `STEPS` object between the `TEMPLATE-STEPS` markers — one entry per node.
 - Fill the header/legend `{{PLACEHOLDER}}`s and set `DEFAULT_NODE`.
@@ -49,13 +51,18 @@ Read `references/components.md` (Mermaid shape/edge syntax, classes, click wirin
 Default output path: `./<slug>-flowchart.html`.
 
 ### 3. Verify before claiming done
+- **Run the validator — this is the gate, and it's runnable headless:**
+  `node <skill-dir>/assets/validate.mjs <output>.html` must print `PASS` / exit 0. It
+  deterministically catches the label-escaping bugs that otherwise break Mermaid's
+  parser/renderer in the browser (raw `( ) { } [ ] "`, literal `\n`, `&#NN;` entities,
+  non-ASCII edge labels). Fix every finding and re-run until clean — do NOT claim done while
+  it fails.
 - Both `TEMPLATE-GRAPH` and both `TEMPLATE-STEPS` markers removed; zero leftover `{{…}}`.
 - Every graph node id has a `click` line and a matching `STEPS` entry; `DEFAULT_NODE` is a
   real key. Exactly one `:::crit` node. One `<h1 class="title">`.
 - The Mermaid `<script>` still has `integrity` + `crossorigin`.
-- Open the file in a browser **with internet**: confirm the chart renders, nodes are
-  clickable, and the panel updates. (A Mermaid syntax error shows as raw text / a red
-  error box — fix the graph if so.)
+- Optional (needs internet): open in a browser to confirm nodes are clickable and the panel
+  updates. The validator already guarantees the Mermaid itself parses and renders.
 - Grounding: if traced from code, snippets/labels are real (read the files); if conceptual,
   faithful to what the user described — invent no steps or fake metrics.
 
