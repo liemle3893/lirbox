@@ -45,7 +45,13 @@ On `prospector <goal>`, a setup agent inspects the repo (package.json scripts, M
   "surface": "src/search/**",          // the train.py analog — the ONLY files the loop may edit
   "metric": { "cmd": "node bench/search.mjs", "parse": "p95=([0-9.]+)", "direction": "min" },
   "gate":   { "cmd": "npm test && npm run build" },   // MUST exit 0 or the candidate is discarded
-  "budgets":{ "perExperimentSec": 300, "total": { "experiments": 100 }, "plateauStop": 15, "minDelta": 0.5 },
+  "budgets": {
+    "evalCapSec": null,        // null → MEASURED at setup (~3× baseline gate+metric time); set a number to pin it
+    "agentCapSec": 600,        // bound the propose/edit step so a stuck agent can't stall the night
+    "total": { "experiments": 100 },  // OR { "wallclockMin": 480 } OR { "tokens": N } — first to hit stops the run
+    "plateauStop": 15,
+    "minDelta": 0.5            // ignore metric moves below this (noise guard)
+  },
   "baseline": "origin/main"
 }
 ```
@@ -53,7 +59,8 @@ On `prospector <goal>`, a setup agent inspects the repo (package.json scripts, M
 - `metric.parse` extracts a number from the command's stdout (regex capture group, or `json:<path>`, or `lastnumber`).
 - `direction`: `min` | `max`.
 - Auto-proposal examples: "reduce bundle size" → metric = built bytes (`min`), gate = build+tests; "raise coverage" → metric = coverage % (`max`), gate = tests green.
-- If no numeric metric is derivable, the skill **asks** rather than guessing (no silent fabrication).
+- **Decline if no defensible metric + gate.** The skill proceeds only when it can propose BOTH an automatable numeric metric AND a hard gate the metric cannot be gamed against (e.g. "fewer lines" needs a gate that fails on deleted behavior). If it can't find a defensible pair it **declines** (or asks) rather than inventing one — a loop optimizing a gameable metric behind a weak gate will exploit it.
+- **Setup measures the baseline once** (runs gate + metric): this confirms the metric command actually works and yields the eval time that derives the per-experiment cap (§3).
 - **Confirm once:** the skill presents the proposed config; the user approves/edits; this is the entire human-in-config step.
 
 ### §2 The loop & generation ledger
@@ -63,7 +70,7 @@ Sequential keep-or-discard on branch `opt/<name>` in worktree `.worktrees/opt-<n
 1. **Baseline:** run gate (must pass) + metric → `best`. If the baseline gate fails, stop (cannot optimize a broken base).
 2. **Each experiment `g`:**
    - **Propose:** an agent makes ONE focused edit to the surface, given the goal + the **ledger of past experiments** (what was tried, metric delta, kept/discarded) so it does not repeat ideas.
-   - **Eval (bounded):** run gate; fail → discard. Pass → run metric under the `perExperimentSec` wall-clock cap; timeout → discard.
+   - **Eval (bounded):** run gate; fail → discard. Pass → run metric. The propose step is bounded by `agentCapSec` and the eval by `evalCapSec` (§3); either timeout → discard.
    - **Keep-or-discard:** gate passed AND metric strictly better than `best` by ≥ `minDelta` → commit on the branch, advance `best`, record **KEPT**; else `git checkout -- <surface>` (revert) and record **DISCARDED**.
    - **Checkpoint:** append to the durable ledger.
 3. **Stop** on the first budget/condition hit (see §3).
@@ -87,11 +94,26 @@ The ledger merges autoresearch "generations" with conductor's durable state: it 
 
 ### §3 Budget & throughput control
 
-- **Per-experiment wall-clock cap** (`perExperimentSec`, autoresearch's 5 min) → predictable throughput (~`total/cap` experiments). Eval wrapped in a timeout; over-cap ⇒ discard.
-- **Total stop:** first of `{experiments: N, wallclockMin, tokens}`.
+The per-experiment cap is **derived, not fixed.** autoresearch's 5 min is welded to its single-GPU
+setup, where 5 min of training *is* both the experiment and the signal. Here an experiment's time is
+*agent propose/edit + eval*, and eval cost is wildly project-specific (10s test suite vs. 18-min
+test+bench), so a fixed cap either kills slow evals or wastes time on fast ones. Instead:
+
+- **Measure once at setup:** run gate + metric and record `evalSec` (this also proves the metric command works).
+- **Two clocks, each bounding a discard:**
+  - **`evalCapSec`** ≈ `factor × evalSec` (default factor ~3 — generous enough to measure a change that
+    legitimately got slower, tight enough to kill an infinite loop). Override to pin.
+  - **`agentCapSec`** — bounds the propose/edit step so a stuck agent can't stall the night.
+- **Throughput reported up front**, not assumed: `≈ nightBudget / (agentCapSec + evalCapSec)` → you
+  see "~N experiments tonight" *before* launching instead of hoping for 100.
+- **Total stop:** first of `{ experiments, wallclockMin, tokens }`.
 - **Plateau stop:** no KEPT in the last `plateauStop` experiments ⇒ stop (sequential, so plateau = stop, not widen).
-- **`minDelta`:** ignore metric changes below this (noise guard for non-deterministic benchmarks).
+- **`minDelta`:** ignore metric moves below this (noise guard for non-deterministic benchmarks).
 - Every experiment is bounded ⇒ the whole run is measurable.
+
+The tradeoff the derivation balances: a **shorter** cap = more, cheaper experiments but a noisier /
+under-powered metric (and a bias toward changes that are fast to eval); a **longer** cap = fewer,
+higher-signal experiments. That balance is per-project — which is why it's measured, not copied.
 
 ### §4 Isolation & safety
 
@@ -110,6 +132,36 @@ Per-run report (`.optimize/reports/<name>.md`): baseline → best (% improvement
 - **In-session (attended):** the skill drives the loop via the Workflow tool; you watch.
 - **Unattended (overnight):** the committed config + ledger let a `/schedule` routine or a standalone Agent SDK runner **resume the same loop** and run overnight; you review the branch + report in the morning.
 - v1 does **not** wire cron — the engine is schedule-*ready*. (Matches the Workflow caveat: it cannot run headless; unattended needs a `/schedule` routine or SDK runner.)
+
+## Use cases & anti-patterns
+
+**Fit test:** an objective scalar metric that is automatable and not-too-expensive, a hard correctness
+gate the metric cannot be gamed against, and a bounded surface where many small changes plausibly move
+the metric.
+
+**Good fits:**
+
+| Use case | metric (direction) | gate | surface |
+|---|---|---|---|
+| Hot-path performance (canonical) | bench p95 / ops-sec (min/max) | tests green | the hot module |
+| Bundle / binary size | built artifact bytes (min) | build + tests + smoke E2E | source + build config |
+| Memory / allocations | peak RSS from a profile harness (min) | tests | the allocating module |
+| Test-suite speedup | suite wall-clock (min) | same tests pass + **coverage floor** | test config / parallelism |
+| Eval-score quality (the true autoresearch analog) | accuracy / recall@k / eval pass-rate (max) | smoke tests | heuristic / model / chunking / ranking code |
+| LLM pipeline cost | $ or tokens per request (min) | quality-eval ≥ threshold | prompt / pipeline code |
+| Compiler / flag / config tuning | runtime under config (min) | correctness tests | build flags / config |
+
+Strongest fits: **performance, size, eval-score** — cheap, trustworthy numbers, gameable only if the gate is weak.
+
+**Anti-patterns (the auto-propose step should decline these):**
+- **No objective metric** (UI "niceness", API "ergonomics") — nothing to hill-climb; use conductor or a human.
+- **Gameable metric + weak gate** ("reduce lines", "raise coverage %" behind a thin gate) — the loop deletes
+  needed code or adds assertion-free tests. Prospector is only as safe as its gate.
+- **One-shot change** (a single feature) — nothing to climb; that's conductor.
+- **Eval costs hours each** — throughput too low to converge overnight.
+
+Unifying line: prospector earns its keep when you have *a dial it can read automatically and a fence it
+can't climb over*. The auto-propose step (§1) uses exactly this to say no to bad-fit goals.
 
 ## Components / files
 
@@ -157,7 +209,7 @@ Run-state namespace (mirrors conductor's `.workflows/`):
 1. **Config derivation:** in a repo exposing `npm test` and a bench script, `prospector "<goal>"` emits a config whose `metric.cmd` runs and `metric.parse` extracts a number, `metric.direction` is set, and `gate.cmd` runs; the run halts for user confirmation before looping.
 2. **Keep rule:** a KEPT ledger entry exists **iff** that experiment's gate passed and its metric beat `best` by ≥ `minDelta`; every other experiment is DISCARDED and leaves the worktree clean (`git status` clean after revert).
 3. **Monotonic best:** `best.metric` is non-worsening across the run (≤ baseline for `min`, ≥ for `max`); checking out `opt/<name>` reproduces `best.metric` within `minDelta`.
-4. **Per-experiment bound:** no experiment exceeds `perExperimentSec` (timeout ⇒ discard, recorded).
+4. **Per-experiment bound:** the propose step never exceeds `agentCapSec` and the eval never exceeds `evalCapSec` (derived from the setup baseline); either timeout ⇒ discard, recorded.
 5. **Surface lock:** an experiment that edits a file outside `surface` is discarded (verify by injecting an out-of-surface edit).
 6. **Stop conditions:** the run stops at the first of {N experiments, wall-clock, tokens, plateau}; `status` reflects why.
 7. **Resume:** interrupting mid-run and re-invoking `prospector <name>` continues from the ledger with all KEPT commits intact and no repeated experiments.
