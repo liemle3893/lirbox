@@ -1,7 +1,7 @@
 ---
 name: prospector
 argument-hint: "[ <goal to start> | <name to resume> | list ]"
-description: "This skill should be used to hill-climb a numeric metric over one declared code surface behind a hard correctness gate — a sequential keep-or-discard optimization loop (autoresearch-style 'generations') that auto-proposes a metric+gate from the goal, confirms once, then runs unattended/overnight, keeping a change only when it strictly improves the metric AND passes the gate, reverting otherwise, on an isolated branch that is never auto-merged. WHEN to use: there is an objective automatable scalar metric, a hard gate the metric cannot be gamed against, and a bounded surface where many small changes plausibly move the metric (hot-path perf, bundle/binary size, memory, test-suite speed, eval-score quality, LLM cost, config tuning); the run is long, interruptible, or overnight-capable. WHEN NOT: no objective metric (UI niceness, API ergonomics); a gameable metric behind a weak gate (reduce-lines, raise-coverage with a thin gate); a one-shot single change (use conductor); or each eval costs hours (throughput too low to converge). Built on conductor's durable, resumable, worktree-isolated Workflow backbone."
+description: "Sequential keep-or-discard optimization loop (autoresearch-style 'generations'): auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE declared code surface — keeping a change only when it strictly beats the metric AND passes the gate, reverting otherwise — on an isolated branch that is never auto-merged. Runs unattended/overnight on conductor's durable, resumable, worktree-isolated backbone. USE WHEN there is an objective automatable scalar (hot-path perf, bundle/binary size, memory, test-suite speed, eval-score, LLM cost, config tuning), a gate the metric cannot be gamed against, and a bounded surface where many small edits plausibly move the number. NOT WHEN the metric is subjective (UI/ergonomics), gameable behind a weak gate (reduce-lines, raise-coverage), one-shot (use conductor), or each eval costs hours."
 allowed-tools:
   - Read
   - Write
@@ -13,303 +13,191 @@ allowed-tools:
 
 $ARGUMENTS
 
-# Prospector
+<arguments>
+`$ARGUMENTS` (top of file) is ONE free-text field — no flags, auto-detected three ways:
 
-## Purpose
+1. **empty / `list`** → list mode: `node <skill-dir>/scripts/list-optimizations.cjs` (`--all` for
+   finished). Launch nothing.
+2. **matches `.optimize/state/<arg>.json`** → resume that run from its ledger.
+3. **anything else** → new goal: derive a kebab `<name>`, tell the user, auto-propose a config
+   (step 1b), and — only if not declined — start fresh.
 
-`autoresearch` proved a pattern — one mutable file, one normalized metric, a fixed
-per-run wall-clock, cumulative "generations", and a human who reviews in the morning —
-but welds it all to ML training. `conductor` already gives the durable, resumable,
-worktree-isolated, Workflow-driven backbone, but for a *fixed sequence of distinct
-phases*, not an optimization loop. **Prospector = conductor's durability + autoresearch's
-metric-driven keep-or-discard**, generalized: it takes a goal, **auto-proposes a success
-metric + a hard gate** (you confirm once), then runs a **sequential keep-or-discard
-hill-climbing loop** over one declared mutable surface — keeping a change only when it
-strictly improves the metric *and* passes the gate, reverting otherwise — until a budget
-is exhausted. Every experiment is wall-clock-bounded, so throughput is predictable and the
-run is fully measurable. Improvements accumulate on an isolated branch; nothing is
-auto-merged.
-
-**Distinction from conductor:** conductor runs *one* path through distinct phases (a linear
-FSM); prospector hill-climbs *one mutable surface* against a metric (repeat-until-budget
-with keep/revert). Different control structure → standalone skill, shared infrastructure.
-
-## When to use & anti-patterns
-
-**Fit test:** an objective scalar metric that is automatable and not-too-expensive, a hard
-correctness gate the metric cannot be gamed against, and a bounded surface where many small
-changes plausibly move the metric. Prospector earns its keep when you have *a dial it can
-read automatically and a fence it can't climb over*.
-
-**Good fits:**
-
-| Use case | metric (direction) | gate | surface |
-|---|---|---|---|
-| Hot-path performance (canonical) | bench p95 / ops-sec (min/max) | tests green | the hot module |
-| Bundle / binary size | built artifact bytes (min) | build + tests + smoke E2E | source + build config |
-| Memory / allocations | peak RSS from a profile harness (min) | tests | the allocating module |
-| Test-suite speedup | suite wall-clock (min) | same tests pass + **coverage floor** | test config / parallelism |
-| Eval-score quality (the true autoresearch analog) | accuracy / recall@k / pass-rate (max) | smoke tests | heuristic / model / chunking / ranking code |
-| LLM pipeline cost | $ or tokens per request (min) | quality-eval ≥ threshold | prompt / pipeline code |
-| Compiler / flag / config tuning | runtime under config (min) | correctness tests | build flags / config |
-
-Strongest fits — **performance, size, eval-score**: cheap, trustworthy numbers, gameable
-only if the gate is weak.
-
-**Anti-patterns (the auto-propose step in §1b should DECLINE these):**
-
-- **No objective metric** (UI "niceness", API "ergonomics") — nothing to hill-climb; use
-  conductor or a human.
-- **Gameable metric + weak gate** ("reduce lines", "raise coverage %" behind a thin gate) —
-  the loop will delete needed code or add assertion-free tests. Prospector is only as safe
-  as its gate.
-- **One-shot change** (a single feature) — nothing to climb; that's conductor.
-- **Eval costs hours each** — throughput too low to converge overnight.
-
-The auto-propose step (§1b) uses exactly the fit test to say **no** to bad-fit goals rather
-than inventing a gameable metric.
-
-## Arguments & the `.optimize/` namespace
-
-`$ARGUMENTS` (placed at the top of this file) is a SINGLE free-text field. Resolve it three
-ways — no separators, no flags (the conductor "one arg, auto-detect" model):
-
-1. **empty or `list`** → **list mode**: run
-   `node <skill-dir>/scripts/list-optimizations.cjs` (add `--all` to include finished runs),
-   show the table, launch nothing.
-2. **matches an existing `.optimize/state/<arg>.json`** → **resume** that run from its ledger.
-3. **anything else** → a **new goal**: derive a short kebab `<name>` slug, tell the user the
-   slug, propose a metric+gate config (§1b), and — only if not declined — start fresh.
-
-`<name>` (matched or derived) drives everything and is the resume key:
+`<name>` drives everything and is the resume key. Namespace (mirrors conductor's `.workflows/`):
 
 ```
 .optimize/
-  config/<name>.json   # the approved run config (metric, gate, surface, budgets) — §1b
-  state/<name>.json    # durable ledger + run state (generations, baseline, best) — §2
-  <name>.js            # generated loop conductor (Workflow script) — §2
-  reports/<name>.md    # run report (baseline→best, runs/kept, duration, tokens) — §5
+  config/<name>.json   # approved run config: metric, gate, surface, budgets   (step 1b)
+  state/<name>.json    # durable ledger + run state: generations, baseline, best (schema: loop-runtime.md)
+  <name>.js            # generated loop conductor (Workflow script)             (step 2)
+  reports/<name>.md    # run report: baseline→best, runs/kept, duration, tokens (step 5)
 ```
 
-This mirrors conductor's `.workflows/` namespace. The goal lives in `config/<name>.json` and
-the ledger in `state/<name>.json` — both in the **main repo**, so they survive worktree
-removal and resume needs only the name. Code edits happen on branch `opt/<name>` inside
-worktree `.worktrees/opt-<name>`; **main is never touched** until the human merges.
+`config/` and `state/` live in the **main repo** (survive worktree removal; resume needs only the
+name). Code edits happen on branch `opt/<name>` in worktree `.worktrees/opt-<name>`; **main is never
+touched** until the human merges.
 
-Examples:
+Examples: `make the /search endpoint faster` → proposes config, slug `search-speed`, confirm, run ·
+`search-speed` → resume · `list` → show in-progress.
+</arguments>
 
-```
-make the /search endpoint faster     → proposes a config; slug e.g. search-speed; confirm; runs
-search-speed                         → resumes that run from its ledger
-list                                 → shows in-progress optimizations
-```
+<execution-model>
+Prospector hill-climbs **one mutable surface** against a metric (repeat-until-budget, keep/revert) —
+contrast conductor, which runs one path through distinct phases (a linear FSM): shared
+infrastructure, different control structure. Read `references/loop-runtime.md` before
+authoring/debugging the loop. A Workflow has two layers — confusing them is the #1 bug source:
 
-## Core model (read `references/loop-runtime.md` before authoring)
+- **Conductor** = the loop `.js` — pure JS, NO filesystem/git/`Date.now()`/`Math.random()`. It only
+  computes the next experiment and makes the keep-or-discard *decision* from values workers return.
+- **Workers** = the subagents it spawns — full tools. They do every side-effect: create the
+  worktree, run gate + metric, edit the surface, commit/revert, write the ledger.
 
-A Workflow has two layers; confusing them is the #1 source of bugs:
+So the durable ledger is written by a **checkpoint worker** after every experiment, never by the
+conductor.
+</execution-model>
 
-- **Conductor** = the loop `.js` script. Restricted: pure JS, **no filesystem**, no git, no
-  `Date.now()` / `Math.random()`. It only computes the next experiment and dispatches.
-- **Workers** = the subagents it spawns. Full tools (`Read`/`Write`/`Edit`/`Bash`). They do
-  all side-effects: create the worktree, run the gate + metric, edit the surface, commit or
-  revert, and write the ledger.
+<procedure>
 
-Therefore the durable ledger is written by a **checkpoint worker** after every experiment,
-never by the conductor.
-
-## Procedure
-
-### 1. Resolve `$ARGUMENTS` (list / resume / new)
-
-- **empty or `list`** → run `node <skill-dir>/scripts/list-optimizations.cjs` (`--all` for
-  finished), show the table, stop. Done.
-- otherwise treat the arg as a candidate `<name>` and read its state (this skill runs in the
-  main session, so read directly): `Read .optimize/state/<name>.json`.
-  - **file exists, `status: "running"`/`"stopped"`/`"failed"`** → **resume** (step 4). The
-    goal and config come from `config/<name>.json`. Do NOT regenerate the loop script if it
-    already exists unchanged.
-  - **no file (arg is a goal)** → **fresh run**: derive a kebab `<name>` slug, tell the user
-    the slug, run **§1b**; if not declined, go to step 2 → step 3.
-  - **file exists, `status: "complete"`/`"stopped"`** → tell the user it's done (offer the
-    report via `node <skill-dir>/scripts/optimize-report.cjs <name>`); start fresh only if
+<step n="1" name="Resolve $ARGUMENTS">
+- **empty / `list`** → run `list-optimizations.cjs` (`--all` for finished), show the table, stop.
+- else read `.optimize/state/<arg>.json` directly (the skill runs in the main session):
+  - `running` / `stopped` / `failed` → **resume** (step 4); goal + config come from `config/`. Don't
+    regenerate the loop script if it already exists unchanged.
+  - no file → **new goal**: derive slug, tell the user, run step 1b; if not declined → step 2 → 3.
+  - `complete` → tell the user it's done (offer `optimize-report.cjs <name>`); start fresh only if
     they meant a new run.
+</step>
 
-### 1b. Auto-propose metric + gate, confirm once, measure baseline (new goals only)
+<step n="1b" name="Auto-propose metric + gate, confirm once, measure baseline" note="new goals only — the heart of the skill">
+Full derivation rules, the DECLINE rule, surface-lock guidance, and the ready-to-use setup-agent
+prompt template are in `references/metric-gate.md`. The flow:
 
-This is the heart of the skill and the entire human-in-config step. Read
-`references/metric-gate.md` for how to derive each field per goal type and the surface-lock
-rule.
-
-1. **Inspect the repo** — `package.json` scripts, Makefile, test dirs, CI config, README,
-   any `bench/` — to find an automatable numeric metric and a hard gate.
-2. **Propose a config** to `.optimize/config/<name>.json`:
-
+1. **Inspect the repo** (`package.json` scripts, Makefile, `bench/`, test dirs, CI, README) for an
+   automatable numeric metric and a hard gate. Use the setup-agent prompt from `metric-gate.md` §8.
+2. **Propose** `.optimize/config/<name>.json`:
    ```jsonc
    {
      "goal": "make the /search endpoint faster",
-     "surface": "src/search/**",           // the train.py analog — the ONLY files the loop may edit
+     "surface": "src/search/**",                         // the ONLY files the loop may edit
      "metric": { "cmd": "node bench/search.mjs", "parse": "p95=([0-9.]+)", "direction": "min" },
-     "gate":   { "cmd": "npm test && npm run build" },   // MUST exit 0 or the candidate is discarded
+     "gate":   { "cmd": "npm test && npm run build" },    // MUST exit 0 or the candidate is discarded
      "budgets": {
-       "evalCapSec": null,        // null → MEASURED at setup (~3× baseline gate+metric time)
-       "agentCapSec": 600,        // bound the propose/edit step so a stuck agent can't stall the night
-       "total": { "experiments": 100 },  // OR { "wallclockMin": 480 } OR { "tokens": N }
+       "evalCapSec": null,                // null → MEASURED at setup (~3× baseline gate+metric time)
+       "agentCapSec": 600,                // bound the propose/edit step so a stuck agent can't stall
+       "total": { "experiments": 100 },   // OR { "wallclockMin": 480 } OR { "tokens": N } — first wins
        "plateauStop": 15,
-       "minDelta": 0.5            // ignore metric moves below this (noise guard)
+       "minDelta": 0.5                    // ignore sub-noise metric moves
      },
      "baseline": "origin/main"
    }
    ```
+   `parse`: regex capture group, `json:<path>`, or `lastnumber`. `direction`: `min` | `max`.
+3. **DECLINE if no defensible metric + gate.** The fit test: *a dial it can read automatically and a
+   fence it can't climb over.* Proceed only with BOTH an automatable number AND a gate the metric
+   can't be gamed against (e.g. "fewer lines" needs a gate that fails on deleted behavior); else
+   decline (or ask one `AskUserQuestion`) naming which half is missing (full bad-fit list in
+   `metric-gate.md`). This is the anti-gaming guard.
+4. **Measure the baseline ONCE** — gate (must pass; a broken base can't be optimized) + metric. This
+   proves `metric.cmd` runs and `metric.parse` yields a number, and records `evalSec` →
+   `evalCapSec` (~3× `evalSec`) when left `null`.
+5. **Report throughput up front**: `≈ nightBudget / (agentCapSec + evalCapSec)` → "~N experiments
+   tonight" *before* launching.
+6. **Confirm once** via `AskUserQuestion`: config + baseline metric + throughput. The only human gate.
+</step>
 
-   - `metric.parse` extracts a number from stdout: a regex capture group, `json:<path>`, or
-     `lastnumber`. `direction` is `min` | `max`.
-   - **DECLINE if no defensible metric + gate.** Proceed only when you can propose BOTH an
-     automatable numeric metric AND a hard gate the metric cannot be gamed against (e.g.
-     "fewer lines" needs a gate that fails on deleted behavior). If you cannot find a
-     defensible pair, **decline** (or ask one `AskUserQuestion`) rather than inventing one — a
-     loop optimizing a gameable metric behind a weak gate will exploit it. This is the
-     anti-pattern guard.
-3. **Measure the baseline ONCE** — run the gate (must pass; a broken base cannot be
-   optimized) + the metric. This confirms `metric.cmd` actually runs and `metric.parse`
-   yields a number, and records `evalSec`, which derives `evalCapSec` (~3× `evalSec`) when it
-   was left `null`.
-4. **Report throughput up front:** `≈ nightBudget / (agentCapSec + evalCapSec)` → tell the
-   user "~N experiments tonight" *before* launching.
-5. **Confirm once** via `AskUserQuestion`: present the proposed config + baseline metric +
-   estimated throughput; the user approves or edits. This is the only human gate.
-
-### 2. Generate the loop conductor (pass config as data; do NOT hand-edit)
-
-Generate the loop conductor deterministically from the approved config — never author it by
-hand. The generator emits all mechanical boilerplate (NAME/STATE/BRANCH/SURFACE consts, the
-Setup worktree phase, the baseline phase, the experiment loop with propose → bounded eval →
-keep-or-discard → surface-lock → checkpoint, the stop-condition checks, and finalize):
-
+<step n="2" name="Generate the loop conductor (config as data — never hand-edit)">
 ```
-node <skill-dir>/scripts/scaffold-optimize.cjs --name <name>
+node <skill-dir>/scripts/scaffold-optimize.cjs --name <name>      # --force to overwrite; --out to redirect
 ```
+Writes `.optimize/<name>.js` (slug drives state/branch/worktree paths). The config is **not** baked
+in — it is passed at launch via `args.config` (step 3), so resume re-passes it unchanged (the
+conductor can't read the filesystem). Glance at the printed structure; to change structure or fill a
+prompt, re-run with `--force` — never hand-edit (reintroduces drift).
+</step>
 
-This writes `.optimize/<name>.js` (the slug drives state/branch/worktree paths and the resume
-key). The config is NOT baked in — it is passed to the loop at launch via Workflow `args.config`
-(step 3), so a `resume` re-passes it unchanged (the conductor cannot read the filesystem). Glance
-at the printed structure to confirm; to overwrite an existing script, re-run with `--force` —
-never hand-edit (that reintroduces drift).
-
-### 3. Launch (fresh)
-
-Stamp the ledger at launch so duration is true wall-clock (the checkpoints preserve
-`startedAt`):
-
+<step n="3" name="Launch (fresh)">
+Stamp the ledger so duration is true wall-clock (checkpoints preserve `startedAt`):
 ```
 node -e "const fs=require('fs');fs.mkdirSync('.optimize/state',{recursive:true});const f='.optimize/state/<name>.json';if(!fs.existsSync(f))fs.writeFileSync(f,JSON.stringify({name:'<name>',status:'running',startedAt:new Date().toISOString()},null,2))"
 ```
-
 Then launch with the config as args:
-
 ```
 Workflow({ scriptPath: ".optimize/<name>.js", args: { config: <config JSON> } })
 ```
+The conductor reads surface/metric/gate/budgets from `args` and runs baseline → experiment loop →
+stop. Each experiment's checkpoint worker appends to the ledger.
+</step>
 
-The conductor reads the config (surface, metric, gate, budgets) from `args` and runs the
-loop: baseline → experiment loop → stop. Each experiment's checkpoint worker appends to the
-ledger (preserving `startedAt`).
-
-### 4. Launch (resume)
-
-Pass the persisted ledger so the conductor continues from `best` and skips done experiments —
-no idea is repeated:
-
+<step n="4" name="Launch (resume)">
+Pass the persisted ledger so the conductor continues from `best` and repeats no idea:
 ```
 Workflow({ scriptPath: ".optimize/<name>.js",
-           args: { config: <from config/<name>.json>,
-                   experiments: <state.experiments>,
-                   best: <state.best>,
-                   baseline: <state.baseline> } })
+           args: { config: <config/<name>.json>, experiments: <state.experiments>,
+                   best: <state.best>, baseline: <state.baseline> } })
 ```
+**Pass `baseline` too** — the conductor re-derives the eval cap from `baseline.evalSec` and
+re-persists it each checkpoint; omitting it overwrites the saved baseline with null and the report
+loses baseline→best. The loop skips Baseline, restores `best`, and numbers generations from where it
+stopped. KEPT commits are already on `opt/<name>`.
+</step>
 
-Pass `baseline` too: the conductor re-derives the eval cap from the measured `baseline.evalSec`
-and re-persists the baseline at every checkpoint, so resume keeps the baseline→best comparison
-in the report (omitting it makes the next checkpoint overwrite the persisted baseline with null).
-
-The loop re-reads the ledger, restores `best`, and continues numbering generations from where
-it stopped. All KEPT commits on `opt/<name>` are already on the branch.
-
-### 5. Finalize, report, and the overnight-trigger note
-
-When the Workflow returns, stamp `status` + `finishedAt` (the conductor cannot — the main
-session does it). Pick the status from why it stopped: `complete` (budget reached cleanly),
-`stopped` (plateau / kill-switch), or `failed` (the Workflow threw, e.g. the baseline gate
-failed). The last checkpoint's ledger is preserved, so a later `resume` continues correctly.
-
+<step n="5" name="Finalize, report, overnight note">
+When the Workflow returns, stamp `status` + `finishedAt` (the conductor can't — the main session
+does). Status by why it stopped: `complete` (budget reached), `stopped` (plateau/kill-switch), or
+`failed` (Workflow threw, e.g. baseline gate failed). Last checkpoint's ledger is preserved → resume
+continues correctly.
 ```
 node -e "const f='.optimize/state/<name>.json';const s=JSON.parse(require('fs').readFileSync(f,'utf8'));s.status='complete';s.finishedAt=new Date().toISOString();require('fs').writeFileSync(f,JSON.stringify(s,null,2))"
-```
-
-Then generate the run report (baseline → best % improvement, experiments run/kept, plateau,
-duration, tokens, est cost):
-
-```
 node <skill-dir>/scripts/optimize-report.cjs <name>
 ```
+Report: the summary (`.optimize/reports/<name>.md`), branch `opt/<name>` + worktree
+`.worktrees/opt-<name>` holding the KEPT commits, and `git diff <baseline>..opt/<name>` as the review
+artifact. **Do NOT auto-merge or auto-remove the worktree** — the human reviews and merges.
 
-Report to the user: the report summary (written to `.optimize/reports/<name>.md`), the
-**branch** (`opt/<name>`) + **worktree** (`.worktrees/opt-<name>`) holding the accumulated
-KEPT commits, and `git diff <baseline>..opt/<name>` as the review artifact. **Do NOT
-auto-merge or auto-remove the worktree** — the human reviews and merges (non-destructive
-default).
+**Overnight (schedule-ready, not scheduled in v1):** the committed config + durable ledger let a
+`/schedule` routine or a standalone Agent SDK runner resume the loop (step 4) overnight; you review
+the branch + report in the morning. v1 does not wire cron — the Workflow tool can't run headless in a
+live session.
+</step>
 
-**Overnight trigger (schedule-ready, not scheduled in v1).** In-session the skill drives the
-loop via the Workflow tool and you watch. For unattended overnight runs, the committed config
-+ durable ledger let a `/schedule` routine or a standalone Agent SDK runner **resume the same
-loop** (step 4) and run overnight; you review the branch + report in the morning. v1 does NOT
-wire cron — the engine is schedule-*ready*, matching the Workflow caveat that it cannot run
-headless inside a live session.
+</procedure>
 
-## Gotchas
+<gotchas>
+Full rules in `references/loop-runtime.md` (keep/discard §4, surface lock §4, two-clock §4, resume
+§5, common mistakes §6).
 
-- **The gate is the floor.** Nothing is kept unless the deterministic gate passes; the loop
-  can never "win" by breaking correctness. A KEPT entry exists **iff** the gate passed AND the
-  metric beat `best` by ≥ `minDelta`; everything else is DISCARDED.
-- **Surface lock.** After each experiment, EVERY changed path — including new untracked files —
-  must be ⊆ `surface`. The eval worker lists them with `git status --porcelain
-  --untracked-files=all` (bare `git diff --name-only` would miss a new out-of-surface file and let
-  it slip the lock). If the agent touched the metric/gate/harness/config (anything outside the
-  surface glob), **discard** the experiment — this is the anti-metric-gaming fence. Globs must
-  allow new matching files so a legitimate new file inside the surface is permitted; an empty
-  change set also fails the lock.
-- **Non-destructive.** KEPT commits accumulate on `opt/<name>`; **never auto-merged**.
-  Revert-on-discard resets the WHOLE worktree to HEAD (`git reset --hard HEAD && git clean -fd`,
-  not a surface-scoped checkout — the candidate may have touched files outside the surface, which
-  is itself a discard reason, and those must not survive into the next experiment). Prior KEPT
-  commits are on the branch, so this only drops the uncommitted candidate; `git status` must be
-  clean after every DISCARDED experiment.
-- **Idempotent / at-least-once.** The checkpoint is written *after* the commit-or-revert, so a
-  crash between them re-runs that experiment. Every experiment body must be idempotent; the
-  revert makes a re-run safe.
-- **Every experiment is bounded.** The propose step is capped by `agentCapSec` and the eval by
-  `evalCapSec` (derived from the setup baseline); either timeout ⇒ discard, recorded. Because
-  every experiment is bounded, the whole run is measurable.
-- **Plateau = stop, not widen.** Sequential keep-or-discard: no KEPT in the last `plateauStop`
-  experiments ⇒ stop. The total stop is the first of `{ experiments, wallclockMin, tokens }`.
-- **The conductor cannot write files, timestamps, or randomness** — push all of that into
-  workers; vary worker labels by experiment index, not random IDs.
-- **Durable ≠ unattended.** The Workflow tool runs inside a live session and cannot be
-  triggered by cron or run headless. Overnight needs a `/schedule` routine or an SDK runner
-  that resumes the loop (step 4); v1 ships schedule-ready, not scheduled.
+- **The gate is the floor.** A KEPT entry exists **iff** the gate passed AND the metric beat `best`
+  by ≥ `minDelta` AND the surface lock held; everything else is DISCARDED. The loop can never win by
+  breaking correctness.
+- **Surface lock.** Every changed path — including new untracked files (`git status --porcelain
+  --untracked-files=all`, not `git diff --name-only`) — must be ⊆ `surface`, else discard. An empty
+  diff also fails. This is the anti-metric-gaming fence: it stops the loop editing the benchmark/gate.
+- **Non-destructive revert.** DISCARD resets the WHOLE worktree (`git reset --hard HEAD && git clean
+  -fd`, not a surface-scoped checkout — an out-of-surface edit must not survive). Prior KEPT commits
+  are on the branch, so only the uncommitted candidate drops; `git status` is clean after every
+  discard. The branch is **never auto-merged**.
+- **Idempotent / at-least-once.** The checkpoint writes *after* commit-or-revert, so a crash between
+  them re-runs that experiment; the revert makes a re-run safe.
+- **Every experiment is bounded** — propose by `agentCapSec`, eval by the derived `evalCapSec`;
+  either timeout ⇒ discard. That is what makes the run measurable.
+- **Plateau = stop, not widen.** No KEPT in the last `plateauStop` experiments ⇒ stop. Total stop is
+  the first of `{ experiments, wallclockMin, tokens }`.
+- **Conductor can't write files/timestamps/randomness** — push all into workers; vary worker labels
+  by experiment index, never `Math.random()`.
+- **Durable ≠ unattended** — see the overnight note (step 5).
+</gotchas>
 
-## Bundled resources
-
-- `scripts/scaffold-optimize.cjs` — **generates** the loop conductor from the approved config
-  (SoT for all loop boilerplate: baseline → experiment loop → keep/discard → surface-lock →
-  checkpoint → stop). Use this instead of hand-authoring. Step 2.
-- `scripts/optimize-report.cjs` — baseline→best (% improvement), runs/kept, plateau, duration,
-  tokens, est cost for one run, written to `.optimize/reports/<name>.md`. Step 5.
-- `scripts/list-optimizations.cjs` — list runs from `.optimize/state/` (in-progress by
+<resources>
+- `scripts/scaffold-optimize.cjs` — **generates** the loop conductor from the approved config (SoT
+  for all loop boilerplate: baseline → experiment loop → keep/discard → surface-lock → checkpoint →
+  stop). Use instead of hand-authoring. Step 2.
+- `scripts/optimize-report.cjs <name>` — baseline→best % improvement, runs/kept, plateau, duration,
+  tokens, est cost → `.optimize/reports/<name>.md`. Step 5.
+- `scripts/list-optimizations.cjs [--all]` — list runs from `.optimize/state/` (in-progress by
   default; `--all` for finished). List mode (step 1).
-- `scripts/test-optimize.cjs` — regression net for the generator: emits a representative
-  matrix of configs, `node --check`s each emitted loop, and asserts the loop structure matches
-  the config. Run after any change to `scaffold-optimize.cjs`.
-- `references/loop-runtime.md` — the two-layer conductor/worker constraints recap, the ledger
-  schema, the resume protocol, and the keep/discard rules. Load before authoring.
-- `references/metric-gate.md` — how the auto-propose step (§1b) derives metric / parse /
-  direction / gate per goal type, and the surface-lock rule. Load before proposing a config.
+- `scripts/test-optimize.cjs` — regression net for the generator (emits a config matrix, `node
+  --check`s each loop, asserts structure). Run after any change to `scaffold-optimize.cjs`.
+- `references/loop-runtime.md` — two-layer constraints, ledger schema, keep/discard, surface lock,
+  two-clock budget, resume protocol, common mistakes. Load before authoring.
+- `references/metric-gate.md` — step-1b derivation (metric/parse/direction/gate per goal), DECLINE
+  rule, surface-lock guidance, baseline measurement, setup-agent prompt template. Load before proposing.
+</resources>
