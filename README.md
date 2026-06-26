@@ -17,6 +17,8 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`flowchart`** | Turn a branching process (CI/deploy pipeline, approval/OTP funnel, state machine) into an interactive HTML flowchart — Mermaid diagram with decision diamonds + clickable per-node detail panel. Note: renders via a CDN, so this one needs internet. |
 | **`deep-understanding`** | Interactive tutor: teaches you to deeply understand a PR/change/subsystem, incrementally — assesses what you know, fills gaps, quizzes you (problem → solution → impact), and doesn't stop until mastery is verified. Not a document — a guided session. |
 | **`conductor`** | Drive the Workflow tool with durable on-disk state, crash/restart resume, worktree isolation, opt-in enforcement gates, and a cost report. For long or interruptible multi-subagent runs (migrations, audits, staged delivery). |
+| **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE code surface — keeping a change only when it strictly beats the metric **and** passes the gate — on an isolated branch, never auto-merged. For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost. |
+| **`whetstone`** | Overnight, feedback-driven skill improver on the same backbone: works a backlog of filed concerns through a deterministic floor + per-item acceptance-check (fail-before/pass-after), keeping only changes a check confirms, on a branch never auto-merged. For sharpening skills (or other deterministic-output targets) from accumulated suggestions/concerns. |
 
 ### Agents
 
@@ -48,9 +50,12 @@ make a plan-deck for <spec/task>    # plan-deck
 codewalk the auth flow              # codewalk
 flowchart the deploy pipeline       # flowchart
 help me deeply understand PR 1059   # deep-understanding (interactive, quizzes you)
+implement <plan/spec> with resume   # conductor (durable, crash-safe multi-subagent run)
+make the /search endpoint faster    # prospector (proposes a metric + gate, confirms once)
+improve the flowchart skill         # whetstone (overnight, eval-gated, from a backlog)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:deep-understanding`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`).
 
 ## Test locally (no install)
 
