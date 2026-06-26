@@ -168,6 +168,13 @@ subagent round-trips; reserve them for work that warrants them:
 - `--merge-gates` — collapse CodeGate + TestGate into ONE **Review** phase (review+fix+build,
   ensure warranted tests green, ≤3 loop, hard-fail). Fewer steps for small tasks. Ignored under
   `--cycle`. Implied by `--profile lite`.
+- `--writeup` / `--no-writeup` — a **Writeup** phase (before PR, hard-fail) that promotes the
+  worktree's `implementation-notes/*.html` into `docs/changes/<name>/notes/`, generates a
+  reviewer `writeup.html` via `lirbox:pr-writeup` and a `design.html` diagram via
+  `lirbox:flowchart` (validated), and commits them — so **every delivery PR carries reviewer
+  artifacts**. Defaults **ON whenever a PR phase exists**; `--no-writeup` opts out; `--writeup`
+  forces it on without `--pr`. The PR body links the artifacts. (DocsGate's `summary.md` lands in
+  the same `docs/changes/<name>/` dir.)
 - `--base` — worktree branch point (default: the remote's default branch, fetched fresh from
   `origin` so it's never stale; don't hardcode across projects).
 - `--enforce-code` — adds a **CodeGate**: review+fix loop (≤3) via `lirbox:lirbox-code-reviewer`;
@@ -189,6 +196,16 @@ subagent round-trips; reserve them for work that warrants them:
 - `--profile delivery` — shorthand for `--cycle --ticket --pr --enforce-docs` (full, big tasks).
 - `--profile lite` — shorthand for `--ticket --pr --merge-gates` (routine, small tasks).
 
+**Model selection (`--model-mode`).** Orthogonal to the phase flags; does not change phase
+structure.
+- `--model-mode default` (default) — emit no `model:` opt; every worker inherits the session
+  model (today's behavior, byte-for-byte).
+- `--model-mode balanced` — tier each worker by phase class: **haiku** for mechanical work
+  (Setup, every checkpoint, Verify/ReVerify, PR, TicketUpdate), the **think** model for reasoning
+  (Brief, RED, PathGap, CodeGate/Review, TestGate, DocsGate, Writeup), and the **work** model for
+  the `--phases` tasks. Tune with `--model-think <sonnet|opus|haiku|fable>` (default `opus`) and
+  `--model-work <…>` (default `sonnet`).
+
 **Swapping the gate agents.** Each gate defaults to an agent bundled with this plugin (in
 `agents/`), referenced by its **plugin-namespaced** type, and is overridable: `--agent-red`
 (default `lirbox:lirbox-test-writer`), `--agent-code` (default `lirbox:lirbox-code-reviewer`),
@@ -201,7 +218,9 @@ Work/gate workers may keep a per-worker `implementation-notes/<slot>.html` in th
 (unique per slot so parallel agents never clobber) — but only **when there's something a
 reviewer genuinely needs**: a non-trivial design decision, an intentional deviation, a real
 tradeoff, or an open question. Mechanical steps (e.g. the PR push) make no notes at all; no-
-decision work skips the file rather than emitting boilerplate.
+decision work skips the file rather than emitting boilerplate. When a `Writeup` phase runs it
+**promotes** these notes into the committed `docs/changes/<name>/notes/` (alongside the generated
+`writeup.html` + `design.html`), so they reach the reviewer instead of being dropped.
 
 **Agent dependency.** The default gate agents (`lirbox:lirbox-test-writer`, `lirbox:lirbox-code-reviewer`,
 `lirbox:lirbox-tryve-enhancer`, `lirbox:lirbox-docs-writer`) ship with this plugin, so the gates work out of the

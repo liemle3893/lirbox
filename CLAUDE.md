@@ -32,8 +32,13 @@ JS *conductor* (the generated `.js`) driving full-tool *worker* subagents. Hard 
 ## Runtime artifacts are gitignored — never commit them
 
 `.workflows/` (conductor), `.optimize/` (prospector), `.improve/` (whetstone), `.worktrees/`, generated
-`*-flowchart/codewalk/plan-deck.html`, and `implementation-notes/` (worker build-scratch — delivered only
-through a docs gate, otherwise dropped).
+`*-flowchart/codewalk/plan-deck.html`, and `implementation-notes/` (worker build-scratch).
+
+**Exception — conductor delivery artifacts ARE committed.** conductor's `Writeup` phase *promotes* the
+worktree's kept `implementation-notes/*.html` plus a generated `writeup.html` + `design.html` + DocsGate
+`summary.md` into `docs/changes/<name>/`, which `.gitignore` un-ignores (`!docs/changes/**`) so they ride
+the PR. So `implementation-notes/` itself stays scratch, but its promoted copies under `docs/changes/` are
+tracked.
 
 ## Validate
 
