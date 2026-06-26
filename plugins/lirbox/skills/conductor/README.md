@@ -85,9 +85,10 @@ Phase order it emits: `Setup → [Brief] → <work phases> → [CodeGate] → [T
 
 **Size it to the task.** `--merge-gates` collapses CodeGate + TestGate into ONE **Review**
 phase (review+fix+build, ensure warranted tests green, ≤3 loop). `--profile lite`
-(= `--ticket --pr --merge-gates`, single work phase) is the ~6-phase path for small/low-risk
-delivery: `Setup → Brief → <work> → Review → PR → TicketUpdate`. Reserve `--profile delivery`
-(full cycle + every gate) for substantial work — don't default every task to 12 steps.
+(= `--ticket --pr --merge-gates`, single work phase) is the small/low-risk delivery path:
+`Setup → Brief → <work> → Review → Writeup → PR → TicketUpdate` (~7 phases — `--no-writeup`
+drops Writeup for ~6). Reserve `--profile delivery` (full cycle + every gate) for substantial
+work — don't default every task to 12 steps.
 
 With **`--cycle`** (implied by `--profile delivery`) the core reorders into a true TDD loop:
 `Setup → [Brief] → RED → <work=GREEN> → Verify → PathGap → CodeGate(IMPROVE+SIMPLIFY) →

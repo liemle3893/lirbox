@@ -65,6 +65,24 @@ function reportedPhases(stdout) {
   return line.replace('Phases:', '').trim().split('→').map((s) => s.trim()).filter(Boolean);
 }
 
+// Conductor-layer purity scan (ported from prospector/whetstone test nets, per CLAUDE.md:
+// "Their test-*.cjs enforce this with a string scan"). fs/git/Date.now()/Math.random()/require()
+// may appear ONLY inside worker prompt STRINGS (data, not executed by the conductor). So slice to
+// the executing body (drops the header comment + the `export const meta` block, both of which name
+// these primitives in prose) and strip every `…` template literal (the worker prompts), then forbid
+// the restricted primitives in what remains.
+function conductorBody(src) {
+  const body = src.slice(src.indexOf('const NAME'));
+  return body.replace(/`(?:[^`\\]|\\.)*`/g, '""');
+}
+const FORBIDDEN = [
+  ['require(', /\brequire\s*\(/],
+  ['fs.', /\bfs\./],
+  ['Date.now', /\bDate\.now\s*\(/],
+  ['new Date', /\bnew Date\b/],
+  ['Math.random', /\bMath\.random\s*\(/],
+];
+
 let failures = 0;
 for (const [label, extra] of MATRIX) {
   const out = path.join(tmp, `wf-${label}.js`);
@@ -95,6 +113,18 @@ for (const [label, extra] of MATRIX) {
       failures++;
       continue;
     }
+
+    // Gate 4: no restricted primitive at the conductor layer (string scan; node --check can't see
+    // it). These belong only inside worker prompts — a leak into the conductor body throws at launch.
+    const body = conductorBody(fs.readFileSync(out, 'utf8'));
+    let pure = true;
+    for (const [pName, re] of FORBIDDEN) {
+      if (re.test(body)) {
+        console.error(`FAIL [${label}] conductor body uses restricted primitive \`${pName}\` (must live in a worker prompt)`);
+        failures++; pure = false;
+      }
+    }
+    if (!pure) continue;
     console.log(`PASS [${label}] ${reported.join(' → ')}`);
   } catch (e) {
     console.error(`FAIL [${label}] generation/check error: ${e.message.split('\n')[0]}`);

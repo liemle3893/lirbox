@@ -122,8 +122,8 @@ PR always carries reviewer artifacts. The worker, inside the shared worktree:
 2. Generates `docs/changes/<name>/writeup.html` via the `lirbox:pr-writeup` skill (by name, via
    the Skill tool; falls back to reading the skill's `SKILL.md` + `assets/template.html`).
 3. Generates `docs/changes/<name>/design.html` via `lirbox:flowchart` — the worker picks the
-   Mermaid diagram type (flowchart or `sequenceDiagram`) that best fits — and validates it with
-   `plugins/lirbox/skills/flowchart/assets/validate.mjs`.
+   Mermaid diagram type (flowchart or `sequenceDiagram`) that best fits; the flowchart skill
+   validates its own output (its `assets/validate.mjs`), so no in-repo path is assumed.
 4. Commits all of `docs/changes/<name>/` on the branch.
 
 `.gitignore` un-ignores `docs/changes/**` so these ride the PR. Reads/writes the `writeup` result
