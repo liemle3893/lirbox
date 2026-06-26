@@ -5,3 +5,19 @@
 # Runtime artifacts from the pr-writeup skill (if ever run inside the repo)
 .pr-writeup/
 *-writeup.html
+
+# Conductor / prospector / whetstone runtime state (local; the resume key lives here, not tracked)
+.workflows/
+.optimize/
+.improve/
+
+# Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
+implementation-notes/
+
+# Git worktrees created by conductor/prospector/whetstone
+.worktrees/
+
+# Generated single-file HTML artifacts (flowchart / codewalk / plan-deck skills)
+*-flowchart.html
+*-codewalk.html
+*-plan-deck.html

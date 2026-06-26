@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- FLOOR fixture: non-ASCII em-dash in an EDGE label.
+     Baseline validate.mjs (line 58) ALREADY flags non-ASCII in edge labels,
+     so validate.mjs FAILs this file on baseline. The floor characterization
+     test asserts that FAIL — it PASSES on the unmodified baseline. Locked. -->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>edge-nonascii fixture</title></head>
+  <body>
+    <pre class="mermaid">
+flowchart TD
+  A[Start] -->|cost — high| B[Stop]
+    </pre>
+  </body>
+</html>

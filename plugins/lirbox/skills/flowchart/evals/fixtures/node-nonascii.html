@@ -1,0 +1,16 @@
+<!doctype html>
+<!-- ITEM-A fixture: non-ASCII em-dash in a NODE label only (no edge labels).
+     Baseline validate.mjs (line 58) checks non-ASCII for EDGE labels ONLY, so it
+     does NOT flag this node label and validate.mjs PASSES this file on baseline.
+     The Item-A acceptance-check asserts validate.mjs FAILS this file — so the
+     check fails-on-baseline (discriminating) and goes green only after the real
+     fix extends the non-ASCII check to node labels. Locked. -->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>node-nonascii fixture</title></head>
+  <body>
+    <pre class="mermaid">
+flowchart TD
+  A[Cost—high] --> B[Done]
+    </pre>
+  </body>
+</html>

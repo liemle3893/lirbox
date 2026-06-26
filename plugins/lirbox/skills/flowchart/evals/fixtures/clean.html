@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- CONTROL fixture: a fully clean flowchart — ASCII-only labels, properly escaped.
+     validate.mjs PASSES this on baseline and must keep passing after any fix.
+     The floor characterization test asserts this PASSES. Locked. -->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>clean fixture</title></head>
+  <body>
+    <pre class="mermaid">
+flowchart TD
+  A[Start] --> B{Ready?}
+  B -->|yes| C[Ship it]
+  B -->|no| D[Wait]
+    </pre>
+  </body>
+</html>
