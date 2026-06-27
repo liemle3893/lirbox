@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>conductor — model-mode + artifacts-to-PR</title>
+<style>
+  :root{
+    --ivory:#FAF9F5; --paper:#FFFFFF; --slate:#141413; --slate-soft:#3A3A37;
+    --muted:#6B6B66; --line:#E7E4DC; --line-soft:#F0EEE7;
+    --clay:#D97757; --clay-soft:#FBEDE7; --olive:#788C5D; --olive-soft:#EEF1E7;
+    --code-bg:#1F1E1B; --code-line:#2E2C28;
+    --kw:#E0A08A; --str:#A6BE83; --com:#6B6B66; --fn:#D8C99B;
+    --radius:14px; --maxw:1180px;
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--ivory);color:var(--slate);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:var(--clay);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--line-soft);
+    padding:.1em .4em;border-radius:5px;color:var(--slate-soft)}
+
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+
+  /* Header */
+  header.hero{border-bottom:1px solid var(--line);background:var(--ivory)}
+  .hero-inner{padding:48px 0 36px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+  h1.title{font-family:var(--serif);font-weight:600;font-size:38px;line-height:1.18;
+    margin:0 0 18px;letter-spacing:-.01em}
+  .meta{display:flex;flex-wrap:wrap;gap:10px 18px;font-family:var(--mono);
+    font-size:13px;color:var(--muted);margin-bottom:22px}
+  .meta b{color:var(--slate-soft);font-weight:600}
+  .meta .add{color:var(--olive)} .meta .del{color:var(--clay)}
+  .prompt{background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--clay);
+    border-radius:var(--radius);padding:16px 20px;color:var(--slate-soft);font-size:15px}
+  .prompt .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--clay);display:block;margin-bottom:6px}
+
+  /* Layout */
+  .layout{display:grid;grid-template-columns:1fr 232px;gap:56px;padding:44px 0 80px;align-items:start}
+  main{min-width:0}
+  aside{position:sticky;top:28px}
+  nav.toc{font-size:13.5px;border-left:1px solid var(--line);padding-left:18px}
+  nav.toc .toc-lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+  nav.toc a{display:block;color:var(--slate-soft);padding:4px 0}
+  nav.toc a.sub{padding-left:14px;font-size:12.5px;color:var(--muted);font-family:var(--mono)}
+  nav.toc a:hover{color:var(--clay);text-decoration:none}
+
+  /* Sections */
+  section{margin-bottom:48px;scroll-margin-top:24px}
+  h2.h{font-family:var(--serif);font-weight:600;font-size:25px;margin:0 0 6px;letter-spacing:-.01em}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--clay);margin:0 0 10px}
+  section p{margin:0 0 14px;color:var(--slate-soft)}
+  .lead{font-size:18px;line-height:1.6;color:var(--slate)}
+
+  /* Panels & before/after */
+  .panel{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px 22px;margin:0 0 16px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .panel.before{border-left:3px solid var(--clay)}
+  .panel.after{border-left:3px solid var(--olive)}
+  .panel .ttl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    margin:0 0 10px;color:var(--muted)}
+  .panel.before .ttl{color:var(--clay)} .panel.after .ttl{color:var(--olive)}
+  .panel ul{margin:0;padding-left:18px;color:var(--slate-soft)} .panel li{margin:4px 0}
+
+  /* Badges */
+  .badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted);
+    background:var(--ivory);white-space:nowrap}
+  .badge.new{color:var(--olive);border-color:#CBD7B6;background:var(--olive-soft)}
+  .badge.mod{color:var(--clay);border-color:#EFCBBC;background:var(--clay-soft)}
+  .badge.del{color:#9B5B4B;border-color:#E6C3B8;background:var(--clay-soft)}
+
+  /* File cards */
+  .file{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 20px;margin:0 0 14px}
+  .file-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .file-head .path{font-family:var(--mono);font-size:13.5px;color:var(--slate);font-weight:600}
+  .file-head .stat{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:auto}
+  .file-head .stat .add{color:var(--olive)} .file-head .stat .del{color:var(--clay)}
+  .file .role{font-style:italic;color:var(--muted);font-family:var(--serif);font-size:15px;margin:0 0 8px}
+
+  /* Code blocks */
+  pre{background:var(--code-bg);color:#E9E6DE;border-radius:10px;padding:16px 18px;overflow:auto;
+    font-family:var(--mono);font-size:13px;line-height:1.6;margin:12px 0 0;border:1px solid var(--code-line)}
+  pre .kw{color:var(--kw)} pre .str{color:var(--str)} pre .com{color:var(--com)} pre .fn{color:var(--fn)}
+  pre .add{color:var(--str)} pre .rem{color:var(--kw)}
+
+  /* Focus items */
+  .focus{display:flex;gap:16px;padding:18px 0;border-top:1px solid var(--line)}
+  .focus:first-of-type{border-top:none}
+  .focus .num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--clay);
+    color:#fff;font-family:var(--mono);font-size:14px;display:flex;align-items:center;justify-content:center}
+  .focus .ttl{font-weight:600;margin:0 0 4px;font-size:16px}
+  .focus p{margin:0 0 6px}
+  .focus .ref{font-family:var(--mono);font-size:12px;color:var(--muted)}
+
+  /* Test plan checklist */
+  ul.checks{list-style:none;margin:0;padding:0}
+  ul.checks li{padding:7px 0 7px 30px;position:relative;color:var(--slate-soft);border-bottom:1px solid var(--line-soft)}
+  ul.checks li::before{position:absolute;left:0;top:7px;font-family:var(--mono)}
+  ul.checks li.done::before{content:"✓";color:var(--olive)}
+  ul.checks li.todo::before{content:"○";color:var(--muted)}
+  ul.checks li.na::before{content:"–";color:var(--muted)}
+
+  /* Rollout steps */
+  .rollout{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .step{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .step .pct{font-family:var(--serif);font-size:26px;font-weight:600;color:var(--olive)}
+  .step .when{font-family:var(--mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  .step p{margin:8px 0 0;font-size:14px}
+
+  footer{border-top:1px solid var(--line);color:var(--muted);font-family:var(--mono);
+    font-size:12px;padding:22px 0 40px}
+
+  @media(max-width:900px){
+    .layout{grid-template-columns:1fr;gap:0} aside{display:none}
+    .grid2,.rollout{grid-template-columns:1fr} h1.title{font-size:30px}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap hero-inner">
+    <p class="eyebrow">Pull request · lirbox</p>
+    <h1 class="title">conductor — <code>--model-mode balanced</code> + a Writeup phase that puts artifacts in the PR</h1>
+    <div class="meta">
+      <span><b>8</b> files</span>
+      <span><b class="add">+371</b> <b class="del">−27</b></span>
+      <span><b>improve/conductor</b> → main</span>
+      <span>by <b>liemle3893</b></span>
+      <span>local branch — not yet opened</span>
+    </div>
+    <div class="prompt">
+      <span class="lbl">What this write-up covers</span>
+      Three improvements to the <code>conductor</code> skill's generator — all surgical edits to one
+      <code>.cjs</code> file plus its eval net and docs. By the end you should know exactly which combos change,
+      which stay byte-for-byte identical, and the two invariants that keep that promise honest.
+    </div>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <main>
+
+    <section id="tldr">
+      <p class="kicker">TL;DR</p>
+      <h2 class="h">Cheaper model tiers, and delivery PRs that finally carry a write-up + a design diagram.</h2>
+      <p class="lead">The conductor generator gains <code>--model-mode balanced</code> (haiku for mechanical
+      work, opus for thinking, sonnet for the work phases) and a new <b>Writeup</b> phase that promotes the
+      per-worker <code>implementation-notes</code> and generates a <code>writeup.html</code> + design diagram,
+      committed under <code>docs/changes/&lt;name&gt;/</code> so they ride the PR. The headline guarantee:
+      <b>default mode is byte-for-byte identical to before</b> — every new opt is emitted only when you ask for it.</p>
+    </section>
+
+    <section id="why">
+      <p class="kicker">Why</p>
+      <h2 class="h">Three gaps in the delivery harness</h2>
+      <p>conductor generated a clean workflow, but threw away its best review material and ran every worker on
+      one model. Per-worker <code>implementation-notes</code> were folded into a markdown summary and then
+      dropped; the PR phase pushed a bare <code>TODO</code> body; and a five-line config edit and a hard
+      reasoning gate both ran on the same expensive model.</p>
+      <div class="grid2">
+        <div class="panel before">
+          <p class="ttl">Before</p>
+          <ul>
+            <li><code>implementation-notes/*.html</code> consumed by DocsGate, then gitignored and discarded — the reviewer never saw them.</li>
+            <li>PR phase = <code>git push</code> + <code>gh pr create</code> with a literal <code>"TODO title"</code>/<code>"TODO summary"</code>.</li>
+            <li>No notion of model per task — every checkpoint, push, and review ran on the session model.</li>
+          </ul>
+        </div>
+        <div class="panel after">
+          <p class="ttl">After</p>
+          <ul>
+            <li>A <b>Writeup</b> phase promotes the notes into <code>docs/changes/&lt;name&gt;/notes/</code> and adds a <code>writeup.html</code> + <code>design.html</code>, all committed.</li>
+            <li>The PR body links those artifacts; DocsGate's <code>summary.md</code> joins them in the same per-run dir.</li>
+            <li><code>--model-mode balanced</code> tiers each phase by class — haiku / opus / sonnet — opt-in and overridable.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="files">
+      <p class="kicker">File-by-file</p>
+      <h2 class="h">What changed, and why</h2>
+
+      <div class="file" id="file-1">
+        <div class="file-head">
+          <span class="badge mod">mod</span>
+          <span class="path">conductor/scripts/scaffold-workflow.cjs</span>
+          <span class="stat"><span class="add">+77</span> <span class="del">−20</span></span>
+        </div>
+        <p class="role">The heart of the PR — the generator.</p>
+        <p>Adds the flag surface (<code>--model-mode</code>, <code>--model-think</code>, <code>--model-work</code>,
+        <code>--writeup</code>/<code>--no-writeup</code>), an <code>mdl(class)</code> helper that mirrors the existing
+        <code>at(agent)</code> helper, a per-phase model class, and a new <code>Writeup</code> descriptor between
+        DocsGate and PR. The emitters compose the model fragment with the agent fragment so the opts object stays valid
+        JS — and emits <em>nothing</em> in default mode, which is what preserves byte-identity.</p>
+<pre><span class="com">// emits `model: 'haiku',` in balanced mode, '' otherwise — exactly like at(agent)</span>
+<span class="kw">const</span> <span class="fn">mdl</span> = (cls) =&gt; (modelMode === <span class="str">'balanced'</span> &amp;&amp; MODEL_TIER[cls])
+  ? <span class="str">`model: '${MODEL_TIER[cls]}',`</span> : <span class="str">''</span>
+<span class="com">// composed with agentFrag so default output is unchanged:</span>
+<span class="kw">const</span> lead = [agentFrag, modelFrag].<span class="fn">filter</span>(Boolean).<span class="fn">join</span>(<span class="str">' '</span>)</pre>
+      </div>
+
+      <div class="file" id="file-2">
+        <div class="file-head">
+          <span class="badge mod">mod</span>
+          <span class="path">conductor/scripts/test-scaffold.cjs</span>
+          <span class="stat"><span class="add">+62</span> <span class="del">−0</span></span>
+        </div>
+        <p class="role">The eval net — the gate that makes the invariants permanent.</p>
+        <p>Four new matrix combos (balanced-bare, balanced-delivery, no-writeup, writeup-only) keep the new paths
+        inside the syntax/phase-order net, plus 17 targeted assertions: default emits no <code>model:</code>, each
+        balanced tier is correct, <code>--model-think fable</code> overrides, the Writeup phase lands before PR and
+        targets the right skills, <code>--no-writeup</code> suppresses it, the DocsGate path moved, and invalid flag
+        values are rejected.</p>
+      </div>
+
+      <div class="file" id="file-3">
+        <div class="file-head">
+          <span class="badge mod">mod</span>
+          <span class="path">.gitignore</span>
+          <span class="stat"><span class="add">+6</span> <span class="del">−0</span></span>
+        </div>
+        <p class="role">The carve-out that lets artifacts ride the PR.</p>
+        <p>An <code>!docs/changes/**</code> un-ignore placed <em>after</em> the filename-globs
+        (<code>*-writeup.html</code>, <code>*-flowchart.html</code>, <code>implementation-notes/</code>) so the
+        promoted copies under <code>docs/changes/</code> are tracked while the runtime scratch stays ignored.</p>
+      </div>
+
+      <div class="file" id="file-rest">
+        <div class="file-head"><span class="path">Supporting changes (5 files)</span></div>
+        <ul>
+          <li><code>docs/superpowers/specs/2026-06-27-…-design.md</code> <span class="badge new">new</span> — the approved design spec (+153).</li>
+          <li><code>conductor/SKILL.md</code> (+20/−1) — documents the new flags, the Writeup phase, and notes-promotion.</li>
+          <li><code>conductor/README.md</code> (+24/−4) — maintainer guide: usage block, phase orders, model tiers.</li>
+          <li><code>conductor/references/delivery-phases.md</code> (+22) — a "Writeup phase" section for hand-customization.</li>
+          <li><code>CLAUDE.md</code> (+7/−2) — the committed-delivery-artifacts exception to the gitignore rule.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="focus">
+      <p class="kicker">Where to focus your review</p>
+      <h2 class="h">The parts that actually need eyes</h2>
+
+      <div class="focus">
+        <div class="num">1</div>
+        <div>
+          <p class="ttl">The byte-identity invariant</p>
+          <p>Every new fragment must be emitted only when opted in. The check that proves it: regenerate the full
+          matrix from the pre-change generator and from this one with <code>--no-writeup</code> in default mode —
+          the only diff is the intentional DocsGate <code>summary.md</code> path. Worth confirming the composition
+          in <code>agentCall</code>/<code>gateLoop</code> can never leak a trailing space or stray opt.</p>
+          <p class="ref">scaffold-workflow.cjs · agentCall(), gateLoop(), mechFrag</p>
+        </div>
+      </div>
+      <div class="focus">
+        <div class="num">2</div>
+        <div>
+          <p class="ttl">Phase → model-class assignment</p>
+          <p>Each descriptor passes <code>mdl('mechanical'|'think'|'work')</code>. The judgement calls: Brief and
+          Verify/ReVerify. Brief is "think" (it derives the goal that gates everything); Verify/ReVerify are
+          "mechanical" (they run a known suite and report). If you'd tier them differently, it's a one-word edit.</p>
+          <p class="ref">scaffold-workflow.cjs · PHASES table</p>
+        </div>
+      </div>
+      <div class="focus">
+        <div class="num">3</div>
+        <div>
+          <p class="ttl">Writeup hard-fails before PR</p>
+          <p>The Writeup phase throws if it can't write artifacts, and it sits <em>before</em> PR — so "every PR
+          carries reviewer artifacts" is actually enforced (no artifacts ⇒ no PR). The escape hatch is
+          <code>--no-writeup</code>. Confirm that ordering is the behaviour you want for small/<code>lite</code> PRs.</p>
+          <p class="ref">scaffold-workflow.cjs · Writeup descriptor</p>
+        </div>
+      </div>
+      <div class="focus">
+        <div class="num">4</div>
+        <div>
+          <p class="ttl">Cross-repo skill invocation</p>
+          <p>The Writeup worker invokes <code>lirbox:pr-writeup</code> and <code>lirbox:flowchart</code> <em>by skill
+          name</em> (portable — conductor runs on any repo, but the sibling skills live in the plugin, not the target
+          tree), with a read-the-SKILL.md fallback. This is a runtime behaviour the eval net can't fully exercise;
+          the assertion only checks the prompt wiring.</p>
+          <p class="ref">scaffold-workflow.cjs · Writeup prompt</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="tests">
+      <p class="kicker">Test plan</p>
+      <h2 class="h">How we know it works</h2>
+      <ul class="checks">
+        <li class="done">Regression net green: 16 matrix combos + 17 eval assertions (<code>node test-scaffold.cjs</code>).</li>
+        <li class="done">Backward-compat eval: pre-change vs <code>--no-writeup</code> default — only the DocsGate path line differs.</li>
+        <li class="done">Balanced tiers verified: 6 haiku / 6 opus / 1 sonnet on the delivery profile; <code>--model-think fable</code> overrides.</li>
+        <li class="done">Runtime purity: balanced + writeup scripts mock-run clean — no conductor-layer fs/clock/ReferenceError.</li>
+        <li class="done">gitignore: <code>git check-ignore</code> confirms artifacts tracked, <code>.workflows/</code>/scratch still ignored.</li>
+        <li class="done">Invalid flag values (<code>--model-mode bogus</code>, <code>--model-think gpt</code>) exit non-zero.</li>
+        <li class="na">Live conductor run not executed — the Writeup phase's actual skill invocation is exercised at delivery time, not in this PR.</li>
+      </ul>
+    </section>
+
+    <section id="rollout">
+      <p class="kicker">Adoption</p>
+      <h2 class="h">Safe by default, opt in when you want it</h2>
+      <div class="rollout">
+        <div class="step"><span class="when">No flags</span><div class="pct">0Δ</div><p>Existing invocations are byte-identical — no model opts, no behaviour change.</p></div>
+        <div class="step"><span class="when">--pr / profiles</span><div class="pct">+1</div><p>A Writeup phase appears before PR; <code>--no-writeup</code> opts out.</p></div>
+        <div class="step"><span class="when">--model-mode balanced</span><div class="pct">$↓</div><p>Cheaper tiers per phase; tune with <code>--model-think</code>/<code>--model-work</code>.</p></div>
+      </div>
+    </section>
+
+  </main>
+
+  <aside>
+    <nav class="toc">
+      <p class="toc-lbl">On this page</p>
+      <a href="#tldr">TL;DR</a>
+      <a href="#why">Why</a>
+      <a href="#files">File-by-file</a>
+      <a class="sub" href="#file-1">scaffold-workflow.cjs</a>
+      <a class="sub" href="#file-2">test-scaffold.cjs</a>
+      <a class="sub" href="#file-3">.gitignore</a>
+      <a href="#focus">Where to focus</a>
+      <a href="#tests">Test plan</a>
+      <a href="#rollout">Adoption</a>
+    </nav>
+  </aside>
+</div>
+
+<footer class="wrap">
+  Generated PR write-up · lirbox · 2026-06-27
+</footer>
+
+</body>
+</html>

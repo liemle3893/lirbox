@@ -36,6 +36,11 @@ const MATRIX = [
   ['profile-lite', ['--phases', 'Work', '--profile', 'lite']],
   ['profile-delivery', ['--phases', 'Implement', '--profile', 'delivery']],
   ['combo-all', ['--phases', 'A,B', '--ticket', '--pr', '--enforce-code', '--enforce-tests']],
+  // model-mode + writeup combos — keep them inside the syntax/phase-order net too.
+  ['balanced-bare', ['--phases', 'Work', '--model-mode', 'balanced']],
+  ['balanced-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--model-mode', 'balanced']],
+  ['no-writeup', ['--phases', 'Work', '--pr', '--no-writeup']],
+  ['writeup-only', ['--phases', 'Work', '--writeup']],
 ];
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-scaffold-'));
@@ -59,6 +64,24 @@ function reportedPhases(stdout) {
   if (!line) throw new Error('generator did not print a "Phases:" line');
   return line.replace('Phases:', '').trim().split('→').map((s) => s.trim()).filter(Boolean);
 }
+
+// Conductor-layer purity scan (ported from prospector/whetstone test nets, per CLAUDE.md:
+// "Their test-*.cjs enforce this with a string scan"). fs/git/Date.now()/Math.random()/require()
+// may appear ONLY inside worker prompt STRINGS (data, not executed by the conductor). So slice to
+// the executing body (drops the header comment + the `export const meta` block, both of which name
+// these primitives in prose) and strip every `…` template literal (the worker prompts), then forbid
+// the restricted primitives in what remains.
+function conductorBody(src) {
+  const body = src.slice(src.indexOf('const NAME'));
+  return body.replace(/`(?:[^`\\]|\\.)*`/g, '""');
+}
+const FORBIDDEN = [
+  ['require(', /\brequire\s*\(/],
+  ['fs.', /\bfs\./],
+  ['Date.now', /\bDate\.now\s*\(/],
+  ['new Date', /\bnew Date\b/],
+  ['Math.random', /\bMath\.random\s*\(/],
+];
 
 let failures = 0;
 for (const [label, extra] of MATRIX) {
@@ -90,12 +113,81 @@ for (const [label, extra] of MATRIX) {
       failures++;
       continue;
     }
+
+    // Gate 4: no restricted primitive at the conductor layer (string scan; node --check can't see
+    // it). These belong only inside worker prompts — a leak into the conductor body throws at launch.
+    const body = conductorBody(fs.readFileSync(out, 'utf8'));
+    let pure = true;
+    for (const [pName, re] of FORBIDDEN) {
+      if (re.test(body)) {
+        console.error(`FAIL [${label}] conductor body uses restricted primitive \`${pName}\` (must live in a worker prompt)`);
+        failures++; pure = false;
+      }
+    }
+    if (!pure) continue;
     console.log(`PASS [${label}] ${reported.join(' → ')}`);
   } catch (e) {
     console.error(`FAIL [${label}] generation/check error: ${e.message.split('\n')[0]}`);
     if (e.stderr) console.error(`  ${String(e.stderr).trim().split('\n').slice(-3).join('\n  ')}`);
     failures++;
   }
+}
+
+// --- Targeted eval/compare assertions: model-mode + writeup behavior ---------------------
+// gen(extra) → emitted source string for a one-off combo.
+function gen(label, extra) {
+  const out = path.join(tmp, `eval-${label}.js`);
+  execFileSync('node', [GEN, '--name', `e-${label}`, '--out', out, '--force', '--prompts-file', promptsFile, ...extra], { encoding: 'utf8' });
+  execFileSync('node', ['--check', out], { stdio: 'pipe' });
+  return fs.readFileSync(out, 'utf8');
+}
+function check(cond, msg) { if (cond) { console.log(`PASS [eval] ${msg}`); } else { console.error(`FAIL [eval] ${msg}`); failures++; } }
+// genFails(extra) → true iff the generator exits non-zero (invalid-flag rejection).
+function genFails(extra) {
+  try { execFileSync('node', [GEN, '--name', 'e-bad', '--out', path.join(tmp, 'bad.js'), '--force', ...extra], { stdio: 'pipe' }); return false; }
+  catch (_) { return true; }
+}
+
+try {
+  // 1. default mode emits NO model: opt at all (byte-cost-free; the backward-compat invariant).
+  check(!/model:\s*'/.test(gen('default', ['--phases', 'Work', '--pr', '--enforce-docs'])),
+    "default mode emits no model: opt");
+
+  // 2. balanced mode tiers each phase class: haiku (mechanical), opus (think), sonnet (work).
+  // Opts are emitted as `phase: 'X', [agentType: '...',] model: 'Y',` on one line.
+  const bal = gen('balanced', ['--phases', 'Implement', '--profile', 'delivery', '--model-mode', 'balanced']);
+  check(/phase: phaseTitle, model: 'haiku'/.test(bal), "balanced: checkpoint → haiku");
+  check(/phase: 'Setup', model: 'haiku'/.test(bal), "balanced: Setup → haiku");
+  check(/phase: 'CodeGate',[^\n]*model: 'opus'/.test(bal), "balanced: CodeGate → opus");
+  check(/phase: 'RED',[^\n]*model: 'opus'/.test(bal), "balanced: RED → opus");
+  check(/phase: 'Writeup', model: 'opus'/.test(bal), "balanced: Writeup → opus");
+  check(/phase: 'Implement', model: 'sonnet'/.test(bal), "balanced: work phase → sonnet");
+  check(/phase: 'PR', model: 'haiku'/.test(bal), "balanced: PR → haiku");
+  check(/phase: 'Verify', model: 'haiku'/.test(bal), "balanced: Verify → haiku");
+
+  // 3. --model-think overrides the think tier (opus → fable).
+  check(/phase: 'CodeGate',[^\n]*model: 'fable'/.test(gen('think-fable', ['--phases', 'Implement', '--cycle', '--model-mode', 'balanced', '--model-think', 'fable'])),
+    "--model-think fable: CodeGate → fable");
+
+  // 4. writeup wiring: a --pr run gets a Writeup phase BEFORE PR that targets docs/changes + both skills.
+  const pr = gen('pr-writeup', ['--phases', 'Work', '--pr']);
+  const order = (pr.match(/phase\('([^']*)'\)/g) || []).map((m) => m.slice(7, -2));
+  check(order.indexOf('Writeup') !== -1 && order.indexOf('Writeup') < order.indexOf('PR'), "writeup: Writeup phase emitted before PR");
+  check(/docs\/changes\/\$\{NAME\}/.test(pr) && /lirbox:pr-writeup/.test(pr) && /lirbox:flowchart/.test(pr), "writeup: prompt targets docs/changes + pr-writeup + flowchart skills");
+  check(/Reviewer artifacts are committed under docs\/changes\//.test(pr), "writeup: PR body links the artifacts");
+
+  // 5. --no-writeup suppresses the Writeup phase entirely.
+  check(!/phase\('Writeup'\)/.test(gen('no-writeup', ['--phases', 'Work', '--pr', '--no-writeup'])), "--no-writeup: no Writeup phase");
+
+  // 6. DocsGate writes into the per-run docs/changes/<name>/ dir.
+  check(/docs\/changes\/\$\{NAME\}\/summary\.md/.test(gen('docs', ['--phases', 'Work', '--enforce-docs'])), "DocsGate: summary.md under docs/changes/<name>/");
+
+  // 7. invalid flag values are rejected.
+  check(genFails(['--phases', 'Work', '--model-mode', 'bogus']), "invalid --model-mode rejected");
+  check(genFails(['--phases', 'Work', '--model-mode', 'balanced', '--model-think', 'gpt']), "invalid --model-think rejected");
+} catch (e) {
+  console.error(`FAIL [eval] generation error: ${e.message.split('\n')[0]}`);
+  failures++;
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

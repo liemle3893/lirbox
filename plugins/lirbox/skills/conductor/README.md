@@ -76,24 +76,41 @@ task-specific bit (the `TODO:` agent prompts).
 ```
 node scripts/scaffold-workflow.cjs --name <slug> [--phases "A,B"] \
   [--ticket] [--pr] [--merge-gates] [--enforce-code] [--enforce-tests] [--enforce-docs] \
+  [--writeup|--no-writeup] [--model-mode default|balanced] [--model-think <m>] [--model-work <m>] \
   [--profile lite|delivery] [--base <ref>] [--desc "..."] [--out <path>] [--force]
 ```
 
 Phase order it emits: `Setup → [Brief] → <work phases> → [CodeGate] → [TestGate] → [DocsGate]
-→ [PR] → [TicketUpdate]`.
+→ [Writeup] → [PR] → [TicketUpdate]`.
 
 **Size it to the task.** `--merge-gates` collapses CodeGate + TestGate into ONE **Review**
 phase (review+fix+build, ensure warranted tests green, ≤3 loop). `--profile lite`
-(= `--ticket --pr --merge-gates`, single work phase) is the ~6-phase path for small/low-risk
-delivery: `Setup → Brief → <work> → Review → PR → TicketUpdate`. Reserve `--profile delivery`
-(full cycle + every gate) for substantial work — don't default every task to 12 steps.
+(= `--ticket --pr --merge-gates`, single work phase) is the small/low-risk delivery path:
+`Setup → Brief → <work> → Review → Writeup → PR → TicketUpdate` (~7 phases — `--no-writeup`
+drops Writeup for ~6). Reserve `--profile delivery` (full cycle + every gate) for substantial
+work — don't default every task to 12 steps.
 
 With **`--cycle`** (implied by `--profile delivery`) the core reorders into a true TDD loop:
 `Setup → [Brief] → RED → <work=GREEN> → Verify → PathGap → CodeGate(IMPROVE+SIMPLIFY) →
-ReVerify → [DocsGate] → [PR] → [TicketUpdate]`. **PathGap** is the step that closes the
+ReVerify → [DocsGate] → [Writeup] → [PR] → [TicketUpdate]`. **PathGap** is the step that closes the
 "code paths > ACs" gap: it intersects branch coverage with the diff and hard-fails unless every
 uncovered changed branch is tested or justified — derives test obligations from the *control
 flow*, not just the spec. RED/Verify/PathGap/ReVerify replace the standalone TestGate in cycle mode.
+
+**Writeup phase (artifacts ride the PR).** With a PR phase present (default; `--no-writeup` to
+suppress), a **Writeup** phase runs just before PR and hard-fails if it can't produce: it promotes
+the worktree's `implementation-notes/*.html` into `docs/changes/<name>/notes/`, generates a
+reviewer `writeup.html` (via `lirbox:pr-writeup`) and a `design.html` diagram (via
+`lirbox:flowchart`, validated), and commits them. `.gitignore` un-ignores `docs/changes/**` so
+they're tracked and ride the PR; the PR body links them. This is why DocsGate's `summary.md` now
+lands in the same `docs/changes/<name>/` directory.
+
+**Model selection (`--model-mode`).** `default` emits no `model:` opt (every worker inherits the
+session model — byte-identical to before). `balanced` tiers each `agent()` call by phase class:
+**haiku** for mechanical work (Setup/checkpoint/Verify/ReVerify/PR/TicketUpdate), `--model-think`
+(default **opus**) for reasoning (Brief/RED/PathGap/CodeGate/Review/TestGate/DocsGate/Writeup), and
+`--model-work` (default **sonnet**) for the work phases. The `mdl(class)` helper mirrors `at(agent)`
+— it emits the `model: '…',` fragment or `''`. Invalid model values are rejected at generation time.
 
 What is generated (do NOT hand-edit) vs what the LLM fills:
 - **Generated/deterministic**: meta, NAME/STATE/BRANCH/BASE/WORKTREE consts, `inWorktree(slot)`,
@@ -129,7 +146,7 @@ their **plugin-namespaced** type via `agent({ agentType })`:
   a single **Review** phase that also ensures warranted tests are green.
 - TestGate → **triages first** (`tryve-e2e`/`unit`/`none` — never enforces blindly) →
   `lirbox:lirbox-tryve-enhancer` (loop ≤3).
-- DocsGate → `lirbox:lirbox-docs-writer` (summary → `docs/changes/`).
+- DocsGate → `lirbox:lirbox-docs-writer` (summary → `docs/changes/<name>/summary.md`).
 
 **Swappable.** Each gate agent is a flag — `--agent-red`/`--agent-code`/`--agent-tests`/
 `--agent-docs` — defaulting to the bundled agents above. Pass your own `agentType`, or `none`
@@ -140,7 +157,9 @@ default, not a hard requirement — override or `none` removes the dependency.
 Work/gate workers keep a per-worker `implementation-notes/<slot>.html` (design decisions,
 deviations, tradeoffs, open questions) — unique slot so parallel agents never clobber — but only
 when there's something a reviewer genuinely needs. Mechanical steps (e.g. the PR push) write no
-notes; no-decision work skips the file instead of emitting boilerplate.
+notes; no-decision work skips the file instead of emitting boilerplate. The **Writeup** phase
+promotes these into the committed `docs/changes/<name>/notes/` so they reach the reviewer (they
+were previously dropped after DocsGate folded their decisions into the summary).
 
 ## Design decisions & boundaries
 
@@ -158,6 +177,8 @@ notes; no-decision work skips the file instead of emitting boilerplate.
 - **Add a new gate**: add a flag in the flag-parsing block, a `*GateBlock` template const, wire
   it into `phaseOrder` and the `src` assembly. Mirror an existing gate (bounded loop + `throw`).
 - **Change pricing**: edit `DEFAULT_RATES` in `workflow-report.cjs` (or pass `RATES_JSON`).
+- **Change a phase's model tier**: flip the `mdl('<class>')` arg on that descriptor's `build()`
+  (`mechanical`/`think`/`work`); Setup + `checkpoint()` use `mechFrag` in the template tail.
 - **Change notes behavior**: edit the `inWorktree(slot)` generated function in the generator.
 - Watch the **nested template-literal escaping** in the generator: conductor-runtime refs are
   `\${...}` (literal in output); generation-time values like `${SCHEMA(...)}` are not escaped.

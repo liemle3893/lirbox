@@ -21,3 +21,9 @@ implementation-notes/
 *-flowchart.html
 *-codewalk.html
 *-plan-deck.html
+
+# EXCEPTION: conductor's Writeup phase PROMOTES delivery artifacts into docs/changes/<name>/
+# (writeup.html, design.html, notes/*.html, summary.md) — these ARE tracked, they ride the PR.
+# Must come AFTER the filename-globs above so it re-includes anything they would catch.
+!docs/changes/
+!docs/changes/**
