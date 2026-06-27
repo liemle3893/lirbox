@@ -210,5 +210,38 @@ try {
   try { if (fs.existsSync('.improve') && fs.readdirSync('.improve').length === 0) fs.rmdirSync('.improve'); } catch {}
 }
 
+// ============================================================================
+// PART 4 — scaffold-readiness.cjs: makes a skill whetstone-ready (init mode).
+// It must write the floor scaffolding, detect argument-hint (custom floor), produce a GREEN
+// floor on the fresh skill, and be idempotent.
+// ============================================================================
+const SCAF = path.join(__dirname, 'scaffold-readiness.cjs');
+const rtmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-readiness-'));
+const rSkill = path.join(rtmp, 'tskill');
+fs.mkdirSync(rSkill, { recursive: true });
+fs.writeFileSync(path.join(rSkill, 'SKILL.md'),
+  '---\nname: tskill\nargument-hint: "[x]"\ndescription: "tmp skill for the readiness test."\nallowed-tools:\n  - Read\n---\nBody.\n');
+try {
+  // cwd=rtmp so the scaffolder's feedback/<skill>.jsonl lands in the tmp dir, not the repo.
+  const out = execFileSync('node', [SCAF, '--name', 'tskill', '--skill-path', rSkill], { encoding: 'utf8', cwd: rtmp });
+  eq(/custom floor/.test(out), true, 'scaffold-readiness: argument-hint → custom floor (quick_validate skipped)');
+  eq(fs.existsSync(path.join(rSkill, 'evals', 'run.mjs')), true, 'scaffold-readiness: writes evals/run.mjs');
+  eq(fs.existsSync(path.join(rSkill, 'evals', 'floor', '00-structure.test.mjs')), true, 'scaffold-readiness: writes floor/00-structure.test.mjs');
+  eq(fs.existsSync(path.join(rSkill, 'evals', 'checks', '.gitkeep')), true, 'scaffold-readiness: writes checks/.gitkeep');
+  eq(fs.existsSync(path.join(rSkill, 'evals', 'README.md')), true, 'scaffold-readiness: writes evals/README.md');
+  eq(fs.existsSync(path.join(rtmp, 'feedback', 'tskill.jsonl')), true, 'scaffold-readiness: writes empty feedback/<skill>.jsonl');
+  // the scaffolded floor MUST be green on the fresh skill (throws → caught below).
+  execFileSync('node', [path.join(rSkill, 'evals', 'run.mjs')], { stdio: 'pipe' });
+  eq(true, true, 'scaffold-readiness: the scaffolded floor is GREEN on baseline');
+  // idempotency: a second run must skip every file.
+  const out2 = execFileSync('node', [SCAF, '--name', 'tskill', '--skill-path', rSkill], { encoding: 'utf8', cwd: rtmp });
+  eq((out2.match(/skip \(exists\)/g) || []).length, 5, 'scaffold-readiness: idempotent re-run skips all 5 files');
+} catch (e) {
+  fail(`scaffold-readiness error: ${e.message.split('\n')[0]}`);
+  if (e.stderr) console.error(`  ${String(e.stderr).trim().split('\n').slice(-3).join('\n  ')}`);
+} finally {
+  try { fs.rmSync(rtmp, { recursive: true, force: true }); } catch {}
+}
+
 if (failures) { console.error(`\n${failures} check(s) FAILED`); process.exit(1); }
 console.log(`\nAll helper checks passed.`);

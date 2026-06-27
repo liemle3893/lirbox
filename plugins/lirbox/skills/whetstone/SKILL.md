@@ -14,12 +14,14 @@ allowed-tools:
 $ARGUMENTS
 
 <arguments>
-`$ARGUMENTS` (top of file) is ONE free-text field — no flags, auto-detected three ways:
+`$ARGUMENTS` (top of file) is ONE free-text field — no flags, auto-detected four ways:
 
 1. **empty / `list`** → list mode: `node <skill-dir>/scripts/list-improvements.cjs` (`--all` for
    finished). Launch nothing.
-2. **matches `.improve/state/<arg>.json`** → resume that run from its ledger.
-3. **anything else** → a target skill to improve: derive a kebab `<skill>` slug, tell the user, run
+2. **`init <skill>`** → scaffold the eval FLOOR that makes `<skill>` whetstone-ready
+   (`scripts/scaffold-readiness.cjs`), print next steps, and stop. Launch nothing.
+3. **matches `.improve/state/<arg>.json`** → resume that run from its ledger.
+4. **anything else** → a target skill to improve: derive a kebab `<skill>` slug, tell the user, run
    **setup** (the attended half), and — only if confirmed — launch the loop.
 
 `<skill>` drives everything and is the resume key. Namespace (mirrors prospector's `.optimize/`):
@@ -62,6 +64,13 @@ passes AND surface-lock holds — the `fixer` may NEVER edit any check (`evals/*
 
 <step n="1" name="Resolve $ARGUMENTS">
 - **empty / `list`** → run `list-improvements.cjs` (`--all` for finished), show the table, stop.
+- **`init <skill>`** (arg begins with `init `) → run
+  `node <skill-dir>/scripts/scaffold-readiness.cjs --name <skill>` to write the eval floor
+  scaffolding (idempotent — `run.mjs`, a lenient `floor/00-structure.test.mjs`, `checks/`, README,
+  empty `feedback/<skill>.jsonl`). Relay its printed next-steps (add ≥1 behavior characterization
+  floor test, file concerns, then `whetstone <skill>`) and **stop** — do NOT draft checks or launch
+  the loop. Full recipe: `docs/whetstone-ready.md`. (`--skill-path` if the skill isn't at
+  `plugins/lirbox/skills/<skill>`.)
 - else read `.improve/state/<arg>.json` directly (the skill runs in the main session):
   - `running` / `stopped` / `failed` → **resume** (step 3); config + items come from `config/`. Don't
     regenerate the loop script if it exists unchanged.
@@ -208,6 +217,11 @@ and `references/checks.md` (discrimination gate §3, floor §4, locked set §5, 
 </gotchas>
 
 <resources>
+- `scripts/scaffold-readiness.cjs --name <skill> [--skill-path <dir>]` — **`init` mode** (step 1):
+  scaffolds the eval FLOOR that makes a skill whetstone-ready — `evals/run.mjs`, a lenient
+  `floor/00-structure.test.mjs` (real, green-on-baseline; stands in for `quick_validate` when the
+  skill uses `argument-hint`), `checks/`, README, empty `feedback/<skill>.jsonl`. Idempotent;
+  detects `argument-hint`/`disable-model-invocation` → custom floor. Recipe: `docs/whetstone-ready.md`.
 - `scripts/scaffold-improve.cjs --name <skill>` — **generates** the loop conductor from the approved
   config (SoT for all loop boilerplate: baseline → backlog loop → fix → floor+check+surface →
   keep/revert → checkpoint → stop). Use instead of hand-authoring. Setup step 7.
@@ -218,8 +232,9 @@ and `references/checks.md` (discrimination gate §3, floor §4, locked set §5, 
 - `scripts/improve-report.cjs <skill>` — per-item verdict table + kept/reverted/unresolved/human-only
   counts + branch/worktree + the `git diff <baseline>..improve/<skill>` pointer →
   `.improve/reports/<skill>.md`. Finalize (step 4).
-- `scripts/test-improve.cjs` — regression net for the generator + helpers (unit + structure +
-  no-fs scan + discrimination + report). Run after any change to `scaffold-improve.cjs`.
+- `scripts/test-improve.cjs` — regression net for the generators + helpers (unit + structure +
+  no-fs scan + discrimination + report + the `scaffold-readiness` floor scaffold). Run after any
+  change to `scaffold-improve.cjs` or `scaffold-readiness.cjs`.
 - `references/loop-runtime.md` — two-layer constraints, `items[]` ledger schema, keep/revert,
   surface-lock (editable−locked), unresolved-after-N, resume protocol, common mistakes. Load before
   authoring the loop.
