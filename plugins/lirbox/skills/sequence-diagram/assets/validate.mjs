@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Headless static validator for sequence-diagram output. Zero deps (node:fs).
 // Checks: one mermaid block that is a sequenceDiagram with autonumber; message↔STEPLIST
-// parity (count match); DEFAULT_STEP in range; exactly one crit step; no literal "\n" or ";"
-// in message text (known render-breakers — escape with <br/>, avoid ";"); SRI intact; no
-// leftover template markers/placeholders. Heuristics documented in the plan/components.md.
+// parity (count match); DEFAULT_STEP in range; exactly one crit step; no literal "\n", ";",
+// or unescaped "#" in message text (known render-breakers — escape with <br/>, avoid ";",
+// write a literal hash as #35;); SRI intact; no leftover template markers/placeholders.
+// Heuristics documented in the plan/components.md.
 //
 // MESSAGE COUNT (the parity heuristic) — counts LOGICAL steps, matching how a STEPLIST is
 // authored ("one entry per autonumbered message, in order"). An `alt`/`opt` block is ONE
@@ -65,6 +66,11 @@ function validateFile(file) {
       const text = mm[1];
       if (text.includes('\\n')) push(line, 'literal "\\n" in message text — use <br/>', t);
       if (text.includes(';')) push(line, '";" in message text — Mermaid may treat it as a separator; remove it', t);
+      // A bare "#" is Mermaid's entity-escape introducer in message text (#35;, #9829;, #59;).
+      // An unescaped "#" not forming a valid "#<name-or-digits>;" entity makes Mermaid swallow
+      // following text as a malformed entity → mangled/empty render (no parse error to see).
+      // Allow a correctly-formed entity escape; flag any other literal "#".
+      if (/#(?![a-zA-Z0-9]+;)/.test(text)) push(line, 'literal "#" in message text — Mermaid reads it as an entity-code introducer; escape it as #35; (a real entity like #9829; is fine)', t);
       if (!inSkippedBranch()) msgCount++;
     }
   });

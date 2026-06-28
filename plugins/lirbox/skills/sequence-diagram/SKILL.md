@@ -44,7 +44,7 @@ Line breaks in message text: `<br/>` only; avoid `;`. Default output: `./<slug>-
 - **Run the validator — the headless gate:** `node <skill-dir>/assets/validate.mjs <output>.html`
   must print `PASS` / exit 0. It checks: it's a `sequenceDiagram` with `autonumber`; every
   autonumbered message has exactly one `STEPLIST` entry (1:1 count); one `crit:true`;
-  `DEFAULT_STEP` in range; no literal `\n`/`;` in message text; SRI intact; no leftover markers.
+  `DEFAULT_STEP` in range; no literal `\n`/`;` or unescaped `#` in message text; SRI intact; no leftover markers.
 - Both marker pairs removed; zero `{{…}}`.
 - Optional (needs internet): open in a browser — numbered steps clickable, panel updates,
   Mermaid renders with no parse error.

@@ -17,6 +17,7 @@ ok(validateExit('clean.html') === 0, 'a clean sequence diagram passes (exit 0)')
 ok(validateExit('no-autonumber.html') === 1, 'a missing autonumber is flagged (exit 1)');
 ok(validateExit('parity.html') === 1, 'a message/STEPLIST count mismatch is flagged (exit 1)');
 ok(validateExit('literal-newline.html') === 1, 'a literal \\n in message text is flagged (exit 1)');
+ok(validateExit('raw-hash.html') === 1, 'a literal "#" in message text is flagged (exit 1)');
 
 if (failures) { console.error(`\n${failures} floor check(s) FAILED`); process.exit(1); }
 console.log('\nfloor: sequence structure characterization green.');

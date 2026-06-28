@@ -75,11 +75,17 @@ its own grammar over it. Two rules for **message / note text**:
    `\n` (it does not break the line). Use `<br/>` inside the message text instead.
 2. **Avoid `;` in message text.** Mermaid can treat `;` as a statement separator and
    misparse the line. Reword to drop it.
-3. **HTML-escape `< > &`** in message/note text (`&lt;` `&gt;` `&amp;`) so they don't collide
+3. **Escape a literal `#` as `#35;`.** In message/note text `#` is Mermaid's entity-code
+   introducer (`#9829;`→♥, `#59;`→`;`). An unescaped `#` that doesn't form a valid
+   `#<digits-or-name>;` entity makes Mermaid swallow the following text as a malformed entity
+   and render it mangled or empty — with no console parse error to warn you. So `ping #alerts`
+   must become `ping #35;alerts` (or just reword to drop the hash). A correctly-formed entity
+   like `#9829;` is fine and is the intended way to emit a symbol.
+4. **HTML-escape `< > &`** in message/note text (`&lt;` `&gt;` `&amp;`) so they don't collide
    with Mermaid's inline-HTML handling.
 
-`assets/validate.mjs` enforces the `\n` and `;` rules headlessly — run it before claiming done
-(see below).
+`assets/validate.mjs` enforces the `\n`, `;`, and unescaped-`#` rules headlessly — run it
+before claiming done (see below).
 
 ## Filling the step list (`STEPLIST`)
 
@@ -137,8 +143,8 @@ and update both the `src` and `integrity` attributes. Never drop the integrity a
   browser): `node <skill-dir>/assets/validate.mjs <output>.html`. It must print `PASS` /
   exit 0. It checks: the block is a `sequenceDiagram` with `autonumber`; the message count and
   `STEPLIST` length match 1:1; exactly one `crit:true`; `DEFAULT_STEP` in range; no literal
-  `\n` or `;` in message text; SRI intact; no leftover markers/placeholders. Fix what it flags
-  and re-run until clean.
+  `\n`, `;`, or unescaped `#` in message text; SRI intact; no leftover markers/placeholders.
+  Fix what it flags and re-run until clean.
 - Both `TEMPLATE-SEQ` markers and both `TEMPLATE-STEPLIST` markers are gone; zero `{{…}}` left.
 - The `<script>` keeps its `integrity` + `crossorigin` attributes. One `<h1 class="title">`.
 - Optional final check (needs internet): open it in a browser — the diagram renders with no
