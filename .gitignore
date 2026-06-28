@@ -17,10 +17,12 @@ implementation-notes/
 # Git worktrees created by conductor/prospector/whetstone
 .worktrees/
 
-# Generated single-file HTML artifacts (flowchart / codewalk / plan-deck skills)
+# Generated single-file HTML artifacts (flowchart / codewalk / plan-deck / component / sequence skills)
 *-flowchart.html
 *-codewalk.html
 *-plan-deck.html
+*-component.html
+*-sequence.html
 
 # EXCEPTION: conductor's Writeup phase PROMOTES delivery artifacts into docs/changes/<name>/
 # (writeup.html, design.html, notes/*.html, summary.md) — these ARE tracked, they ride the PR.

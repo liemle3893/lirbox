@@ -15,6 +15,8 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`plan-deck`** | Turn a spec or task into a self-contained HTML implementation plan (milestone timeline, data-flow, mockups, key code, risks, open questions). Feature, backend, infra/migration, refactor. |
 | **`codewalk`** | Trace one path through a real codebase into a self-contained HTML walkthrough (path diagram, numbered steps with verified `file:line` + code excerpts, key files, gotchas). For onboarding or auditing a flow/subsystem. |
 | **`flowchart`** | Turn a branching process (CI/deploy pipeline, approval/OTP funnel, state machine) into an interactive HTML flowchart — Mermaid diagram with decision diamonds + clickable per-node detail panel. Note: renders via a CDN, so this one needs internet. |
+| **`component-diagram`** | Draw a system's static structure as a self-contained interactive HTML component diagram — Mermaid flowchart with subgraph boundaries + typed dependency edges + a clickable per-component panel (responsibility / interface / deps). Note: renders via a CDN, so this one needs internet. |
+| **`sequence-diagram`** | Draw a time-ordered interaction as a self-contained interactive HTML sequence diagram — Mermaid sequenceDiagram (autonumbered) + a numbered step list driving a clickable detail panel (who→who, sync/async, code at the call site). Note: renders via a CDN, so this one needs internet. |
 | **`deep-understanding`** | Interactive tutor: teaches you to deeply understand a PR/change/subsystem, incrementally — assesses what you know, fills gaps, quizzes you (problem → solution → impact), and doesn't stop until mastery is verified. Not a document — a guided session. |
 | **`conductor`** | Drive the Workflow tool with durable on-disk state, crash/restart resume, worktree isolation, opt-in enforcement gates, and a cost report. For long or interruptible multi-subagent runs (migrations, audits, staged delivery). |
 | **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE code surface — keeping a change only when it strictly beats the metric **and** passes the gate — on an isolated branch, never auto-merged. For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost. |
@@ -49,13 +51,15 @@ write up PR 1059 verbose            # snippet on every non-trivial file
 make a plan-deck for <spec/task>    # plan-deck
 codewalk the auth flow              # codewalk
 flowchart the deploy pipeline       # flowchart
+diagram the components of <service>  # component-diagram
+sequence-diagram the login flow      # sequence-diagram
 help me deeply understand PR 1059   # deep-understanding (interactive, quizzes you)
 implement <plan/spec> with resume   # conductor (durable, crash-safe multi-subagent run)
 make the /search endpoint faster    # prospector (proposes a metric + gate, confirms once)
 improve the flowchart skill         # whetstone (overnight, eval-gated, from a backlog)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`).
 
 ## Test locally (no install)
 

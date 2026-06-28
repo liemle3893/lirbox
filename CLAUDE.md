@@ -11,7 +11,7 @@ Full skill catalog → [README.md](./README.md). Adding a skill/agent/plugin →
 
 ## Two skill families (and the conventions that matter)
 
-**HTML-artifact skills** (`codewalk`, `flowchart`, `plan-deck`, `pr-writeup`) emit one self-contained HTML
+**HTML-artifact skills** (`codewalk`, `flowchart`, `component-diagram`, `sequence-diagram`, `plan-deck`, `pr-writeup`) emit one self-contained HTML
 file. `flowchart` ships a headless `assets/validate.mjs` — run it on output
 (`node .../validate.mjs <file>.html`); it catches Mermaid label-escaping bugs. `deep-understanding` is an
 interactive tutor (no artifact).
