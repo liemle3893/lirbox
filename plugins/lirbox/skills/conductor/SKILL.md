@@ -200,7 +200,7 @@ subagent round-trips; reserve them for work that warrants them:
 structure.
 - `--model-mode default` (default) — emit no `model:` opt; every worker inherits the session
   model (today's behavior, byte-for-byte).
-- `--model-mode balanced` — tier each worker by phase class: **haiku** for mechanical work
+- `--model-mode auto` — tier each worker by phase class: **haiku** for mechanical work
   (Setup, every checkpoint, Verify/ReVerify, PR, TicketUpdate), the **think** model for reasoning
   (Brief, RED, PathGap, CodeGate/Review, TestGate, DocsGate, Writeup), and the **work** model for
   the `--phases` tasks. Tune with `--model-think <sonnet|opus|haiku|fable>` (default `opus`) and

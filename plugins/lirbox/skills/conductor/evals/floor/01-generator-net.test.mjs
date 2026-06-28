@@ -2,7 +2,7 @@
 //
 // Runs scripts/test-scaffold.cjs, which pins the WHOLE generator: 16 flag/profile combos
 // (syntax + emitted-vs-reported phase order + the conductor-purity string-scan) plus 17 eval
-// assertions (default byte-cost-free, balanced model tiers, writeup wiring, DocsGate path,
+// assertions (default byte-cost-free, auto model tiers, writeup wiring, DocsGate path,
 // invalid-flag rejection). This is the behavioral core a whetstone fix must never regress — a
 // candidate that breaks it goes RED here and is reverted. PASSES on baseline.
 //

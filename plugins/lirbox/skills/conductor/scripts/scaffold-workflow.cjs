@@ -22,9 +22,9 @@
  *   --writeup            add a Writeup phase (promote implementation-notes + pr-writeup HTML +
  *                        design diagram, committed under docs/changes/<name>/). Default ON when a
  *                        PR phase exists; --no-writeup opts out.
- *   --model-mode <m>     default (inherit session model, no opt emitted) | balanced (tier by phase)
- *   --model-think <m>    balanced thinking-tier model: sonnet|opus|haiku|fable (default opus)
- *   --model-work <m>     balanced work-phase model:    sonnet|opus|haiku|fable (default sonnet)
+ *   --model-mode <m>     default (inherit session model, no opt emitted) | auto (tier by phase)
+ *   --model-think <m>    auto thinking-tier model: sonnet|opus|haiku|fable (default opus)
+ *   --model-work <m>     auto work-phase model:    sonnet|opus|haiku|fable (default sonnet)
  *   --profile lite       routine small-task delivery: --ticket --pr --merge-gates, 1 work phase
  *   --profile delivery   full TDD cycle + all gates (--cycle --ticket --pr --enforce-docs)
  *   --out <path>         output file (default: .workflows/<name>.js)
@@ -81,24 +81,24 @@ const at = (a) => (a && a !== 'none' && a !== true) ? `agentType: '${a}',` : '';
 // --- model selection (--model-mode) ---
 // default  : emit NO `model:` opt at all → every worker inherits the session model. Output is
 //            byte-identical to the pre-mode generator (the backward-compat invariant).
-// balanced : tag each agent() call with a `model:` opt by phase CLASS — a cheap model for
+// auto     : tag each agent() call with a `model:` opt by phase CLASS — a cheap model for
 //            mechanical/IO work, a strong model for reasoning, the work phases the advisor's call.
 const MODEL_VALUES = ['sonnet', 'opus', 'haiku', 'fable'];
 const modelMode = arg('model-mode', 'default');
-if (modelMode !== 'default' && modelMode !== 'balanced') {
-  console.error(`ERROR: --model-mode must be 'default' or 'balanced' (got '${modelMode}')`); process.exit(1);
+if (modelMode !== 'default' && modelMode !== 'auto') {
+  console.error(`ERROR: --model-mode must be 'default' or 'auto' (got '${modelMode}')`); process.exit(1);
 }
 // In default mode no `model:` opt is emitted, so --model-think/--model-work would be silently
 // ignored. Reject them loudly instead of pretending they took effect.
 if (modelMode === 'default') {
   for (const flag of ['--model-think', '--model-work']) {
     if (process.argv.includes(flag)) {
-      console.error(`ERROR: ${flag} requires --model-mode balanced (ignored in default mode)`); process.exit(1);
+      console.error(`ERROR: ${flag} requires --model-mode auto (ignored in default mode)`); process.exit(1);
     }
   }
 }
-const modelThink = arg('model-think', 'opus');  // thinking-tier model (balanced)
-const modelWork = arg('model-work', 'sonnet');  // work-phase model (balanced; advisor's call)
+const modelThink = arg('model-think', 'opus');  // thinking-tier model (auto)
+const modelWork = arg('model-work', 'sonnet');  // work-phase model (auto; advisor's call)
 for (const [flag, val] of [['--model-think', modelThink], ['--model-work', modelWork]]) {
   if (val === true || !MODEL_VALUES.includes(val)) {
     console.error(`ERROR: ${flag} must be one of: ${MODEL_VALUES.join(', ')}`); process.exit(1);
@@ -107,10 +107,10 @@ for (const [flag, val] of [['--model-think', modelThink], ['--model-work', model
 // class → model. mechanical: worktree/checkpoint/verify/push/ticket. think: RED, gates, pathgap,
 // docs, writeup, brief. work: the --phases tasks.
 const MODEL_TIER = { mechanical: 'haiku', think: modelThink, work: modelWork };
-// Emits the class opt fragment in balanced mode (or '' in default mode, no opt emitted): the
+// Emits the class opt fragment in auto mode (or '' in default mode, no opt emitted): the
 // `model: '<m>',` opt, plus `effort: 'high',` for the think class — reasoning phases get the
 // stronger reasoning budget; mechanical/work phases never carry an effort opt.
-const mdl = (cls) => (modelMode === 'balanced' && MODEL_TIER[cls])
+const mdl = (cls) => (modelMode === 'auto' && MODEL_TIER[cls])
   ? `model: '${MODEL_TIER[cls]}',${cls === 'think' ? " effort: 'high'," : ''}`
   : '';
 const mechFrag = mdl('mechanical');  // used by Setup + checkpoint (emitted in the template tail)
@@ -576,8 +576,8 @@ fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, src);
 console.log(`Generated ${out}`);
 console.log(`Phases: ${phaseOrder.join(' → ')}`);
-console.log(modelMode === 'balanced'
-  ? `Model mode: balanced (think=${modelThink}, work=${modelWork}, mechanical=haiku)`
+console.log(modelMode === 'auto'
+  ? `Model mode: auto (think=${modelThink}, work=${modelWork}, mechanical=haiku)`
   : `Model mode: default (workers inherit the session model)`);
 if (pendingTodos > 0) {
   console.log(`${pendingTodos} work phase(s) still hold a TODO prompt — regenerate with --prompt/--prompts-file (+ --force) to fill them from data. Do NOT hand-edit. Then launch.`);
