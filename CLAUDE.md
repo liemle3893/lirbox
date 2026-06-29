@@ -5,7 +5,6 @@ Personal Claude Code **plugin marketplace**. One plugin, `lirbox`, under `plugin
 - `skills/<name>/SKILL.md` (+ optional `scripts/`, `references/`, `assets/`) — one skill each.
 - `agents/<name>.md` — subagents (the default enforcement gates for `conductor`, usable standalone).
 - `.claude-plugin/marketplace.json` — marketplace manifest (skills are auto-discovered, not listed here).
-- `docs/superpowers/{specs,plans}/` — design specs + implementation plans for in-flight work.
 
 Full skill catalog → [README.md](./README.md). Adding a skill/agent/plugin → [CONTRIBUTING.md](./CONTRIBUTING.md).
 

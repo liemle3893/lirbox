@@ -2,6 +2,9 @@
 .DS_Store
 *.swp
 
+# Local design docs (brainstorming specs / implementation plans) — never tracked or published
+docs/superpowers/
+
 # Runtime artifacts from the pr-writeup skill (if ever run inside the repo)
 .pr-writeup/
 *-writeup.html
