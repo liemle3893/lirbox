@@ -27,6 +27,20 @@ function mermaidBlocks(html) {
   return out;
 }
 
+// Split a STEPLIST array body into its top-level `{…}` entry sources. Tracks brace depth and
+// string state so braces inside string values don't confuse the boundaries.
+function steplistEntries(listBlock) {
+  const entries = []; let depth = 0, start = -1, str = null;
+  for (let i = 0; i < listBlock.length; i++) {
+    const c = listBlock[i];
+    if (str) { if (c === '\\') i++; else if (c === str) str = null; continue; }
+    if (c === '"' || c === "'" || c === '`') { str = c; continue; }
+    if (c === '{') { if (depth === 0) start = i; depth++; }
+    else if (c === '}') { depth--; if (depth === 0 && start >= 0) { entries.push(listBlock.slice(start, i + 1)); start = -1; } }
+  }
+  return entries;
+}
+
 function validateFile(file) {
   let html;
   try { html = readFileSync(file, 'utf8'); } catch (e) { return [{ line: 0, msg: `cannot read: ${e.message}` }]; }
@@ -80,6 +94,16 @@ function validateFile(file) {
   const listBlock = (html.match(/const\s+STEPLIST\s*=\s*\[([\s\S]*?)\];/) || [, ''])[1];
   const stepCount = (listBlock.match(/\btitle\s*:/g) || []).length;
   if (stepCount !== msgCount) push(0, `STEPLIST has ${stepCount} entries but the diagram has ${msgCount} messages — they must match 1:1`);
+  // Each entry needs BOTH `from` and `to`: the detail panel renders the who→who chip only when
+  // both are present, and the authoring guide treats them as required. Flag any half-populated
+  // (or missing) one so a no-chip entry can't slip past the title-count parity check.
+  steplistEntries(listBlock).forEach((entry, i) => {
+    const missing = ['from', 'to'].filter((k) => !new RegExp(`\\b${k}\\s*:`).test(entry));
+    if (missing.length) {
+      const title = (entry.match(/\btitle\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/) || [, , `#${i + 1}`])[2];
+      push(0, `STEPLIST entry "${title}" is missing ${missing.join('/')} — both from and to are required (the who→who chip needs both)`);
+    }
+  });
   const critCount = (listBlock.match(/\bcrit\s*:\s*true\b/g) || []).length;
   if (critCount !== 1) push(0, `expected exactly one STEPLIST entry with crit:true, found ${critCount}`);
   const defM = html.match(/const\s+DEFAULT_STEP\s*=\s*(\d+)/);
