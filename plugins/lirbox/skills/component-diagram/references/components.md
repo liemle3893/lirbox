@@ -85,9 +85,29 @@ labels** alike:
 ### Colour classes
 
 The template defines `classDef`s — keep them: `:::boundary`, `:::store` (data store),
-`:::crit` (the one control point). **Highlight exactly one `:::crit`** — the single
-component the reader should notice (the validator requires exactly one). More than one
-dilutes it.
+`:::crit` (the one control point), and `:::external` (a third-party / external system).
+**Highlight exactly one `:::crit`** — the single component the reader should notice (the
+validator requires exactly one). More than one dilutes it.
+
+### External / third-party systems (`:::external`)
+
+A microservices map usually mixes **in-house services you own** with **external / third-party
+dependencies you don't** (Stripe, an upstream partner API, a managed queue, an auth provider).
+Mark every external system distinctly so the reader can see the ownership boundary at a glance —
+apply the `:::external` class (the template ships `classDef external …` with a muted, dashed
+border) to each node that belongs to a third party:
+```
+subgraph ext[Third-party]
+  stripe[Stripe API]:::external
+  twilio[Twilio]:::external
+end
+orders -->|charges| stripe
+```
+Use it on the **node**, not the boundary, so an external component placed inside an in-house
+subgraph still reads as external. Reserve `:::crit` for your own one control point — an external
+dependency is rarely the thing the reader should focus on, so it should not also be `:::crit`.
+If you prefer a one-off colour instead of the shared class, define your own `classDef extDep …`
+and apply it the same way; the `classDef <name>ext…` naming keeps the intent obvious.
 
 ### Wiring clicks
 
