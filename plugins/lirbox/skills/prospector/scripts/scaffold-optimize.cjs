@@ -116,6 +116,10 @@ export const meta = {
   ],
 }
 
+// Normalize the Workflow \`args\` global: some harnesses deliver it as a JSON STRING, others as an
+// object. Parse-if-string so every \`(args && args.X)\` read below sees an object (or undefined).
+if (typeof args === 'string') args = JSON.parse(args)
+
 // ---------------------------------------------------------------------------
 // Pure decision helpers — inlined from scaffold-optimize.cjs (legal in the restricted layer).
 // isBetter(metric, best, direction, minDelta) — the metric half of the KEEP rule.

@@ -90,6 +90,9 @@ export const meta = {
   phases: [ { title: 'Setup' }, { title: 'Baseline' }, { title: 'Items' } ],
 }
 
+// Some Workflow harnesses deliver \`args\` as a JSON STRING; normalize to an object before any read.
+if (typeof args === 'string') args = JSON.parse(args)
+
 // ---------------------------------------------------------------------------
 // Pure decision helpers — inlined from scaffold-improve.cjs (legal in the restricted layer).
 // surfaceAllows(files, editable, locked) — the surface-lock fence (editable minus locked).

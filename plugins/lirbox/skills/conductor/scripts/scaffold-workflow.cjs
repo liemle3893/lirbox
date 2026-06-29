@@ -455,6 +455,11 @@ ${metaPhases}
   ],
 }
 
+// Some Workflow harnesses deliver \`args\` as a JSON STRING rather than an object; normalize
+// once here (BEFORE any args read) so every \`(args && args.X)\` guard below works either way.
+// Uses only typeof + JSON.parse — both allowed at the restricted conductor layer.
+if (typeof args === 'string') args = JSON.parse(args)
+
 const NAME     = '${name}'
 const STATE    = \`.workflows/state/\${NAME}.json\`
 const BRANCH   = (args && args.branch) ? args.branch : \`wf/\${NAME}\`
