@@ -134,6 +134,15 @@ function validateFile(file) {
     }
   }
 
+  // dangling STEPS key: a STEPS entry whose key matches NO graph node id is a panel the
+  // reader can never reach — there is no diagram node to click. The click↔STEPS parity
+  // above only guards click→STEPS; this guards the STEPS→node direction.
+  for (const key of stepKeys) {
+    if (!nodeIds.has(key)) {
+      push(0, `STEPS key "${key}" matches no graph node id — dangling/orphan panel entry`);
+    }
+  }
+
   return findings;
 }
 
