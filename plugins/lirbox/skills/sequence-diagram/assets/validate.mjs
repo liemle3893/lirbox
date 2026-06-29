@@ -122,18 +122,26 @@ function validateFile(file) {
   // Each entry needs BOTH `from` and `to`: the detail panel renders the who→who chip only when
   // both are present, and the authoring guide treats them as required. Flag any half-populated
   // (or missing) one so a no-chip entry can't slip past the title-count parity check.
-  // `kind` must match the arrow of the message it maps to (components.md: solid `->>` = sync,
-  // dashed `-->>` = return, open `-)` = async). The STEPLIST is 1:1 with counted messages, so
-  // entry i corresponds to msgKinds[i]; flag a kind that contradicts that arrow (a wrong kind
-  // mislabels the detail-panel chip). Skip when the arrow is unconstrained or the entry omits
-  // kind (a missing kind is steplist-missing-kind's concern, not this one).
+  // `kind` is required on every entry AND must match the arrow of the message it maps to
+  // (components.md: solid `->>` = sync, dashed `-->>` = return, open `-)` = async). The STEPLIST
+  // is 1:1 with counted messages, so entry i corresponds to msgKinds[i]: flag a MISSING kind
+  // (unlabeled in the panel/legend), and — when present — flag a kind that contradicts that arrow
+  // (a wrong kind mislabels the detail-panel chip). The mismatch check skips when the arrow is
+  // unconstrained (arrowKind → null).
   steplistEntries(listBlock).forEach((entry, i) => {
     const missing = ['from', 'to'].filter((k) => !new RegExp(`\\b${k}\\s*:`).test(entry));
     if (missing.length) {
       const title = (entry.match(/\btitle\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/) || [, , `#${i + 1}`])[2];
       push(0, `STEPLIST entry "${title}" is missing ${missing.join('/')} — both from and to are required (the who→who chip needs both)`);
     }
+    // `kind` ("sync" | "return" | "async") is part of the required entry shape (authoring guide):
+    // the detail panel and legend classify every message by it, so a missing kind leaves the entry
+    // unlabeled. Flag its absence regardless of arrow constraint.
     const kindM = entry.match(/\bkind\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/);
+    if (!kindM) {
+      const title = (entry.match(/\btitle\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/) || [, , `#${i + 1}`])[2];
+      push(0, `STEPLIST entry "${title}" is missing kind — every entry needs kind ("sync" | "return" | "async") for the detail-panel/legend classification`);
+    }
     const expected = msgKinds[i];
     if (kindM && expected && kindM[2] !== expected) {
       const title = (entry.match(/\btitle\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/) || [, , `#${i + 1}`])[2];
