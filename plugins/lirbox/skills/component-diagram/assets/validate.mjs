@@ -56,6 +56,12 @@ function validateFile(file) {
   const blocks = mermaidBlocks(html);
   if (blocks.length === 0) return [...findings, { line: 0, msg: 'no <pre class="mermaid"> block found' }];
 
+  // Graph node ids (component rectangles + edge endpoints), and the subgraph boundary
+  // ids — boundaries are NOT inspectable components, so they are excused from the
+  // orphan rule below.
+  const nodeIds = new Set();
+  const subgraphIds = new Set();
+
   for (const b of blocks) {
     const lines = b.text.split('\n');
     const joined = b.text;
@@ -65,6 +71,21 @@ function validateFile(file) {
     lines.forEach((raw, i) => {
       const t = raw.trim();
       const line = b.startLine + i;
+      // Collect graph node ids so we can flag orphans (declared/edged but uninspectable).
+      // Subgraph ids name boundaries (not components) — track them separately so they are
+      // excused. Skip click/classDef/style headers; harvest ids only from content lines.
+      const sub = t.match(/^subgraph\s+(\w+)\b/);
+      if (sub) subgraphIds.add(sub[1]);
+      else if (!isStructural(t)) {
+        // `id[Label]` rectangle definitions
+        for (const m of t.matchAll(/(\w+)\s*\[/g)) nodeIds.add(m[1]);
+        // edge endpoints: source id sits just before an arrow operator; target id is the
+        // bare `\w+` ending the line (after the arrow and any optional `|label|`).
+        const src = t.match(/^(\w+)\s*-\.?-/);
+        if (src) nodeIds.add(src[1]);
+        const dst = t.match(/(?:->|\|)\s*(\w+)\s*$/);
+        if (dst) nodeIds.add(dst[1]);
+      }
       // diamond shape id{...} is forbidden (that is flowchart's job)
       if (!t.startsWith('classDef') && /[\w)\]]\s*\{[^{}]*\}/.test(t)) push(line, 'decision diamond {…} not allowed in a component diagram');
       // Rectangles only: every component must be a plain `id[Label]`. Reject exotic node
@@ -100,6 +121,18 @@ function validateFile(file) {
   for (const id of clickIds) if (!stepKeys.has(id)) push(0, `click target "${id}" has no STEPS entry`);
   const def = (html.match(/const\s+DEFAULT_NODE\s*=\s*["'](\w+)["']/) || [])[1];
   if (!def || !stepKeys.has(def)) push(0, `DEFAULT_NODE "${def || '(unset)'}" is not a STEPS key`);
+
+  // orphan node: a graph node id with NO click line AND no STEPS entry is uninspectable —
+  // the reader sees it in the diagram but can never open it. The click↔STEPS parity above
+  // only guards the click→STEPS direction; this guards the node→inspectability direction.
+  // Subgraph boundary ids are excused (boundaries aren't clickable components).
+  const clickSet = new Set(clickIds);
+  for (const id of nodeIds) {
+    if (subgraphIds.has(id)) continue;
+    if (!clickSet.has(id) && !stepKeys.has(id)) {
+      push(0, `orphan node "${id}" has no click line and no STEPS entry — every component the reader can inspect needs both`);
+    }
+  }
 
   return findings;
 }
