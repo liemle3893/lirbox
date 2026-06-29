@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<!--
+  Sequence diagram — generated, self-contained HTML. Renders a time-ordered interaction with
+  Mermaid (sequenceDiagram + autonumber, loaded from CDN) + a NUMBERED side-list that drives
+  a detail panel. NEEDS INTERNET to render (Mermaid is fetched from a CDN).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sequence — User login flow</title>
+<style>
+  :root{
+    --ivory:#FAF9F5; --paper:#FFFFFF; --slate:#141413; --slate-soft:#3A3A37;
+    --muted:#6B6B66; --line:#E7E4DC; --line-soft:#F0EEE7;
+    --clay:#D97757; --clay-deep:#B04A3F; --clay-soft:#FBEDE7;
+    --olive:#788C5D; --olive-soft:#EEF1E7; --oat:#E3DACC; --oat-soft:#F3EFE6;
+    --code-bg:#1F1E1B; --code-line:#2E2C28; --kw:#E0A08A; --str:#A6BE83; --com:#6B6B66; --fn:#D8C99B;
+    --radius:14px; --maxw:1180px;
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ivory);color:var(--slate);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  code{font-family:var(--mono);font-size:.86em;background:var(--line-soft);padding:.1em .4em;border-radius:5px}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 32px}
+
+  header.hero{border-bottom:1px solid var(--line)}
+  .hero-inner{padding:50px 0 32px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+  h1.title{font-family:var(--serif);font-weight:600;font-size:36px;line-height:1.18;margin:0 0 14px;letter-spacing:-.01em}
+  .lead{font-size:17px;color:var(--slate-soft);max-width:70ch;margin:0}
+  .lead code{font-size:.9em}
+
+  .layout{display:grid;grid-template-columns:1fr 340px;gap:40px;padding:34px 0 90px;align-items:start}
+  .chart{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px;overflow:auto}
+  .mermaid{font-family:var(--sans)}
+  aside{position:sticky;top:24px;display:flex;flex-direction:column;gap:20px}
+
+  /* Legend */
+  .legend{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .legend .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+  .leg{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--slate-soft);padding:4px 0}
+  .swatch{width:22px;height:14px;border-radius:4px;border:1px solid var(--line);flex:none}
+  .swatch.proc{background:var(--paper)} .swatch.dec{background:var(--oat-soft);border-color:var(--oat)}
+  .swatch.ok{background:var(--olive-soft);border-color:var(--olive)} .swatch.fail{background:var(--clay-soft);border-color:var(--clay)}
+  .swatch.line{height:0;border:none;border-top:2px solid var(--muted)}
+  .swatch.yes{height:0;border:none;border-top:2px solid var(--olive)} .swatch.no{height:0;border:none;border-top:2px solid var(--clay)}
+
+  /* Detail panel */
+  .detail{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px}
+  .detail .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--clay);margin:0 0 8px}
+  .detail h3{font-family:var(--serif);font-size:20px;margin:0 0 8px}
+  .detail .meta{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+  .detail .tag{font-family:var(--mono);font-size:11px;color:var(--slate-soft);background:var(--oat-soft);border:1px solid var(--oat);border-radius:20px;padding:2px 9px}
+  .detail p{margin:0 0 12px;color:var(--slate-soft);font-size:14.5px}
+  .detail pre{background:var(--code-bg);color:#E9E6DE;border-radius:10px;padding:13px 14px;overflow:auto;
+    font-family:var(--mono);font-size:12px;line-height:1.55;margin:0;border:1px solid var(--code-line)}
+  .detail pre .kw{color:var(--kw)} .detail pre .str{color:var(--str)} .detail pre .com{color:var(--com)} .detail pre .fn{color:var(--fn)}
+  .hint{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:10px}
+
+  footer{border-top:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:12px;padding:20px 0 40px}
+  @media(max-width:960px){.layout{grid-template-columns:1fr;gap:24px} aside{position:static}}
+
+  /* Numbered step list */
+  .steplist{margin:0;padding-left:0;list-style:none;counter-reset:s}
+  .steplist li{counter-increment:s;margin:0 0 4px}
+  .steplist li button{all:unset;cursor:pointer;display:block;width:100%;font-size:13px;
+    color:var(--slate-soft);padding:6px 8px;border-radius:8px;line-height:1.4}
+  .steplist li button::before{content:counter(s)". ";font-family:var(--mono);color:var(--muted)}
+  .steplist li button:hover{background:var(--line-soft)}
+  .steplist li.active button{background:var(--oat-soft);color:var(--slate)}
+  .steplist li.crit button::after{content:" ●";color:var(--clay)}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap hero-inner">
+    <p class="eyebrow">Sequence · auth</p>
+    <h1 class="title">User login flow</h1>
+    <p class="lead">The ordered exchange when a user submits credentials: the API looks up the account, then issues a session or rejects. Click a numbered step for detail.</p>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <main>
+    <div class="chart">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant API as API
+  participant DB as Postgres
+  U->>API: POST /login
+  API->>DB: SELECT user by email
+  DB-->>API: row
+  alt password ok
+    API-->>U: 200 + session
+  else bad password
+    API-->>U: 401
+  end
+</pre>
+    </div>
+  </main>
+
+  <aside>
+    <div class="detail" id="detail">
+      <p class="lbl">Step detail</p>
+      <h3 id="d-title">—</h3>
+      <div class="meta" id="d-meta"></div>
+      <div id="d-body"></div>
+      <p class="hint">Click a numbered step to inspect it.</p>
+    </div>
+
+    <div class="legend">
+      <p class="lbl">Steps</p>
+      <ol id="steplist" class="steplist"></ol>
+    </div>
+  </aside>
+</div>
+
+<footer class="wrap">Sequence · auth · 2026-06-29</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js"
+        integrity="sha384-yQ4mmBBT+vhTAwjFH0toJXNYJ6O4usWnt6EPIdWwrRvx2V/n5lXuDZQwQFeSFydF"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+  // One entry per autonumbered message, in order. body/code are HTML (escape <,>,& in prose).
+  const STEPLIST = [
+    { title: "User submits credentials", from: "User", to: "API", kind: "sync", meta: ["POST /login"],
+      body: "<p>The login form posts email + password.</p>" },
+    { title: "Look up the user", from: "API", to: "Postgres", kind: "sync", crit: true, meta: ["SELECT"],
+      body: "<p>The load-bearing read — the trust decision hinges on this row.</p>",
+      code: "<pre><span class='kw'>SELECT</span> id, pw_hash <span class='kw'>FROM</span> users <span class='kw'>WHERE</span> email = $1</pre>" },
+    { title: "Row returned", from: "Postgres", to: "API", meta: ["row"],
+      body: "<p>The user record (or none) comes back.</p>" },
+    { title: "Session issued / rejected", from: "API", to: "User", kind: "return", meta: ["200 / 401"],
+      body: "<p>On match: 200 + session cookie. On mismatch: 401.</p>" },
+  ];
+  const DEFAULT_STEP = 0;
+
+  function selectStep(i){
+    const s = STEPLIST[i]; if(!s) return;
+    document.getElementById('d-title').textContent = s.title;
+    const chips = [ (s.from && s.to) ? `${s.from} → ${s.to}` : null, s.kind, ...(s.meta||[]) ].filter(Boolean);
+    document.getElementById('d-meta').innerHTML = chips.map(m=>`<span class="tag">${m}</span>`).join('');
+    document.getElementById('d-body').innerHTML = (s.body||'') + (s.code||'');
+    document.querySelectorAll('#steplist li').forEach((li,j)=>li.classList.toggle('active', j===i));
+  }
+  function renderSteps(){
+    const ol = document.getElementById('steplist');
+    ol.innerHTML = STEPLIST.map((s,i)=>`<li${s.crit?' class="crit"':''}><button data-i="${i}">${s.title}</button></li>`).join('');
+    ol.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>selectStep(+b.dataset.i)));
+  }
+  window.selectStep = selectStep;
+
+  mermaid.initialize({ startOnLoad:false, securityLevel:'loose', theme:'base',
+    themeVariables:{ fontFamily:'-apple-system,Segoe UI,Roboto,sans-serif', primaryColor:'#FFFFFF',
+      primaryBorderColor:'#E7E4DC', primaryTextColor:'#141413', lineColor:'#9A968C',
+      secondaryColor:'#F3EFE6', tertiaryColor:'#FAF9F5', actorBkg:'#FFFFFF', actorBorder:'#E7E4DC',
+      noteBkgColor:'#F3EFE6', noteBorderColor:'#E3DACC' } });
+  mermaid.run({ querySelector:'.mermaid' }).then(()=>{ renderSteps(); selectStep(DEFAULT_STEP); });
+</script>
+</body>
+</html>
