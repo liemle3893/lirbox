@@ -18,7 +18,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 
 const BLOCK_KW = /^(participant|actor|note|alt|else|opt|loop|par|and|end|rect|activate|deactivate|autonumber|title|box|critical|break)\b/;
-const ARROW = /^\s*[\w"']+\s*(?:--?(?:>>|>|\)|x))\s*[+-]?[\w"']+\s*:(.*)$/;
+const ARROW = /^\s*[\w"']+\s*(?:--?(?:>>|>|\)|x))\s*([+-]?)[\w"']+\s*:(.*)$/;
 
 function mermaidBlocks(html) {
   const re = /<pre[^>]*class=["'][^"']*\bmermaid\b[^"']*["'][^>]*>([\s\S]*?)<\/pre>/gi;
@@ -64,6 +64,11 @@ function validateFile(file) {
   // branch's messages count; `else`-alternative messages are collapsed into that step.
   // Stack of {type, branch} frames lets nested blocks be handled correctly.
   let msgCount = 0;
+  // Activation-bar balance: every opener (`->>+` suffix, or `activate X`) must have a matching
+  // closer (`-->>-` suffix, or `deactivate X`). A net-positive count = a dangling bar Mermaid
+  // renders broken. We track a running counter, not per-participant, since the defect is simply
+  // "an open with no matching close."
+  let activations = 0;
   const stack = [];
   const inSkippedBranch = () => stack.some((f) => (f.type === 'alt' || f.type === 'opt') && f.branch > 0);
   lines.forEach((raw, i) => {
@@ -74,10 +79,14 @@ function validateFile(file) {
     if (/^else\b/.test(t)) { const f = stack[stack.length - 1]; if (f) f.branch++; return; }
     if (/^and\b/.test(t)) return; // par-branch separator: messages still count (concurrent ≠ alternative)
     if (/^end\b/.test(t)) { stack.pop(); return; }
+    if (/^activate\b/.test(t)) { activations++; return; }
+    if (/^deactivate\b/.test(t)) { activations--; return; }
     if (BLOCK_KW.test(t)) return;
     const mm = t.match(ARROW);
     if (mm) {
-      const text = mm[1];
+      if (mm[1] === '+') activations++;
+      else if (mm[1] === '-') activations--;
+      const text = mm[2];
       if (text.includes('\\n')) push(line, 'literal "\\n" in message text — use <br/>', t);
       if (text.includes(';')) push(line, '";" in message text — Mermaid may treat it as a separator; remove it', t);
       // A bare "#" is Mermaid's entity-escape introducer in message text (#35;, #9829;, #59;).
@@ -89,6 +98,8 @@ function validateFile(file) {
     }
   });
   if (msgCount === 0) push(b.startLine, 'no messages found in the sequenceDiagram');
+  if (activations > 0) push(b.startLine, `unbalanced activation bar — ${activations} activation(s) opened (->>+ or activate) without a matching close (-->>- or deactivate); Mermaid renders this broken`);
+  else if (activations < 0) push(b.startLine, `unbalanced activation bar — ${-activations} activation close(s) (-->>- or deactivate) without a matching open; Mermaid renders this broken`);
 
   // STEPLIST parity (count title: keys in the STEPLIST array)
   const listBlock = (html.match(/const\s+STEPLIST\s*=\s*\[([\s\S]*?)\];/) || [, ''])[1];
