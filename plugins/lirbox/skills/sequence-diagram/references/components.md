@@ -57,6 +57,12 @@ loop every 30s             %% repeated messages
   Worker->>Queue: poll
 end
 
+loop retry until 2xx or 3 attempts   %% retry-with-backoff: put the EXIT condition in the loop label
+  Client->>+API: POST /charge
+  API-->>-Client: 503 (then wait 2^n * 100ms)   %% per-attempt BACKOFF stated on the reply
+end
+note right of Client: break out on first 2xx; give up after 3 attempts
+
 par fan-out                %% concurrent branches; separate with `and`
   API->>A: req
 and
@@ -65,6 +71,21 @@ end
 
 note over A,B: a side note %% `note over X` / `note left of X` / `note right of X`
 ```
+
+**Retry-with-backoff** is the most common resilience flow, so model it deliberately — a bare
+`loop` with no exit reads as "forever". Mermaid has no native loop guard, so encode the two
+things a reader needs to see *in text you control*:
+
+- **Exit / break condition** → write it into the `loop` **label** (`loop retry until 2xx or 3
+  attempts`). That label is the only place a stop/`break` rule survives; without it the reader
+  can't tell when the retry ends.
+- **Per-attempt backoff/delay** → state the wait on the failing **reply** message (or a `note`),
+  e.g. `503 (then wait 2^n * 100ms)` for exponential backoff (or a fixed delay). This is what
+  distinguishes a tight hot-loop from a backed-off retry.
+
+In the `STEPLIST`, the call and its reply inside the loop are normal steps; describe the exit
+condition and the backoff schedule in the step's `body` so the numbered list carries the full
+retry contract, not just one attempt.
 
 ### Escaping (REQUIRED — message text breaks Mermaid otherwise)
 

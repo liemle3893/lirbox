@@ -18,13 +18,38 @@
 import { readFileSync, readdirSync } from 'node:fs';
 
 const BLOCK_KW = /^(participant|actor|note|alt|else|opt|loop|par|and|end|rect|activate|deactivate|autonumber|title|box|critical|break)\b/;
-const ARROW = /^\s*[\w"']+\s*(?:--?(?:>>|>|\)|x))\s*[+-]?[\w"']+\s*:(.*)$/;
+const ARROW = /^\s*[\w"']+\s*(--?(?:>>|>|\)|x))\s*([+-]?)[\w"']+\s*:(.*)$/;
+
+// Map a message arrow operator to the `kind` the matching STEPLIST entry must declare
+// (components.md "arrow vocabulary"): solid `->>` = sync, dashed `-->>` = return, open `-)`/`--)`
+// = async. Single-head `->`/`-->` and `-x`/`--x` are ambiguous/uncommon, so they're left
+// unconstrained (returns null = "any kind ok") to avoid false positives.
+function arrowKind(op) {
+  if (op === '->>') return 'sync';
+  if (op === '-->>') return 'return';
+  if (op === '-)' || op === '--)') return 'async';
+  return null;
+}
 
 function mermaidBlocks(html) {
   const re = /<pre[^>]*class=["'][^"']*\bmermaid\b[^"']*["'][^>]*>([\s\S]*?)<\/pre>/gi;
   const out = []; let m;
   while ((m = re.exec(html))) out.push({ text: m[1], startLine: html.slice(0, m.index).split('\n').length });
   return out;
+}
+
+// Split a STEPLIST array body into its top-level `{…}` entry sources. Tracks brace depth and
+// string state so braces inside string values don't confuse the boundaries.
+function steplistEntries(listBlock) {
+  const entries = []; let depth = 0, start = -1, str = null;
+  for (let i = 0; i < listBlock.length; i++) {
+    const c = listBlock[i];
+    if (str) { if (c === '\\') i++; else if (c === str) str = null; continue; }
+    if (c === '"' || c === "'" || c === '`') { str = c; continue; }
+    if (c === '{') { if (depth === 0) start = i; depth++; }
+    else if (c === '}') { depth--; if (depth === 0 && start >= 0) { entries.push(listBlock.slice(start, i + 1)); start = -1; } }
+  }
+  return entries;
 }
 
 function validateFile(file) {
@@ -50,6 +75,14 @@ function validateFile(file) {
   // branch's messages count; `else`-alternative messages are collapsed into that step.
   // Stack of {type, branch} frames lets nested blocks be handled correctly.
   let msgCount = 0;
+  // Expected `kind` per counted message, in STEPLIST order — built alongside msgCount so each
+  // STEPLIST[i] can be cross-checked against the arrow of message ⑴+i (null = arrow unconstrained).
+  const msgKinds = [];
+  // Activation-bar balance: every opener (`->>+` suffix, or `activate X`) must have a matching
+  // closer (`-->>-` suffix, or `deactivate X`). A net-positive count = a dangling bar Mermaid
+  // renders broken. We track a running counter, not per-participant, since the defect is simply
+  // "an open with no matching close."
+  let activations = 0;
   const stack = [];
   const inSkippedBranch = () => stack.some((f) => (f.type === 'alt' || f.type === 'opt') && f.branch > 0);
   lines.forEach((raw, i) => {
@@ -60,10 +93,14 @@ function validateFile(file) {
     if (/^else\b/.test(t)) { const f = stack[stack.length - 1]; if (f) f.branch++; return; }
     if (/^and\b/.test(t)) return; // par-branch separator: messages still count (concurrent ≠ alternative)
     if (/^end\b/.test(t)) { stack.pop(); return; }
+    if (/^activate\b/.test(t)) { activations++; return; }
+    if (/^deactivate\b/.test(t)) { activations--; return; }
     if (BLOCK_KW.test(t)) return;
     const mm = t.match(ARROW);
     if (mm) {
-      const text = mm[1];
+      if (mm[2] === '+') activations++;
+      else if (mm[2] === '-') activations--;
+      const text = mm[3];
       if (text.includes('\\n')) push(line, 'literal "\\n" in message text — use <br/>', t);
       if (text.includes(';')) push(line, '";" in message text — Mermaid may treat it as a separator; remove it', t);
       // A bare "#" is Mermaid's entity-escape introducer in message text (#35;, #9829;, #59;).
@@ -71,15 +108,46 @@ function validateFile(file) {
       // following text as a malformed entity → mangled/empty render (no parse error to see).
       // Allow a correctly-formed entity escape; flag any other literal "#".
       if (/#(?![a-zA-Z0-9]+;)/.test(text)) push(line, 'literal "#" in message text — Mermaid reads it as an entity-code introducer; escape it as #35; (a real entity like #9829; is fine)', t);
-      if (!inSkippedBranch()) msgCount++;
+      if (!inSkippedBranch()) { msgCount++; msgKinds.push(arrowKind(mm[1])); }
     }
   });
   if (msgCount === 0) push(b.startLine, 'no messages found in the sequenceDiagram');
+  if (activations > 0) push(b.startLine, `unbalanced activation bar — ${activations} activation(s) opened (->>+ or activate) without a matching close (-->>- or deactivate); Mermaid renders this broken`);
+  else if (activations < 0) push(b.startLine, `unbalanced activation bar — ${-activations} activation close(s) (-->>- or deactivate) without a matching open; Mermaid renders this broken`);
 
   // STEPLIST parity (count title: keys in the STEPLIST array)
   const listBlock = (html.match(/const\s+STEPLIST\s*=\s*\[([\s\S]*?)\];/) || [, ''])[1];
   const stepCount = (listBlock.match(/\btitle\s*:/g) || []).length;
   if (stepCount !== msgCount) push(0, `STEPLIST has ${stepCount} entries but the diagram has ${msgCount} messages — they must match 1:1`);
+  // Each entry needs BOTH `from` and `to`: the detail panel renders the who→who chip only when
+  // both are present, and the authoring guide treats them as required. Flag any half-populated
+  // (or missing) one so a no-chip entry can't slip past the title-count parity check.
+  // `kind` is required on every entry AND must match the arrow of the message it maps to
+  // (components.md: solid `->>` = sync, dashed `-->>` = return, open `-)` = async). The STEPLIST
+  // is 1:1 with counted messages, so entry i corresponds to msgKinds[i]: flag a MISSING kind
+  // (unlabeled in the panel/legend), and — when present — flag a kind that contradicts that arrow
+  // (a wrong kind mislabels the detail-panel chip). The mismatch check skips when the arrow is
+  // unconstrained (arrowKind → null).
+  steplistEntries(listBlock).forEach((entry, i) => {
+    const missing = ['from', 'to'].filter((k) => !new RegExp(`\\b${k}\\s*:`).test(entry));
+    if (missing.length) {
+      const title = (entry.match(/\btitle\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/) || [, , `#${i + 1}`])[2];
+      push(0, `STEPLIST entry "${title}" is missing ${missing.join('/')} — both from and to are required (the who→who chip needs both)`);
+    }
+    // `kind` ("sync" | "return" | "async") is part of the required entry shape (authoring guide):
+    // the detail panel and legend classify every message by it, so a missing kind leaves the entry
+    // unlabeled. Flag its absence regardless of arrow constraint.
+    const kindM = entry.match(/\bkind\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/);
+    if (!kindM) {
+      const title = (entry.match(/\btitle\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/) || [, , `#${i + 1}`])[2];
+      push(0, `STEPLIST entry "${title}" is missing kind — every entry needs kind ("sync" | "return" | "async") for the detail-panel/legend classification`);
+    }
+    const expected = msgKinds[i];
+    if (kindM && expected && kindM[2] !== expected) {
+      const title = (entry.match(/\btitle\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/) || [, , `#${i + 1}`])[2];
+      push(0, `STEPLIST entry "${title}" has kind:"${kindM[2]}" but its message arrow is a ${expected} arrow — kind must match the arrow (mismatch)`);
+    }
+  });
   const critCount = (listBlock.match(/\bcrit\s*:\s*true\b/g) || []).length;
   if (critCount !== 1) push(0, `expected exactly one STEPLIST entry with crit:true, found ${critCount}`);
   const defM = html.match(/const\s+DEFAULT_STEP\s*=\s*(\d+)/);
