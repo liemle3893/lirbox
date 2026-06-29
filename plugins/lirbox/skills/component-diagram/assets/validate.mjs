@@ -68,6 +68,14 @@ function validateFile(file) {
       // diamond shape id{...} is forbidden (that is flowchart's job)
       if (!t.startsWith('classDef') && /[\w)\]]\s*\{[^{}]*\}/.test(t)) push(line, 'decision diamond {…} not allowed in a component diagram');
       if (isStructural(t)) return;
+      // every dependency edge must be typed (calls/reads/publishes) — flag a bare
+      // `-->` / `-.->` arrow carrying no label. First drop inline-labeled edges
+      // (`A -- text --> B`, `A -. text .-> B`) so only the operator remains to inspect,
+      // then any leftover arrow with no following `|label|` is untyped.
+      const stripped = t.replace(/--+[^->|]+-+>/g, ' ').replace(/-\.+[^->|]+\.-+>/g, ' ');
+      for (const a of stripped.matchAll(/(-\.?-*->)(\s*\|[^|]*\|)?/g)) {
+        if (!a[2]) push(line, `untyped dependency edge "${a[1]}" — every edge needs a |label| (calls/reads/publishes)`, t);
+      }
       const { labels, edges } = spans(raw);
       for (const l of labels) for (const msg of checkLabel(l, { edge: false })) push(line, msg, t);
       for (const e of edges) for (const msg of checkLabel(e, { edge: true })) push(line, msg, t);
