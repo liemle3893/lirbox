@@ -67,6 +67,17 @@ function validateFile(file) {
       const line = b.startLine + i;
       // diamond shape id{...} is forbidden (that is flowchart's job)
       if (!t.startsWith('classDef') && /[\w)\]]\s*\{[^{}]*\}/.test(t)) push(line, 'decision diamond {…} not allowed in a component diagram');
+      // Rectangles only: every component must be a plain `id[Label]`. Reject exotic node
+      // shapes — the docs forbid them (references/components.md). A shape opener is the
+      // bracket sequence right after a node id; a plain rectangle opens with `[` + a label
+      // char (not another shape bracket). Flag stadium `id([…])`, cylinder `id[(…)]`,
+      // subroutine `id[[…]]`, parallelogram/trapezoid `id[/…/]` `id[\…\]`, circle `id((…))`,
+      // hexagon `id{{…}}`, and asymmetric `id>…]`. (Bare diamonds `id{…}` are caught above.)
+      for (const m of t.matchAll(/\b\w+\s*(\(\(|\(\[|\[\(|\[\[|\[\/|\[\\|\{\{|>)/g)) {
+        const shapes = { '((': 'circle', '([': 'stadium', '[(': 'cylinder', '[[': 'subroutine',
+          '[/': 'parallelogram', '[\\': 'trapezoid', '{{': 'hexagon', '>': 'asymmetric' };
+        push(line, `exotic node shape ${shapes[m[1]]} (${m[0]}…) — use a plain rectangle id[Label] only`, t);
+      }
       if (isStructural(t)) return;
       // every dependency edge must be typed (calls/reads/publishes) — flag a bare
       // `-->` / `-.->` arrow carrying no label. First drop inline-labeled edges
