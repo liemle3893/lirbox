@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="lirbox logo" width="160">
+</p>
+
 # lirbox
 
 liemle3893's personal [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin marketplace.
