@@ -21,7 +21,7 @@ Consequences specific to the loop:
 - The conductor **cannot run the gate or metric** — the baseline/eval workers do, then return structured `{gatePassed, metric, diffFiles, sec, tokens}`; the conductor makes the keep-or-discard **decision** from those values.
 - The conductor **cannot create the worktree, commit, or revert** — those are workers (setup, keep, revert).
 - The conductor **cannot generate timestamps or randomness** — vary worker labels by experiment index (`propose:${g}`), never `Math.random()`; timestamps are injected by the checkpoint worker.
-- The conductor **cannot read a wall-clock or token counter** — so `shouldStop`'s `elapsedMin`/`tokensUsed` are supplied via resume `args` (and are `undefined` on a fresh in-session run, where only the count + plateau stops apply live).
+- The conductor **cannot read a wall-clock or token counter** — so it accumulates each eval worker's returned `sec`/`tokens` into LIVE `let` counters (`liveElapsedMin`/`liveTokens`, seeded from resume `args`) and feeds **those** into `shouldStop`, so the wallclock/token budgets fire on a fresh in-session run, not only on resume.
 
 This restriction exists so the conductor is **deterministic and replayable** — required for
 resume to be correct.
@@ -109,11 +109,15 @@ After each experiment the conductor keeps the change **iff ALL THREE hold**, els
 
 1. **Gate passes** — the deterministic gate exited 0 (the correctness **floor**; nothing is kept
    if it breaks correctness). `gatePassed === true`.
-2. **Metric strictly better by ≥ `minDelta`** — `isBetter(metric, best.metric, direction, minDelta)`:
-   - `min` → keep iff `best - metric >= minDelta`.
-   - `max` → keep iff `metric - best >= minDelta`.
+2. **Metric strictly better by ≥ `minDelta` AND beyond the measurement noise** —
+   `isBetter(metric, best.metric, direction, minDelta, spread)`:
+   - `min` → improvement `= best - metric`; `max` → improvement `= metric - best`.
+   - Keep iff `improvement >= minDelta` **and** (when `spread` is finite) `improvement > spread`.
    - A non-finite metric (failed parse / timeout) **never** beats best.
-   - `minDelta` is the noise guard: metric moves below it are ignored.
+   - `minDelta` is a fixed floor; `spread` is the **variance-aware** floor — the measured spread of
+     the repeated metric samples (see `metric.repeat`). A within-noise move (`improvement <= spread`)
+     is NOT kept even if it clears `minDelta`, so a single noisy sample can't permanently inflate
+     `best`. With `metric.repeat` absent/1, `spread` is 0 and only `minDelta` applies.
 3. **Surface lock holds** — every changed path is within the `surface` glob
    (`surfaceAllows(diffFiles, surface)`). The eval worker lists changed paths with
    `git status --porcelain --untracked-files=all` (NOT `git diff --name-only`, which misses new
@@ -150,10 +154,17 @@ Because every experiment is bounded, the whole run is **measurable**: throughput
 
 ### Stop conditions (spec §3)
 `shouldStop` returns the **first** hit reason (or `null`):
-- **Total** — first of `{ experiments, wallclockMin, tokens }` (`wallclockMin`/`tokens` need the
-  worker-supplied `elapsedMin`/`tokensUsed`; count is always live).
-- **Plateau** — no KEPT in the last `plateauStop` experiments ⇒ stop. Sequential keep-or-discard
-  means **plateau = stop, not widen** (there is no exploration to broaden).
+- **Total** — first of `{ experiments, wallclockMin, tokens }` (`wallclockMin`/`tokens` read the
+  LIVE counters accumulated from each worker's `sec`/`tokens`; count is always live).
+- **Plateau** — no KEPT in the last `plateauStop` experiments. Sequential keep-or-discard means
+  **plateau ≠ widen** (there is no exploration to broaden). With `budgets.maxRestarts: 0` (default)
+  plateau is **terminal**. With `maxRestarts > 0` the conductor instead does a **bounded escape**
+  before stopping: `planRestart(sinceKept, plateauStop, restartsDone, maxRestarts)` returns
+  `'restart'` while rounds remain, and `pickReseedRef(baseline, ledger, best, restartsDone)` picks a
+  **non-incumbent** seed commit (the baseline, or a kept-but-not-best commit — never `best`,
+  deterministically rotated by `restartsDone`). PROPOSE then `git checkout <seedRef> -- <surface>`
+  to start that experiment from a different basin; `restartsDone` is re-passed on resume and reset to
+  0 on any KEEP. Once restarts are exhausted, `planRestart` returns `'plateau'` and the loop stops.
 
 ---
 
@@ -175,14 +186,17 @@ On (re)entry with an arg that matches an existing `.optimize/state/<name>.json`:
               args: { config: <config/<name>.json>,
                       experiments: <state.experiments>,
                       best: <state.best>,
-                      baseline: <state.baseline> } })
+                      baseline: <state.baseline>,
+                      restartsDone: <state.restartsDone> } })
    ```
    The conductor:
    - rebuilds `ledger` from `args.experiments`, restores `best` from `args.best`, and restores the
      measured `baseline` from `args.baseline` (so it re-derives the eval cap from `baseline.evalSec`
      and re-persists `baseline` at every checkpoint — omitting it overwrites the saved baseline with
      null and the report loses baseline→best);
-   - reconstructs the plateau counter `sinceKept` by scanning back from the ledger tail;
+   - reconstructs the plateau counter `sinceKept` by scanning back from the ledger tail, and restores
+     the plateau-escape counter `restartsDone` from `args.restartsDone` (so a crash mid-escape does
+     not silently refill the restart budget);
    - **skips the Baseline phase** (best is already set) and continues numbering generations from
      `experiments.length + 1` — so **no idea is repeated** (the propose agent is fed the ledger
      digest);

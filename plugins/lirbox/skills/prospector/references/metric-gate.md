@@ -63,6 +63,15 @@ The parse rule MUST yield a **finite number**; the baseline step proves it does 
 (throughput, coverage %, accuracy, recall@k, pass-rate). This sign drives both the keep rule
 (`isBetter`) and the report's "% improvement".
 
+### `repeat` — repeated measurement for noisy metrics (optional, default 1)
+For a **noisy** metric (wall-clock latency, throughput, anything timing- or scheduler-sensitive) set
+`metric.repeat: N` (e.g. 5). The baseline AND every eval worker then run the metric `N` times and
+report the **median** of the samples (robust to one outlier) plus a `spread` (robust dispersion,
+e.g. half the IQR / MAD). The conductor feeds `spread` into `isBetter` as a **variance-aware floor**:
+a within-noise improvement (`improvement <= spread`) is NOT kept, so a single lucky sample can't
+inflate `best` and reject every genuine later gain. Leave it unset (`repeat: 1`) for a deterministic
+metric (bundle bytes, static counts) where one measurement is exact and `spread` is 0.
+
 ---
 
 ## 3. Deriving the hard gate — `gate.cmd`
@@ -201,6 +210,8 @@ STEP 2 — Decide:
 STEP 3 — If not declining, propose the config:
   - metric.cmd: the command to run.  metric.parse: a regex with ONE capture group, OR `json:<dot.path>`,
     OR `lastnumber`.  metric.direction: `min` (lower better) or `max` (higher better).
+    metric.repeat (optional, default 1): for a NOISY metric set N>1 so baseline+eval measure it N
+    times and use the median + a variance-aware keep floor; leave 1 for a deterministic metric.
   - gate.cmd: the hard gate command (may chain with `&&`).
   - surface: the file/glob the loop may edit (glob that allows new matching files).
   - baseline: the ref to branch from (e.g. `origin/main`).
@@ -224,7 +235,8 @@ Suggested structured-output schema for the agent:
     "surface": { "type": "string" },
     "metric":  { "type": "object", "properties": {
       "cmd": { "type": "string" }, "parse": { "type": "string" },
-      "direction": { "type": "string", "enum": ["min", "max"] } } },
+      "direction": { "type": "string", "enum": ["min", "max"] },
+      "repeat": { "type": "integer", "minimum": 1 } } },  // repeated measurement → median + spread (default 1)
     "gate":    { "type": "object", "properties": { "cmd": { "type": "string" } } },
     "baseline": { "type": "string" },
     "summary": { "type": "string" }             // the baseline plan + expected eval time

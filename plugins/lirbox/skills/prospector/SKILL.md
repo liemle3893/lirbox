@@ -78,25 +78,30 @@ prompt template are in `references/metric-gate.md`. The flow:
    {
      "goal": "make the /search endpoint faster",
      "surface": "src/search/**",                         // the ONLY files the loop may edit
-     "metric": { "cmd": "node bench/search.mjs", "parse": "p95=([0-9.]+)", "direction": "min" },
+     "metric": { "cmd": "node bench/search.mjs", "parse": "p95=([0-9.]+)", "direction": "min", "repeat": 5 },
      "gate":   { "cmd": "npm test && npm run build" },    // MUST exit 0 or the candidate is discarded
      "budgets": {
        "evalCapSec": null,                // null → MEASURED at setup (~3× baseline gate+metric time)
        "agentCapSec": 600,                // bound the propose/edit step so a stuck agent can't stall
        "total": { "experiments": 100 },   // OR { "wallclockMin": 480 } OR { "tokens": N } — first wins
        "plateauStop": 15,
+       "maxRestarts": 0,                  // >0 → on plateau, restart proposing from a NON-incumbent (baseline / kept-but-not-best) for that many rounds before stopping
        "minDelta": 0.5                    // ignore sub-noise metric moves
      },
      "baseline": "origin/main"
    }
    ```
    `parse`: regex capture group, `json:<path>`, or `lastnumber`. `direction`: `min` | `max`.
+   `repeat` (optional, default 1): for a NOISY metric set N>1 — baseline+eval measure it N times and
+   use the **median** + a variance-aware keep floor (a within-noise move isn't kept); leave 1 for a
+   deterministic metric.
 3. **DECLINE if no defensible metric + gate.** The fit test: *a dial it can read automatically and a
    fence it can't climb over.* Proceed only with BOTH an automatable number AND a gate the metric
    can't be gamed against (e.g. "fewer lines" needs a gate that fails on deleted behavior); else
    decline (or ask one `AskUserQuestion`) naming which half is missing (full bad-fit list in
    `metric-gate.md`). This is the anti-gaming guard.
-4. **Measure the baseline ONCE** — gate (must pass; a broken base can't be optimized) + metric. This
+4. **Measure the baseline ONCE** — gate (must pass; a broken base can't be optimized) + metric
+   (run `metric.repeat` times → median + spread). This
    proves `metric.cmd` runs and `metric.parse` yields a number, and records `evalSec` →
    `evalCapSec` (~3× `evalSec`) when left `null`.
 5. **Report throughput up front**: `≈ nightBudget / (agentCapSec + evalCapSec)` → "~N experiments
@@ -179,8 +184,12 @@ Full rules in `references/loop-runtime.md` (keep/discard §4, surface lock §4, 
   them re-runs that experiment; the revert makes a re-run safe.
 - **Every experiment is bounded** — propose by `agentCapSec`, eval by the derived `evalCapSec`;
   either timeout ⇒ discard. That is what makes the run measurable.
-- **Plateau = stop, not widen.** No KEPT in the last `plateauStop` experiments ⇒ stop. Total stop is
-  the first of `{ experiments, wallclockMin, tokens }`.
+- **Plateau = stop, or a bounded escape.** No KEPT in the last `plateauStop` experiments ⇒ plateau.
+  With `budgets.maxRestarts: 0` (default) that is terminal. With `maxRestarts > 0` the loop first
+  attempts a BOUNDED escape: it restarts proposing from a NON-incumbent commit (the baseline, or a
+  kept-but-not-best commit — never `best`) for up to that many rounds, jumping the search to a
+  different basin; it stops only once those restarts are exhausted. Total stop is the first of
+  `{ experiments, wallclockMin, tokens }`.
 - **Conductor can't write files/timestamps/randomness** — push all into workers; vary worker labels
   by experiment index, never `Math.random()`.
 - **Durable ≠ unattended** — see the overnight note (step 5).
