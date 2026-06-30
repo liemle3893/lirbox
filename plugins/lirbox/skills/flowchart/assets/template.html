@@ -47,8 +47,32 @@
   .lead code{font-size:.9em}
 
   .layout{display:grid;grid-template-columns:1fr 340px;gap:40px;padding:34px 0 90px;align-items:start}
-  .chart{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px;overflow:auto}
+  /* min-width:0 lets the wide SVG track shrink instead of shoving the side panel off-screen (gotcha 3) */
+  .layout>main{min-width:0}
+  /* Fixed vh-based height + overflow:hidden so zooming can't grow the page vertically (gotcha 2) */
+  .chart{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px;overflow:hidden;height:min(680px,80vh)}
+  .chart:fullscreen{height:100vh;width:100vw;border-radius:0;padding:0}
+  .viewport{width:100%;height:100%;overflow:hidden;cursor:grab;touch-action:none}
+  .viewport:active{cursor:grabbing}
+  /* transform on the canvas is RESERVED for pan/translate only — never scale (gotcha 1) */
+  .canvas{display:inline-block;transform-origin:0 0}
   .mermaid{font-family:var(--sans)}
+  .mermaid svg{display:block;max-width:none}
+
+  /* Zoom / fullscreen controls */
+  .zoom-controls{position:absolute;top:20px;right:20px;z-index:5;display:flex;flex-direction:column;gap:6px}
+  .zoom-controls button{width:34px;height:34px;border:1px solid var(--line);background:var(--paper);color:var(--slate);
+    border-radius:9px;font-family:var(--sans);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 1px 3px rgba(20,20,19,.08)}
+  .zoom-controls button:hover{background:var(--line-soft)}
+
+  /* In-fullscreen detail popup — the side panel lives outside the fullscreen element, so mirror it here */
+  .popup{display:none;position:absolute;top:20px;left:20px;z-index:6;width:340px;max-width:40vw;max-height:80%;overflow:auto;
+    background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;box-shadow:0 10px 34px rgba(20,20,19,.2)}
+  .chart:fullscreen .popup{display:block}
+  .chart:fullscreen .popup[hidden]{display:none}
+  .popup-close{position:absolute;top:12px;right:12px;width:26px;height:26px;border:1px solid var(--line);background:var(--paper);
+    color:var(--muted);border-radius:7px;font-size:14px;line-height:1;cursor:pointer}
+  .popup-close:hover{color:var(--slate);background:var(--line-soft)}
   aside{position:sticky;top:24px;display:flex;flex-direction:column;gap:20px}
 
   /* Legend */
@@ -89,7 +113,23 @@
 
 <div class="wrap layout">
   <main>
-    <div class="chart">
+    <div class="chart" id="chart">
+      <div class="zoom-controls">
+        <button id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+        <button id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+        <button id="zoom-fit" title="Fit to width" aria-label="Fit to width">⤢</button>
+        <button id="zoom-reset" title="Reset to 1:1" aria-label="Reset to 1:1">1:1</button>
+        <button id="zoom-fs" title="Toggle fullscreen" aria-label="Toggle fullscreen">⛶</button>
+      </div>
+      <div class="popup detail" id="detail-popup" hidden>
+        <button class="popup-close" id="popup-close" title="Close" aria-label="Close">✕</button>
+        <p class="lbl">Step detail</p>
+        <h3 id="p-title">—</h3>
+        <div class="meta" id="p-meta"></div>
+        <div id="p-body"></div>
+      </div>
+      <div class="viewport" id="viewport">
+        <div class="canvas" id="canvas">
 <pre class="mermaid">
 %% TEMPLATE-GRAPH-START — replace this entire graph with the real process, then delete both markers.
 flowchart TD
@@ -120,6 +160,8 @@ flowchart TD
   click rollback selectNode "details"
 %% TEMPLATE-GRAPH-END
 </pre>
+        </div>
+      </div>
     </div>
   </main>
 
@@ -169,11 +211,19 @@ flowchart TD
   };
   const DEFAULT_NODE = "start";
 
+  const metaTags = (meta) => (meta||[]).map(m=>`<span class="tag">${m}</span>`).join('');
+
   function selectNode(id){
     const s = STEPS[id]; if(!s) return;
+    const body = (s.body||'') + (s.code||'');
     document.getElementById('d-title').textContent = s.title;
-    document.getElementById('d-meta').innerHTML = (s.meta||[]).map(m=>`<span class="tag">${m}</span>`).join('');
-    document.getElementById('d-body').innerHTML = (s.body||'') + (s.code||'');
+    document.getElementById('d-meta').innerHTML = metaTags(s.meta);
+    document.getElementById('d-body').innerHTML = body;
+    // Mirror into the in-fullscreen popup (the side panel is outside the fullscreen element).
+    document.getElementById('p-title').textContent = s.title;
+    document.getElementById('p-meta').innerHTML = metaTags(s.meta);
+    document.getElementById('p-body').innerHTML = body;
+    if (document.fullscreenElement) document.getElementById('detail-popup').hidden = false;
   }
   window.selectNode = selectNode;
 
@@ -181,7 +231,79 @@ flowchart TD
     themeVariables:{ fontFamily:'-apple-system,Segoe UI,Roboto,sans-serif', primaryColor:'#FFFFFF',
       primaryBorderColor:'#E7E4DC', primaryTextColor:'#141413', lineColor:'#9A968C',
       secondaryColor:'#F3EFE6', tertiaryColor:'#FAF9F5' } });
-  mermaid.run({ querySelector:'.mermaid' }).then(()=>selectNode(DEFAULT_NODE));
+
+  /* ── Pan / zoom / fullscreen layer (vanilla, no extra deps) ─────────────────────
+     Zoom = re-size the SVG width from its viewBox (crisp at any scale). Pan = translate
+     the canvas. The two never mix: CSS transform is translate-only. */
+  const MIN_SCALE = 0.2, MAX_SCALE = 4;
+  let scale = 1, baseW = 0, panX = 0, panY = 0;
+  let svgEl = null;
+  const chart    = document.getElementById('chart');
+  const viewport = document.getElementById('viewport');
+  const canvas   = document.getElementById('canvas');
+  const popup    = document.getElementById('detail-popup');
+
+  const clamp = (s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+
+  function applyZoom(){
+    if (!svgEl || !baseW) return;
+    // Crisp zoom: set the rendered SVG width from its intrinsic viewBox width — NOT transform:scale().
+    svgEl.style.width  = (baseW * scale) + 'px';
+    svgEl.style.height = 'auto';
+  }
+  function applyPan(){ canvas.style.transform = 'translate(' + panX + 'px,' + panY + 'px)'; }
+  function setZoom(s){ scale = clamp(s); applyZoom(); }
+
+  function fitToWidth(){
+    if (!baseW) return;
+    const w = viewport.clientWidth || chart.clientWidth;
+    panX = 0; panY = 0; applyPan();
+    setZoom(w / baseW);
+  }
+  function resetView(){ panX = 0; panY = 0; applyPan(); setZoom(1); }
+
+  // Wheel-to-zoom around the pointer is overkill here; zoom toward origin keeps it simple + crisp.
+  viewport.addEventListener('wheel', (e)=>{
+    e.preventDefault();
+    setZoom(scale * (e.deltaY < 0 ? 1.1 : 0.9));
+  }, { passive:false });
+
+  // Drag-to-pan. Deliberately NO preventDefault on pointerdown and NO setPointerCapture,
+  // so Mermaid node click handlers keep firing (gotcha 4).
+  let dragging = false, startX = 0, startY = 0, originX = 0, originY = 0;
+  viewport.addEventListener('pointerdown', (e)=>{
+    dragging = true; startX = e.clientX; startY = e.clientY; originX = panX; originY = panY;
+  });
+  window.addEventListener('pointermove', (e)=>{
+    if (!dragging) return;
+    panX = originX + (e.clientX - startX);
+    panY = originY + (e.clientY - startY);
+    applyPan();
+  });
+  window.addEventListener('pointerup', ()=>{ dragging = false; });
+
+  document.getElementById('zoom-in').addEventListener('click',   ()=>setZoom(scale * 1.2));
+  document.getElementById('zoom-out').addEventListener('click',  ()=>setZoom(scale / 1.2));
+  document.getElementById('zoom-fit').addEventListener('click',  fitToWidth);
+  document.getElementById('zoom-reset').addEventListener('click', resetView);
+  document.getElementById('zoom-fs').addEventListener('click', ()=>{
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (chart.requestFullscreen) chart.requestFullscreen();
+  });
+  document.getElementById('popup-close').addEventListener('click', ()=>{ popup.hidden = true; });
+
+  // Re-fit on entering/leaving fullscreen; the popup only makes sense while fullscreen.
+  document.addEventListener('fullscreenchange', ()=>{
+    popup.hidden = !document.fullscreenElement;
+    fitToWidth();
+  });
+
+  mermaid.run({ querySelector:'.mermaid' }).then(()=>{
+    svgEl = document.querySelector('.mermaid svg');
+    if (svgEl && svgEl.viewBox && svgEl.viewBox.baseVal) baseW = svgEl.viewBox.baseVal.width;
+    selectNode(DEFAULT_NODE);
+    fitToWidth();  // fit-to-width on load; 1:1 reset is the "1:1" control
+  });
 </script>
 </body>
 </html>

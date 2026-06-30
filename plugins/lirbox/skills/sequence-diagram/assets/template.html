@@ -45,8 +45,42 @@
   .lead code{font-size:.9em}
 
   .layout{display:grid;grid-template-columns:1fr 340px;gap:40px;padding:34px 0 90px;align-items:start}
-  .chart{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px;overflow:auto}
+  /* min-width:0 lets a wide SVG shrink inside the 1fr track instead of shoving the side panel off-screen */
+  .layout main{min-width:0}
+  /* Fixed viewport-relative height + overflow:hidden so zooming pans inside the box, never grows the page */
+  .chart{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);
+    height:min(680px,80vh);overflow:hidden}
+  .chart:fullscreen{height:100vh;width:100vw;border-radius:0;background:var(--ivory)}
+  .chart-viewport{position:absolute;inset:0;overflow:hidden;cursor:grab;padding:14px}
+  .chart-viewport.dragging{cursor:grabbing}
+  /* The pan layer carries ONLY translate — zoom resizes the SVG width (crisp), never CSS transform scale */
+  .chart-pan{transform-origin:0 0;display:inline-block}
+  .chart-pan svg{max-width:none;height:auto;display:block}
   .mermaid{font-family:var(--sans)}
+
+  /* Zoom / fullscreen toolbar */
+  .chart-tools{position:absolute;top:10px;right:10px;z-index:4;display:flex;gap:4px;
+    background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:4px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+  .chart-tools button{all:unset;cursor:pointer;font-family:var(--mono);font-size:13px;line-height:1;
+    color:var(--slate-soft);padding:6px 9px;border-radius:7px;min-width:18px;text-align:center}
+  .chart-tools button:hover{background:var(--line-soft);color:var(--slate)}
+
+  /* In-fullscreen detail popup (the sticky side panel lives outside the fullscreen element, so mirror it here) */
+  .fs-popup{position:absolute;right:18px;bottom:18px;width:330px;max-width:42vw;z-index:5;display:none;
+    background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px 18px;
+    box-shadow:0 12px 44px rgba(0,0,0,.20)}
+  .chart:fullscreen .fs-popup{display:block}
+  .chart:fullscreen .fs-popup[hidden]{display:none}
+  .fs-popup .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--clay);margin:0 0 8px}
+  .fs-popup h3{font-family:var(--serif);font-size:18px;margin:0 0 8px;padding-right:22px}
+  .fs-popup .meta{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+  .fs-popup .tag{font-family:var(--mono);font-size:11px;color:var(--slate-soft);background:var(--oat-soft);border:1px solid var(--oat);border-radius:20px;padding:2px 9px}
+  .fs-popup p{margin:0 0 10px;color:var(--slate-soft);font-size:14px}
+  .fs-popup pre{background:var(--code-bg);color:#E9E6DE;border-radius:10px;padding:11px 12px;overflow:auto;
+    font-family:var(--mono);font-size:11.5px;line-height:1.55;margin:0;border:1px solid var(--code-line)}
+  .fs-popup pre .kw{color:var(--kw)} .fs-popup pre .str{color:var(--str)} .fs-popup pre .com{color:var(--com)} .fs-popup pre .fn{color:var(--fn)}
+  .fs-popup-close{position:absolute;top:10px;right:12px;all:unset;cursor:pointer;font-size:15px;color:var(--muted);line-height:1}
+  .fs-popup-close:hover{color:var(--slate)}
   aside{position:sticky;top:24px;display:flex;flex-direction:column;gap:20px}
 
   /* Legend */
@@ -97,7 +131,16 @@
 
 <div class="wrap layout">
   <main>
-    <div class="chart">
+    <div class="chart" id="chart">
+      <div class="chart-tools">
+        <button id="zoom-out" title="Zoom out">−</button>
+        <button id="zoom-in" title="Zoom in">+</button>
+        <button id="zoom-reset" title="Reset to 1:1">1:1</button>
+        <button id="zoom-fit" title="Fit to width">Fit</button>
+        <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+      </div>
+      <div class="chart-viewport" id="chart-viewport">
+        <div class="chart-pan" id="chart-pan">
 <pre class="mermaid">
 %% TEMPLATE-SEQ-START — replace with the real interaction, then delete both markers.
 sequenceDiagram
@@ -115,6 +158,15 @@ sequenceDiagram
   end
 %% TEMPLATE-SEQ-END
 </pre>
+        </div>
+      </div>
+      <div class="fs-popup" id="fs-popup" hidden>
+        <button class="fs-popup-close" id="fs-popup-close" title="Close" aria-label="Close">✕</button>
+        <p class="lbl">Step detail</p>
+        <h3 id="p-title">—</h3>
+        <div class="meta" id="p-meta"></div>
+        <div id="p-body"></div>
+      </div>
     </div>
   </main>
 
@@ -158,10 +210,18 @@ sequenceDiagram
 
   function selectStep(i){
     const s = STEPLIST[i]; if(!s) return;
-    document.getElementById('d-title').textContent = s.title;
     const chips = [ (s.from && s.to) ? `${s.from} → ${s.to}` : null, s.kind, ...(s.meta||[]) ].filter(Boolean);
-    document.getElementById('d-meta').innerHTML = chips.map(m=>`<span class="tag">${m}</span>`).join('');
-    document.getElementById('d-body').innerHTML = (s.body||'') + (s.code||'');
+    const chipHTML = chips.map(m=>`<span class="tag">${m}</span>`).join('');
+    const bodyHTML = (s.body||'') + (s.code||'');
+    document.getElementById('d-title').textContent = s.title;
+    document.getElementById('d-meta').innerHTML = chipHTML;
+    document.getElementById('d-body').innerHTML = bodyHTML;
+    // Mirror into the in-fullscreen popup (the side panel is outside the fullscreen element).
+    document.getElementById('p-title').textContent = s.title;
+    document.getElementById('p-meta').innerHTML = chipHTML;
+    document.getElementById('p-body').innerHTML = bodyHTML;
+    const pop = document.getElementById('fs-popup');
+    if(document.fullscreenElement) pop.hidden = false;
     document.querySelectorAll('#steplist li').forEach((li,j)=>li.classList.toggle('active', j===i));
   }
   function renderSteps(){
@@ -176,7 +236,80 @@ sequenceDiagram
       primaryBorderColor:'#E7E4DC', primaryTextColor:'#141413', lineColor:'#9A968C',
       secondaryColor:'#F3EFE6', tertiaryColor:'#FAF9F5', actorBkg:'#FFFFFF', actorBorder:'#E7E4DC',
       noteBkgColor:'#F3EFE6', noteBorderColor:'#E3DACC' } });
-  mermaid.run({ querySelector:'.mermaid' }).then(()=>{ renderSteps(); selectStep(DEFAULT_STEP); });
+  // ── Self-contained pan / zoom / fullscreen layer (vanilla JS+CSS, no extra deps) ──────────────
+  // Crisp zoom: resize the SVG's intrinsic width from its viewBox; the pan layer carries translate
+  // only (CSS transform scale on the SVG would rasterize → blur). Scale is clamped 0.2x–4x.
+  const chartEl = document.getElementById('chart');
+  const viewport = document.getElementById('chart-viewport');
+  const panEl = document.getElementById('chart-pan');
+  const MIN_SCALE = 0.2, MAX_SCALE = 4;
+  let scale = 1, tx = 0, ty = 0, baseW = 0;
+
+  function svgEl(){ return panEl.querySelector('svg'); }
+  function clamp(v){ return Math.min(MAX_SCALE, Math.max(MIN_SCALE, v)); }
+  function applyZoom(){
+    const svg = svgEl(); if(!svg || !baseW) return;
+    svg.style.width = (baseW * scale) + 'px';   // width drives zoom — crisp, no raster
+    svg.removeAttribute('height');
+  }
+  function applyPan(){ panEl.style.transform = 'translate(' + tx + 'px,' + ty + 'px)'; }
+  function setZoom(next){ scale = clamp(next); applyZoom(); }
+  function fitToWidth(){
+    const svg = svgEl(); if(!svg || !baseW) return;
+    setZoom(clamp((viewport.clientWidth - 28) / baseW));
+    tx = 0; ty = 0; applyPan();
+  }
+  function resetZoom(){ setZoom(1); tx = 0; ty = 0; applyPan(); }
+
+  function initPanZoom(){
+    const svg = svgEl(); if(!svg) return;
+    baseW = (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width) || svg.getBoundingClientRect().width;
+    fitToWidth();
+
+    // wheel-to-zoom (anchored under the cursor)
+    viewport.addEventListener('wheel', (e)=>{
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
+      const before = scale; setZoom(scale * factor);
+      const r = viewport.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top, k = scale/before;
+      tx = cx - (cx - tx) * k; ty = cy - (cy - ty) * k; applyPan();
+    }, { passive:false });
+
+    // drag-to-pan: no preventDefault / no setPointerCapture on pointerdown → Mermaid node clicks still fire
+    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0, moved = 0;
+    viewport.addEventListener('pointerdown', (e)=>{
+      dragging = true; moved = 0; sx = e.clientX; sy = e.clientY; ox = tx; oy = ty;
+      viewport.classList.add('dragging');
+    });
+    window.addEventListener('pointermove', (e)=>{
+      if(!dragging) return;
+      tx = ox + (e.clientX - sx); ty = oy + (e.clientY - sy);
+      moved += Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy);
+      applyPan();
+    });
+    window.addEventListener('pointerup', ()=>{ dragging = false; viewport.classList.remove('dragging'); });
+
+    document.getElementById('zoom-in').addEventListener('click', ()=>setZoom(scale * 1.2));
+    document.getElementById('zoom-out').addEventListener('click', ()=>setZoom(scale / 1.2));
+    document.getElementById('zoom-reset').addEventListener('click', resetZoom);
+    document.getElementById('zoom-fit').addEventListener('click', fitToWidth);
+
+    // fullscreen toggle via the Fullscreen API; re-fit on enter/exit
+    document.getElementById('fullscreen-btn').addEventListener('click', ()=>{
+      if(document.fullscreenElement) document.exitFullscreen();
+      else if(chartEl.requestFullscreen) chartEl.requestFullscreen();
+    });
+    document.getElementById('fs-popup-close').addEventListener('click', ()=>{
+      document.getElementById('fs-popup').hidden = true;
+    });
+    document.addEventListener('fullscreenchange', ()=>{
+      const pop = document.getElementById('fs-popup');
+      pop.hidden = !document.fullscreenElement;   // popup is meaningful only inside fullscreen
+      fitToWidth();
+    });
+  }
+
+  mermaid.run({ querySelector:'.mermaid' }).then(()=>{ renderSteps(); selectStep(DEFAULT_STEP); initPanZoom(); });
 </script>
 </body>
 </html>

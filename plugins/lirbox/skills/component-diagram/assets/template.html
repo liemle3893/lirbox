@@ -45,10 +45,43 @@
   .lead{font-size:17px;color:var(--slate-soft);max-width:70ch;margin:0}
   .lead code{font-size:.9em}
 
-  .layout{display:grid;grid-template-columns:1fr 340px;gap:40px;padding:34px 0 90px;align-items:start}
-  .chart{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px;overflow:auto}
+  /* min-width:0 lets the 1fr track shrink so a wide SVG can't shove the side panel off-screen (gotcha 3) */
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:40px;padding:34px 0 90px;align-items:start}
+  main{min-width:0}
+  .stage{position:relative}
+  /* fixed vh-based height + overflow:hidden so zoom can't grow the page vertically (gotcha 2) */
+  .chart{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:0;
+    overflow:hidden;height:min(680px,80vh);position:relative;cursor:grab;touch-action:none}
+  .chart:active{cursor:grabbing}
+  /* pan layer: CSS transform reserved for translate only (gotcha 1) — zoom resizes the SVG, not this */
+  .pan{transform-origin:0 0;transform:translate(0,0)}
   .mermaid{font-family:var(--sans)}
+  .mermaid svg{display:block;max-width:none}
   aside{position:sticky;top:24px;display:flex;flex-direction:column;gap:20px}
+
+  /* zoom/fit/fullscreen controls, floated over the chart */
+  .controls{position:absolute;top:10px;right:10px;z-index:5;display:flex;gap:6px}
+  .controls button{font-family:var(--mono);font-size:14px;line-height:1;background:var(--paper);
+    border:1px solid var(--line);border-radius:8px;min-width:32px;height:30px;padding:0 7px;cursor:pointer;
+    color:var(--slate);display:flex;align-items:center;justify-content:center}
+  .controls button:hover{background:var(--line-soft)}
+
+  /* in-fullscreen detail popup — the side <aside> lives outside the fullscreen element, so mirror it here */
+  .popup{position:absolute;top:14px;left:14px;z-index:6;width:320px;max-width:42vw;background:var(--paper);
+    border:1px solid var(--line);border-radius:var(--radius);padding:16px 40px 16px 18px;
+    box-shadow:0 12px 44px rgba(20,20,19,.20);display:none}
+  .stage:fullscreen{background:var(--ivory)}
+  .stage:fullscreen .chart{height:100vh;border:none;border-radius:0}
+  .stage:fullscreen .popup{display:block}
+  .popup.dismissed{display:none!important}
+  .popup-close{position:absolute;top:9px;right:11px;border:none;background:none;font-size:16px;
+    cursor:pointer;color:var(--muted);padding:0;line-height:1}
+  .popup-close:hover{color:var(--slate)}
+  .popup .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--clay);margin:0 0 8px}
+  .popup h3{font-family:var(--serif);font-size:19px;margin:0 0 8px}
+  .popup .meta{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+  .popup .tag{font-family:var(--mono);font-size:11px;color:var(--slate-soft);background:var(--oat-soft);border:1px solid var(--oat);border-radius:20px;padding:2px 9px}
+  .popup p{margin:0 0 10px;color:var(--slate-soft);font-size:14px}
 
   /* Legend */
   .legend{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
@@ -88,7 +121,16 @@
 
 <div class="wrap layout">
   <main>
-    <div class="chart">
+    <div class="stage" id="stage">
+      <div class="controls">
+        <button type="button" data-act="out" title="Zoom out" aria-label="Zoom out">−</button>
+        <button type="button" data-act="in" title="Zoom in" aria-label="Zoom in">+</button>
+        <button type="button" data-act="fit" title="Fit to width" aria-label="Fit to width">Fit</button>
+        <button type="button" data-act="reset" title="Reset to 1:1" aria-label="Reset to 1:1">1:1</button>
+        <button type="button" data-act="fs" title="Toggle fullscreen" aria-label="Toggle fullscreen">⛶</button>
+      </div>
+      <div class="chart" id="chart">
+        <div class="pan" id="pan">
 <pre class="mermaid">
 %% TEMPLATE-GRAPH-START — replace with the real components, then delete both markers.
 flowchart LR
@@ -121,6 +163,16 @@ flowchart LR
   click cache selectNode "details"
 %% TEMPLATE-GRAPH-END
 </pre>
+        </div>
+      </div>
+      <!-- mirrors the side detail panel; CSS shows it only while fullscreen -->
+      <div class="popup" id="popup">
+        <button type="button" class="popup-close" id="popup-close" aria-label="Close detail">✕</button>
+        <p class="lbl">Component detail</p>
+        <h3 id="p-title">—</h3>
+        <div class="meta" id="p-meta"></div>
+        <div id="p-body"></div>
+      </div>
     </div>
   </main>
 
@@ -171,9 +223,16 @@ flowchart LR
 
   function selectNode(id){
     const s = STEPS[id]; if(!s) return;
+    const meta = (s.meta||[]).map(m=>`<span class="tag">${m}</span>`).join('');
+    const body = (s.body||'') + (s.code||'');
     document.getElementById('d-title').textContent = s.title;
-    document.getElementById('d-meta').innerHTML = (s.meta||[]).map(m=>`<span class="tag">${m}</span>`).join('');
-    document.getElementById('d-body').innerHTML = (s.body||'') + (s.code||'');
+    document.getElementById('d-meta').innerHTML = meta;
+    document.getElementById('d-body').innerHTML = body;
+    // mirror into the fullscreen popup (the side panel is outside the fullscreen element)
+    document.getElementById('p-title').textContent = s.title;
+    document.getElementById('p-meta').innerHTML = meta;
+    document.getElementById('p-body').innerHTML = body;
+    document.getElementById('popup').classList.remove('dismissed');
   }
   window.selectNode = selectNode;
 
@@ -181,7 +240,65 @@ flowchart LR
     themeVariables:{ fontFamily:'-apple-system,Segoe UI,Roboto,sans-serif', primaryColor:'#FFFFFF',
       primaryBorderColor:'#E7E4DC', primaryTextColor:'#141413', lineColor:'#9A968C',
       secondaryColor:'#F3EFE6', tertiaryColor:'#FAF9F5' } });
-  mermaid.run({ querySelector:'.mermaid' }).then(()=>selectNode(DEFAULT_NODE));
+  mermaid.run({ querySelector:'.mermaid' }).then(()=>{ selectNode(DEFAULT_NODE); initPanZoom(); });
+
+  // ---- Self-contained pan / zoom / fullscreen layer (vanilla, no extra deps) ----
+  function initPanZoom(){
+    const stage  = document.getElementById('stage');
+    const chart  = document.getElementById('chart');
+    const pan    = document.getElementById('pan');
+    const svg    = chart.querySelector('svg');
+    if(!svg) return;
+    // intrinsic width from the viewBox — resizing this (NOT a CSS transform) keeps zoom crisp (gotcha 1)
+    const baseW = svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width
+                  ? svg.viewBox.baseVal.width : (svg.getBoundingClientRect().width || 1);
+    svg.removeAttribute('height');
+    let zoom = 1, tx = 0, ty = 0;
+
+    function clamp(z){ return Math.min(4, Math.max(0.2, z)); }      // scale clamp 0.2x – 4x
+    function drawZoom(){ svg.style.width = (baseW * zoom) + 'px'; }
+    function drawPan(){ pan.style.transform = 'translate(' + tx + 'px,' + ty + 'px)'; }
+    function setZoom(z){ zoom = clamp(z); drawZoom(); }
+    function fit(){ setZoom((chart.clientWidth - 4) / baseW); tx = 0; ty = 0; drawPan(); }
+    function reset(){ setZoom(1); tx = 0; ty = 0; drawPan(); }     // 1:1
+    fit();                                                          // fit-to-width on load
+
+    // wheel-to-zoom (anchored so the cursor stays put)
+    chart.addEventListener('wheel', (e)=>{
+      e.preventDefault();
+      const prev = zoom, f = e.deltaY < 0 ? 1.1 : 1/1.1;
+      setZoom(zoom * f);
+      const r = chart.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top, k = zoom/prev;
+      tx = cx - (cx - tx) * k; ty = cy - (cy - ty) * k; drawPan();
+    }, { passive:false });
+
+    // drag-to-pan — NO preventDefault on pointerdown, NO setPointerCapture, so Mermaid node clicks survive (gotcha 4)
+    let drag = false, px = 0, py = 0, ox = 0, oy = 0;
+    pan.addEventListener('pointerdown', (e)=>{ drag = true; px = e.clientX; py = e.clientY; ox = tx; oy = ty; });
+    window.addEventListener('pointermove', (e)=>{ if(!drag) return; tx = ox + (e.clientX - px); ty = oy + (e.clientY - py); drawPan(); });
+    window.addEventListener('pointerup', ()=>{ drag = false; });
+
+    // controls
+    document.querySelector('.controls').addEventListener('click', (e)=>{
+      const b = e.target.closest('button'); if(!b) return;
+      const act = b.dataset.act;
+      if(act === 'in')   setZoom(zoom * 1.2);
+      else if(act === 'out') setZoom(zoom / 1.2);
+      else if(act === 'fit') fit();
+      else if(act === 'reset') reset();
+      else if(act === 'fs'){ if(document.fullscreenElement) document.exitFullscreen(); else stage.requestFullscreen(); }
+    });
+
+    // re-fit when entering/leaving fullscreen
+    document.addEventListener('fullscreenchange', ()=>{
+      const on = document.fullscreenElement === stage;
+      if(on) document.getElementById('popup').classList.remove('dismissed');
+      setTimeout(fit, 60);
+    });
+    document.getElementById('popup-close').addEventListener('click', ()=>{
+      document.getElementById('popup').classList.add('dismissed');
+    });
+  }
 </script>
 </body>
 </html>
