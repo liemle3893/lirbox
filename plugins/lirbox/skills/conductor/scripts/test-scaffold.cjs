@@ -182,6 +182,20 @@ try {
   // 6. DocsGate writes into the per-run docs/changes/<name>/ dir.
   check(/docs\/changes\/\$\{NAME\}\/summary\.md/.test(gen('docs', ['--phases', 'Work', '--enforce-docs'])), "DocsGate: summary.md under docs/changes/<name>/");
 
+  // 8. DoD anchor + round carryover (issue #12): gate loops scope findings to the captured
+  //    goal/AC and feed the prior round forward so retries converge instead of re-reviewing raw.
+  const dod = gen('dod', ['--phases', 'Implement', '--ticket', '--enforce-code']);
+  check(/results\.brief\.goal/.test(dod) && /results\.brief\.acceptanceCriteria/.test(dod),
+    "DoD anchor: CodeGate prompt interpolates results.brief.goal/acceptanceCriteria");
+  check(/round > 1 && last/.test(dod) && /last\.summary/.test(dod),
+    "carryover: round>1 gate prompt references the prior round's last.summary");
+  check(/\+ dod \+ carry/.test(dod), "gate prompt appends the dod + carry anchors");
+  // The anchor is guarded on results.brief, so a NON-ticket enforce-code run still carries rounds
+  // but never dereferences a missing brief.
+  const noTicket = gen('carry-only', ['--phases', 'Implement', '--enforce-code']);
+  check(/results\.brief \?/.test(noTicket), "DoD anchor is guarded on results.brief (safe without --ticket)");
+  check(/round > 1 && last/.test(noTicket), "carryover present even without a ticket");
+
   // 7. invalid flag values are rejected.
   check(genFails(['--phases', 'Work', '--model-mode', 'bogus']), "invalid --model-mode rejected");
   check(genFails(['--phases', 'Work', '--model-mode', 'auto', '--model-think', 'gpt']), "invalid --model-think rejected");

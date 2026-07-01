@@ -190,15 +190,29 @@ ${body}
 }`;
 }
 
+// Runtime prompt anchors appended to every gate round (issue #12). Emitted as generated-conductor
+// SOURCE — the backticks/${…} below are runtime template literals, NOT generator interpolation.
+//   - DOD_DECL: when a Brief captured the goal/AC (results.brief), scope the gate to the task's
+//     actual intent so findings don't drift into unrelated changes. Guarded, so non-ticket runs
+//     never dereference a missing brief.
+//   - CARRY_DECL: on round>1, feed the prior round's result forward so retries CONVERGE (build on
+//     what was already found/fixed) instead of re-reviewing the diff from scratch.
+const DOD_DECL = "const dod = results.brief ? `\\n\\nScope this gate to the task's actual goal — judge findings against what the task set out to achieve; do NOT drift into changes unrelated to it.\\nGOAL: ${results.brief.goal || '(none)'}` + ((results.brief.acceptanceCriteria || []).length ? `\\nACCEPTANCE CRITERIA:\\n- ${results.brief.acceptanceCriteria.join('\\n- ')}` : '') : ''";
+const CARRY_DECL = "const carry = round > 1 && last ? `\\n\\nROUND ${round} of up to 3 — a prior round already ran; BUILD ON what it already found/fixed, do NOT re-review from scratch. Prior round summary: ${last.summary || '(no summary)'}` : ''";
+
 // A bounded 3-round gate: run the agent up to 3× until `flag` is truthy, else throw.
 // `prompt`/`schema` are template-literal source fragments; `agentFrag` is the optional
 // `agentType: '...',` (or '' for a generic subagent). Output is indented for the else-block.
-function gateLoop({ flag, prompt, schema, agentFrag, modelFrag, label, phase: ph, throwMsg, resultKey }) {
+// `dod` (default true) appends the goal/AC scope anchor; set false for non-findings gates.
+function gateLoop({ flag, prompt, schema, agentFrag, modelFrag, label, phase: ph, throwMsg, resultKey, dod = true }) {
   const lead = [agentFrag, modelFrag].filter(Boolean).join(' ');
+  const decls = [dod ? '    ' + DOD_DECL : null, '    ' + CARRY_DECL].filter(Boolean).join('\n');
+  const apply = dod ? ' + dod + carry' : ' + carry';
   return `  let passed = false, last = null
   for (let round = 1; round <= 3 && !passed; round++) {
+${decls}
     last = await agent(
-      ${prompt},
+      ${prompt}${apply},
       { label: \`${label}:r\${round}\`, phase: '${ph}',${lead ? ' ' + lead : ''}
         schema: ${schema} },
     )
@@ -281,7 +295,7 @@ VERIFY (GREEN): run the full relevant test suite for the changes on \${BRANCH} v
 
   { title: 'PathGap', enabledWhen: withCycle, build: () => emitPhase('PathGap',
     '  // Close test gaps for code paths the ACs never specified (decide-or-justify, hard-fail).\n' + gateLoop({
-      flag: 'closed', resultKey: 'pathGap', label: 'pathgap', phase: 'PathGap', modelFrag: mdl('think'),
+      flag: 'closed', resultKey: 'pathGap', label: 'pathgap', phase: 'PathGap', modelFrag: mdl('think'), dod: false,
       prompt: `\`\${inWorktree('pathgap')}
 
 PATH-GAP: the ACs do NOT cover every code path. Steps:
@@ -336,13 +350,15 @@ Return the level and a one-line justification.\`,
   } else {
     let passed = false, last = null
     for (let round = 1; round <= 3 && !passed; round++) {
+      ${DOD_DECL}
+      ${CARRY_DECL}
       last = await agent(
         \`\${inWorktree('testgate')}
 
 The change needs \${assess.level} coverage (\${assess.reason || ''}). Ensure the right tests for the changes on \${BRANCH} vs \${BASE || 'the base branch'} EXIST and PASS:
 - unit → add/fix Jest tests; run with coverage; >90% on changed files.
 - tryve-e2e → add/fix tryve E2E YAML in tests/e2e/; run \\\`yarn e2e:run\\\` and confirm green (some tryve suites need external integration envs — if unavailable, say so, do NOT fake a pass).
-Do NOT change source to game coverage. Commit new tests.\`,
+Do NOT change source to game coverage. Commit new tests.\` + dod + carry,
         { label: \`testgate:r\${round}\`, phase: 'TestGate', ${at(agentTests)}${mdl('think') ? ' ' + mdl('think') : ''}
           schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, summary: { type: 'string' } }, ['gatePassed'])} },
       )
