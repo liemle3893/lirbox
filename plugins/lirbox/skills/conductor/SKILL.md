@@ -121,6 +121,11 @@ work earns:
 
 - **decline** — trivial / one-shot / single-file; finishes in one pass and won't span sessions.
   Conductor is overkill: say so, do it inline or call the Workflow tool directly, and **STOP**.
+  This applies **even if conductor was invoked explicitly** (e.g. `/lirbox:conductor <goal>` or
+  by name) — explicit invocation selects the skill, it does not license skipping triage or
+  jumping straight to scaffold/launch. Regardless of how directly conductor was called, when
+  triage lands on decline you must still surface the cost/overkill caveat and offer to do the
+  work inline **before** generating or launching anything.
 - **bare** — multi-step but low-risk, no PR/ticket/gates → generator with just `--phases` (or
   the default single `Work`).
 - **lite** — routine delivery, small/low-risk PR → `--profile lite`.
