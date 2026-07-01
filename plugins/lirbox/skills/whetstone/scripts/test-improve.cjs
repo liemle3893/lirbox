@@ -39,6 +39,8 @@ const REQUIRED = [
   ['surface-lock untracked', /status --porcelain --untracked-files=all/],
   ['keep-or-revert decision',/verdictOf\(floorPassed, checkPassed, surfaceOk\)/],
   ['keep commits on branch', /git commit -m "whetstone\(/],
+  ['baseline resolves via rev-parse', /git rev-parse --verify --quiet "\$BASEREF\^\{commit\}"/],
+  ['baseline unresolvable hard-errors', /refusing to fall back to HEAD"; exit 1/],
   ['revert resets worktree', /git reset --hard HEAD/],
   ['revert cleans untracked',/git clean -fd\b/],
   ['checkpoint worker',      /async function checkpoint\(/],

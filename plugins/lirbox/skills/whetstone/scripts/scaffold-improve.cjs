@@ -188,17 +188,28 @@ elif git show-ref --verify --quiet "refs/heads/\${BRANCH}"; then
 else
   # Branch from the FRESH remote tip, not a possibly-stale local ref.
   git fetch origin --quiet 2>/dev/null || echo "WARN: git fetch origin failed — using local refs (may be stale)"
-  BASEREF="\${BASELINE}"
-  # Auto-detect the remote's default branch when no baseline was given.
-  [ -n "\$BASEREF" ] || BASEREF="\$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
-  if [ -n "\$BASEREF" ] && git show-ref --verify --quiet "refs/remotes/origin/\$BASEREF"; then
-    START="origin/\$BASEREF"
-  elif [ -n "\$BASEREF" ] && git show-ref --verify --quiet "\$BASEREF"; then
-    echo "NOTE: \$BASEREF is not an origin/ ref — using it verbatim (e.g. a tag/sha/origin-prefixed ref)"; START="\$BASEREF"
-  elif [ -n "\$BASEREF" ]; then
-    echo "WARN: \$BASEREF not found — branching from current HEAD (may be stale)"; START="HEAD"
+  if [ -n "\${BASELINE}" ]; then
+    # An explicit baseline MUST carry the frozen evals/ checks, so resolve it to an EXACT commit.
+    # Prefer the fresh remote tip when it names an origin branch; otherwise resolve SHAs / tags /
+    # local-only branches via rev-parse (which show-ref --verify cannot, as it needs a full refname).
+    # NEVER silently fall back to HEAD — that builds the worktree from the wrong commit, so every
+    # item is judged against a missing check and reverts / comes back unresolved.
+    BASEREF="\${BASELINE}"
+    if git show-ref --verify --quiet "refs/remotes/origin/\$BASEREF"; then
+      START="origin/\$BASEREF"
+    elif START="\$(git rev-parse --verify --quiet "\$BASEREF^{commit}")"; then
+      echo "NOTE: baseline '\$BASEREF' resolved to commit \$START (not an origin/ branch)"
+    else
+      echo "ERROR: baseline '\$BASEREF' is set but cannot be resolved to a commit (tried origin/\$BASEREF and \$BASEREF^{commit}) — refusing to fall back to HEAD"; exit 1
+    fi
   else
-    echo "WARN: could not detect remote default branch — branching from current HEAD (may be stale)"; START="HEAD"
+    # No baseline: branch from the remote default-branch tip; only here may we fall back to HEAD.
+    BASEREF="\$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+    if [ -n "\$BASEREF" ] && git show-ref --verify --quiet "refs/remotes/origin/\$BASEREF"; then
+      START="origin/\$BASEREF"
+    else
+      echo "WARN: could not detect remote default branch — branching from current HEAD (may be stale)"; START="HEAD"
+    fi
   fi
   echo "Branching \${BRANCH} from \$START"
   git worktree add "\${WORKTREE}" -b "\${BRANCH}" "\$START"
