@@ -25,6 +25,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`conductor`** | Drive the Workflow tool with durable on-disk state, crash/restart resume, worktree isolation, opt-in enforcement gates, and a cost report. For long or interruptible multi-subagent runs (migrations, audits, staged delivery). |
 | **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE code surface — keeping a change only when it strictly beats the metric **and** passes the gate — on an isolated branch, never auto-merged. For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost. |
 | **`whetstone`** | Overnight, feedback-driven skill improver on the same backbone: works a backlog of filed concerns through a deterministic floor + per-item acceptance-check (fail-before/pass-after), keeping only changes a check confirms, on a branch never auto-merged. For sharpening skills (or other deterministic-output targets) from accumulated suggestions/concerns. |
+| **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over the word budget or dense with long prose), unbalanced/missing XML structural tags, weak frontmatter triggers, and oversized inline flowcharts or reference files. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
 
 ### Agents
 
@@ -61,9 +62,10 @@ help me deeply understand PR 1059   # deep-understanding (interactive, quizzes y
 implement <plan/spec> with resume   # conductor (durable, crash-safe multi-subagent run)
 make the /search endpoint faster    # prospector (proposes a metric + gate, confirms once)
 improve the flowchart skill         # whetstone (overnight, eval-gated, from a backlog)
+which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:skill-lint`).
 
 ## Test locally (no install)
 

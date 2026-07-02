@@ -135,3 +135,13 @@ needed once the skill is running.
 - ❌ Per-agent `isolation:'worktree'` on work phases → separate trees; phase B can't see phase A's edits. Use the single shared Setup worktree instead.
 - ❌ Work-worker edits outside the worktree → defeats isolation, dirties the main tree. Always prefix prompts with `IN_WORKTREE`.
 - ❌ Writing `state.json` inside the worktree → lost on `git worktree remove`. Keep it in the main repo `.workflows/state/`.
+- ❌ Assuming a phase runs exactly once on resume → phases are **at-least-once**: the checkpoint is written *after* the side-effect, so a crash between them re-runs that phase. Every phase body must be **idempotent**.
+- ❌ Trusting a corrupt/forged resume state → the generated conductor self-validates on entry that `phasesDone` is a **contiguous prefix** of the phase order (unknown or mid-skip phases throw), so it fails loudly instead of silently skipping Setup.
+
+---
+
+## 7. Durable ≠ unattended
+
+Durability (survives restarts) is not headless autonomy. The Workflow tool runs inside a live
+Claude Code session and cannot be triggered by cron or run **unattended** / headless. For
+unattended execution a different mechanism is needed (a standalone runner driving the agent SDK).
