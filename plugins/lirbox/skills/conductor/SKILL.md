@@ -15,22 +15,22 @@ $ARGUMENTS
 
 # Conductor
 
-## Purpose
-
+<purpose>
 The Workflow tool gives deterministic, JS-authored, massively-parallel subagent orchestration — but
 its state is in-memory and resume is **same-session only**. This skill adds the missing half: a
 **durable JSON state file** written by a worker after every phase, and a **resume protocol** that
 restarts an interrupted run from disk across sessions — keeping the tool's determinism while adding
 durable + resumable + inspectable state, in portable JS.
+</purpose>
 
-## When to use
-
+<when-to-use>
 Use only when ALL hold: multi-step and dispatches subagents; long/interruptible or may span
 sessions where losing progress is costly; and a durable, inspectable on-disk record is wanted. For a
 quick one-shot fan-out, call the Workflow tool directly — the checkpoint overhead only pays off when
 durability matters.
+</when-to-use>
 
-## Arguments
+<arguments>
 
 `$ARGUMENTS` (top of this file) is a SINGLE free-text field — no separators, no flags. Resolve it:
 
@@ -53,9 +53,9 @@ Replace console.log with context.log across src/      → starts; slug e.g. migr
 migrate-logging                                       → resumes that run
 list                                                  → shows in-progress workflows
 ```
+</arguments>
 
-## Core model (read `references/workflow-runtime.md` before authoring)
-
+<core-model>
 A Workflow has two layers — confusing them is the #1 source of bugs:
 - **Conductor** = the workflow `.js` script. Restricted: pure JS, **no filesystem**, no git, no
   `Date.now()` / `Math.random()`; it only computes and dispatches. So durable state is written by a
@@ -68,8 +68,9 @@ A Workflow has two layers — confusing them is the #1 source of bugs:
 `state.json` stays in the **main repo** so it survives worktree removal. Do NOT pass per-agent
 `isolation:'worktree'` to work phases. Two-layer rules, state schema, and shared-worktree details:
 [`references/workflow-runtime.md`](references/workflow-runtime.md) — read before authoring.
+</core-model>
 
-## Procedure
+<procedure>
 
 ### 1. Resolve `$ARGUMENTS` (list / resume / new)
 
@@ -176,9 +177,9 @@ the **branch** (`wf/<name>`) + **worktree** (`.worktrees/<name>`) holding the co
 review and merge. **Do NOT auto-merge or auto-remove the worktree** — the human's call
 (non-destructive default; clean up after merge with `git worktree remove`). The state file + report
 are the audit trail.
+</procedure>
 
-## Gotchas
-
+<gotchas>
 - Every phase needs a skip-if-done guard, or resume re-runs completed work; phases are
   **at-least-once** and must be **idempotent**.
 - `.filter(Boolean)` after `parallel()` — dead agents return `null`.
@@ -186,8 +187,9 @@ are the audit trail.
 
 Full gotcha list (the `phasesDone` **contiguous**-prefix guard, checkpoint/isolation traps,
 unattended-runner note) → [`references/workflow-runtime.md`](references/workflow-runtime.md) §6–§7.
+</gotchas>
 
-## Bundled resources
+<resources>
 
 - `scripts/scaffold-workflow.cjs` — **generates** the conductor from params (SoT for boilerplate). Step 2.
 - `references/generator-flags.md` — full generator flag reference (step 2): every flag, `--model-mode`, agent-swapping, notes policy.
@@ -196,3 +198,4 @@ unattended-runner note) → [`references/workflow-runtime.md`](references/workfl
 - `scripts/list-workflows.cjs` — list workflows from `.workflows/state/` (`--all` includes completed). Step 1.
 - `scripts/workflow-report.cjs` — duration/tokens/cost for one run → `.workflows/reports/<name>.md` (step 5; rates via `RATES_JSON`).
 - `scripts/test-scaffold.cjs` — regression net: `node --check`s a flag/profile matrix, asserts emitted `phase()` order. Run after editing the generator.
+</resources>
