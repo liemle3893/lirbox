@@ -7,7 +7,7 @@
 //   1. raw  ( ) { } [ ] "  inside a node/edge label   → parse error
 //   2. literal `\n` used for a line break               → renders as the text "\n"
 //   3. HTML entities `&#NN;` in a label                 → decoded by textContent → parse error
-//   4. non-ASCII (—, …, →, …) in an EDGE label          → btoa() InvalidCharacterError at render
+//   4. non-ASCII (—, …, →, …) in a node/edge label      → btoa() InvalidCharacterError at render
 //
 // Usage:
 //   node validate.mjs <file.html> [more.html ...]
@@ -55,9 +55,9 @@ function checkLabel(text, { edge }) {
   }
   if (/&#\d+;|&#x[0-9a-f]+;/i.test(text)) issues.push(`HTML entity "&#…;" in label — textContent decodes it; use Mermaid's "#NN;" (no ampersand)`);
   if (text.includes('\\n')) issues.push(`literal "\\n" in label — use <br/> for a line break`);
-  if (edge && /[^\x00-\x7F]/.test(text)) {
+  if (/[^\x00-\x7F]/.test(text)) {
     const bad = [...new Set([...text].filter((c) => c.charCodeAt(0) > 127))].join(' ');
-    issues.push(`non-ASCII (${bad}) in edge label — btoa() throws at render; map —→- …→... →→->`);
+    issues.push(`non-ASCII (${bad}) in ${edge ? 'edge' : 'node'} label — btoa() throws at render; map —→- …→... →→->`);
   }
   return issues;
 }
