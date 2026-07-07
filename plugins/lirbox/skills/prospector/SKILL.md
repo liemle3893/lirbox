@@ -19,8 +19,10 @@ $ARGUMENTS
 1. **empty / `list`** → list mode: `node <skill-dir>/scripts/list-optimizations.cjs` (`--all` for
    finished). Launch nothing.
 2. **matches `.optimize/state/<arg>.json`** → resume that run from its ledger.
-3. **anything else** → new goal: derive a kebab `<name>`, tell the user, auto-propose a config
-   (step 1b), and — only if not declined — start fresh.
+3. **anything else** → new goal: derive a kebab goal slug, then a unique run name
+   `<name> = <goalslug>-$(date -u +%Y%m%d-%H%M%S)`, tell the user, auto-propose a config (step 1b),
+   and — only if not declined — start fresh. The timestamp keeps two runs of the same goal from
+   clobbering each other's branch/worktree/ledger.
 
 `<name>` drives everything and is the resume key. Namespace (mirrors conductor's `.workflows/`):
 
@@ -36,8 +38,8 @@ $ARGUMENTS
 name). Code edits happen on branch `opt/<name>` in worktree `.worktrees/opt-<name>`; **main is never
 touched** until the human merges.
 
-Examples: `make the /search endpoint faster` → proposes config, slug `search-speed`, confirm, run ·
-`search-speed` → resume · `list` → show in-progress.
+Examples: `make the /search endpoint faster` → proposes config, run name `search-speed-20260707-143205`,
+confirm, run · `search-speed-20260707-143205` → resume · `list` → show in-progress.
 </arguments>
 
 <execution-model>
@@ -157,7 +159,20 @@ node <skill-dir>/scripts/optimize-report.cjs <name>
 ```
 Report: the summary (`.optimize/reports/<name>.md`), branch `opt/<name>` + worktree
 `.worktrees/opt-<name>` holding the KEPT commits, and `git diff <baseline>..opt/<name>` as the review
-artifact. **Do NOT auto-merge or auto-remove the worktree** — the human reviews and merges.
+artifact.
+
+**Auto-PR (the delivery step).** If `best` beat the baseline (≥1 KEPT experiment), open a PR so
+review is one click, never a merge:
+1. Push the branch: `git -C .worktrees/opt-<name> push -u origin opt/<name>` (retry with backoff on
+   network error, per the git-ops rules).
+2. Open a PR **into the run's baseline branch** (NOT a merge) with the GitHub MCP / `gh` — title
+   `prospector(<name>): <baseline.metric> → <best.metric>` and the report markdown as the body.
+   Search for a PR template first and populate it if present.
+3. Report the PR URL back, plus the `git diff <baseline>..opt/<name>` pointer.
+
+**Never merge, and never `git worktree remove`** — the PR is the deliverable; the human reviews and
+merges. **Fallback:** no remote / no PR tooling → skip the PR, report the local branch + report path
+as before. If `best` never beat the baseline, don't open a PR; report the outcome.
 
 **Overnight (schedule-ready, not scheduled in v1):** the committed config + durable ledger let a
 `/schedule` routine or a standalone Agent SDK runner resume the loop (step 4) overnight; you review

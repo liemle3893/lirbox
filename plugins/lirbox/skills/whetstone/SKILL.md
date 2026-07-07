@@ -20,27 +20,31 @@ $ARGUMENTS
    finished). Launch nothing.
 2. **`init <skill>`** → scaffold the eval FLOOR that makes `<skill>` whetstone-ready
    (`scripts/scaffold-readiness.cjs`), print next steps, and stop. Launch nothing.
-3. **matches `.improve/state/<arg>.json`** → resume that run from its ledger.
-4. **anything else** → a target skill to improve: derive a kebab `<skill>` slug, tell the user, run
-   **setup** (the attended half), and — only if confirmed — launch the loop.
+3. **matches `.improve/state/<arg>.json`** → resume that RUN from its ledger (`<arg>` is a run slug).
+4. **anything else** → a target skill to improve: derive a kebab `<skill>` slug, then a unique
+   **run slug** `<run> = <skill>-$(date -u +%Y%m%d-%H%M%S)`, tell the user both, run **setup** (the
+   attended half), and — only if confirmed — launch the loop.
 
-`<skill>` drives everything and is the resume key. Namespace (mirrors prospector's `.optimize/`):
+**`<run>` (not `<skill>`) is the resume key and namespaces every per-run artifact** — so multiple
+runs on one skill get distinct branches/worktrees/ledgers instead of clobbering each other. The
+skill name keys only the shared INPUT backlog. Namespace (mirrors prospector's `.optimize/`):
 
 ```
 .improve/
-  config/<skill>.json   # approved run config: editable, locked, floor, items, budgets, baseline (setup)
-  state/<skill>.json    # durable ledger + run state: items, baseline, humanOnly  (schema: loop-runtime.md §3)
-  <skill>.js            # generated loop conductor (Workflow script)              (setup)
-  reports/<skill>.md    # run report: baseline→verdicts, kept/reverted/unresolved/human-only (finalize)
-feedback/<skill>.jsonl  # the INPUT backlog (one {id,type,text,acceptanceCheck?} per line)
+  config/<run>.json    # approved run config: skill, editable, locked, floor, items, budgets, baseline (setup)
+  state/<run>.json     # durable ledger + run state: items, baseline, humanOnly  (schema: loop-runtime.md §3)
+  <run>.js             # generated loop conductor (Workflow script)              (setup)
+  reports/<run>.md     # run report: baseline→verdicts, kept/reverted/unresolved/human-only (finalize)
+feedback/<skill>.jsonl # the INPUT backlog, keyed by SKILL not run (one {id,type,text,acceptanceCheck?} per line)
 ```
 
 `config/` and `state/` live in the **main repo** (survive worktree removal; resume needs only the
-name). Edits happen on branch `improve/<skill>` in worktree `.worktrees/improve-<skill>`; **main is
-never touched** until the human merges.
+run slug). Edits happen on branch `improve/<run>` in worktree `.worktrees/improve-<run>`; **main is
+never touched** — finalize opens a PR for review, never a merge.
 
-Examples: `flowchart` → reads `feedback/flowchart.jsonl`, drafts+freezes checks, confirm, run ·
-`flowchart` (after a state file exists) → resume · `list` → show in-progress.
+Examples: `flowchart` → derives run `flowchart-20260707-143205`, reads `feedback/flowchart.jsonl`,
+drafts+freezes checks, confirm, run · `flowchart-20260707-143205` (a state file exists) → resume ·
+`list` → show in-progress runs with their skill.
 </arguments>
 
 <execution-model>
@@ -71,12 +75,14 @@ passes AND surface-lock holds — the `fixer` may NEVER edit any check (`evals/*
   floor test, file concerns, then `whetstone <skill>`) and **stop** — do NOT draft checks or launch
   the loop. Full recipe: `docs/whetstone-ready.md`. (`--skill-path` if the skill isn't at
   `plugins/lirbox/skills/<skill>`.)
-- else read `.improve/state/<arg>.json` directly (the skill runs in the main session):
+- else read `.improve/state/<arg>.json` directly (the skill runs in the main session; `<arg>` is a
+  run slug):
   - `running` / `stopped` / `failed` → **resume** (step 3); config + items come from `config/`. Don't
     regenerate the loop script if it exists unchanged.
-  - no file → **new run**: derive the slug from the target skill, tell the user, run step 2 (setup);
-    if confirmed → launch.
-  - `complete` → tell the user it's done (offer `improve-report.cjs <skill>`); start fresh only if
+  - no file → **new run**: derive `<skill>` from the target, then a unique run slug
+    `<run> = <skill>-$(date -u +%Y%m%d-%H%M%S)`, tell the user both, run step 2 (setup); if
+    confirmed → launch.
+  - `complete` → tell the user it's done (offer `improve-report.cjs <run>`); start fresh only if
     they meant a new run.
 </step>
 
@@ -113,7 +119,8 @@ and the DECLINE rule are in `references/checks.md`. The flow:
    the only human gate. If declined, stop.
 
 6. **Freeze + write config** — on confirmation, write the `*.test.mjs` files into `<skill>/evals/`
-   (immutable for the run), then write `.improve/config/<skill>.json` with:
+   (immutable for the run), then write `.improve/config/<run>.json` with (`skill` is the target,
+   decoupled from the `<run>` slug that names the file):
    ```jsonc
    {
      "skill": "<skill>", "skillPath": "<skillPath>",
@@ -132,9 +139,9 @@ and the DECLINE rule are in `references/checks.md`. The flow:
 
 7. **Generate the loop conductor** — config as data, never hand-edit:
    ```
-   node <skill-dir>/scripts/scaffold-improve.cjs --name <skill>     # --force to overwrite; --out to redirect
+   node <skill-dir>/scripts/scaffold-improve.cjs --name <run>     # --force to overwrite; --out to redirect
    ```
-   Writes `.improve/<skill>.js` (slug drives state/branch/worktree paths). The config is **not**
+   Writes `.improve/<run>.js` (the run slug drives state/branch/worktree paths). The config is **not**
    baked in — it is passed at launch via `args.config` (step below), so resume re-passes it
    unchanged (the conductor can't read the filesystem). To change structure, re-run with `--force` —
    never hand-edit (reintroduces drift).
@@ -142,11 +149,11 @@ and the DECLINE rule are in `references/checks.md`. The flow:
 8. **Launch (fresh)** — stamp the ledger so duration is true wall-clock (checkpoints preserve
    `startedAt`):
    ```
-   node -e "const fs=require('fs');fs.mkdirSync('.improve/state',{recursive:true});const f='.improve/state/<skill>.json';if(!fs.existsSync(f))fs.writeFileSync(f,JSON.stringify({name:'<skill>',status:'running',startedAt:new Date().toISOString()},null,2))"
+   node -e "const fs=require('fs');fs.mkdirSync('.improve/state',{recursive:true});const f='.improve/state/<run>.json';if(!fs.existsSync(f))fs.writeFileSync(f,JSON.stringify({name:'<run>',skill:'<skill>',status:'running',startedAt:new Date().toISOString()},null,2))"
    ```
    Then launch with the config as args:
    ```
-   Workflow({ scriptPath: ".improve/<skill>.js", args: { config: <config JSON> } })
+   Workflow({ scriptPath: ".improve/<run>.js", args: { config: <config JSON> } })
    ```
    The conductor runs Setup → Baseline (floor MUST pass) → the per-item fix → floor+check+surface →
    keep/revert loop → optional Consolidate (only when `config.consolidate: true`) → stop. Each
@@ -156,14 +163,14 @@ and the DECLINE rule are in `references/checks.md`. The flow:
 <step n="3" name="Launch (resume)">
 Pass the persisted ledger so the conductor **skips already-done items** and continues the backlog:
 ```
-Workflow({ scriptPath: ".improve/<skill>.js",
-           args: { config: <config/<skill>.json>, items: <state.items>, baseline: <state.baseline> } })
+Workflow({ scriptPath: ".improve/<run>.js",
+           args: { config: <config/<run>.json>, items: <state.items>, baseline: <state.baseline> } })
 ```
 **Pass `config` AND `baseline`** — `config` carries the frozen items/floor/editable/locked the
 conductor can't reconstruct; `baseline` lets it skip the Baseline phase (when `floorPassed`) and
 re-persist the baseline at each checkpoint (omitting it overwrites the saved baseline with null).
 The loop rebuilds the ledger from `args.items`, skips any item whose id is already recorded, and
-runs the rest. KEPT commits are already on `improve/<skill>`.
+runs the rest. KEPT commits are already on `improve/<run>`.
 </step>
 
 <step n="4" name="Finalize, report, overnight note">
@@ -172,13 +179,27 @@ does). Status by why it stopped: `complete` (backlog exhausted / budget reached)
 (kill-switch), or `failed` (Workflow threw, e.g. the baseline floor failed). Last checkpoint's
 ledger is preserved → resume continues correctly.
 ```
-node -e "const f='.improve/state/<skill>.json';const s=JSON.parse(require('fs').readFileSync(f,'utf8'));s.status='complete';s.finishedAt=new Date().toISOString();require('fs').writeFileSync(f,JSON.stringify(s,null,2))"
-node <skill-dir>/scripts/improve-report.cjs <skill>
+node -e "const f='.improve/state/<run>.json';const s=JSON.parse(require('fs').readFileSync(f,'utf8'));s.status='complete';s.finishedAt=new Date().toISOString();require('fs').writeFileSync(f,JSON.stringify(s,null,2))"
+node <skill-dir>/scripts/improve-report.cjs <run>
 ```
-Report: the summary (`.improve/reports/<skill>.md` — per-item kept/reverted/unresolved + the
-human-only list), branch `improve/<skill>` + worktree `.worktrees/improve-<skill>` holding the KEPT
-commits, and `git diff <baseline>..improve/<skill>` as the review artifact. **Do NOT auto-merge or
-auto-remove the worktree** — the human reviews and merges. `main` is byte-unchanged.
+Report: the summary (`.improve/reports/<run>.md` — per-item kept/reverted/unresolved + the
+human-only list), branch `improve/<run>` + worktree `.worktrees/improve-<run>` holding the KEPT
+commits, and `git diff <baseline>..improve/<run>` as the review artifact.
+
+**Auto-PR (the delivery step).** If ≥1 item was KEPT, open a PR so review is one click, never a
+merge:
+1. Push the branch: `git -C .worktrees/improve-<run> push -u origin improve/<run>` (retry with
+   backoff on network error, per the git-ops rules).
+2. Open a PR **into the run's baseline branch** (NOT a merge) with the GitHub MCP / `gh` — title
+   `whetstone(<skill>): <k> kept / <u> unresolved` and the report markdown as the body. Search for
+   a PR template first (per the PR rules) and populate it if present.
+3. Report the PR URL back to the user, plus the `git diff <baseline>..improve/<run>` pointer.
+
+**Never merge, and never `git worktree remove`** — the PR is the deliverable; the human reviews and
+merges. `main`/the baseline branch is byte-unchanged until they do. **Fallback:** if there is no
+remote or no PR tooling, skip the PR and report the local branch + report path exactly as before —
+the run is still complete and resumable. If NO item was kept (all reverted/unresolved), don't open
+a PR; report the outcome and the human-only list.
 
 **Overnight (schedule-ready, not scheduled in v1):** the committed config + frozen checks + durable
 ledger let a `/schedule` routine or a standalone Agent SDK runner resume the loop (step 3)
@@ -245,9 +266,9 @@ and `references/checks.md` (discrimination gate §3, floor §4, locked set §5, 
   `evals/**` set. Idempotent; refuses the held-out val split. Run it, then `whetstone <skill>`.
 - `scripts/list-improvements.cjs [--all]` — list runs from `.improve/state/` (in-progress by
   default; `--all` for finished). List mode (step 1).
-- `scripts/improve-report.cjs <skill>` — per-item verdict table + kept/reverted/unresolved/human-only
-  counts + branch/worktree + the `git diff <baseline>..improve/<skill>` pointer →
-  `.improve/reports/<skill>.md`. Finalize (step 4).
+- `scripts/improve-report.cjs <run>` — per-item verdict table + kept/reverted/unresolved/human-only
+  counts + skill + branch/worktree + the `git diff <baseline>..improve/<run>` pointer →
+  `.improve/reports/<run>.md` (also serves as the auto-PR body). Finalize (step 4).
 - `scripts/test-improve.cjs` — regression net for the generators + helpers (unit + structure +
   no-fs scan + discrimination + report + the `scaffold-readiness` floor scaffold). Run after any
   change to `scaffold-improve.cjs` or `scaffold-readiness.cjs`.

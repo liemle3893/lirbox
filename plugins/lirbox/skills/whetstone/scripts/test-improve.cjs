@@ -48,6 +48,8 @@ const REQUIRED = [
   ['consolidate needs kept checks', /Consolidate: no KEPT items this run/],
   ['consolidate strict-shrink keep-half', /tokensShrank\(tokensBefore, cTokens\)/],
   ['consolidate ledger entry', /id: '__consolidate', type: 'consolidate'/],
+  ['run-slug decoupled from skill', /const SKILL = CONFIG\.skill \|\| NAME/],
+  ['ledger records the skill, not the slug', /skill: SKILL, skillPath: SKILLPATH/],
   ['keep commits on branch', /git commit -m "whetstone\(/],
   ['baseline resolves via rev-parse', /git rev-parse --verify --quiet "\$BASEREF\^\{commit\}"/],
   ['baseline unresolvable hard-errors', /refusing to fall back to HEAD"; exit 1/],
@@ -192,18 +194,19 @@ eq(run('true'),   1, 'check-baseline: a check that PASSES on baseline is non-dis
 const LIST = path.join(__dirname, 'list-improvements.cjs');
 const REPORT = path.join(__dirname, 'improve-report.cjs');
 const SKILL = 'fixture-skill';
+const RUN = SKILL + '-20260626-000000';   // run slug DECOUPLED from the skill it improves
 const stateDir = path.join('.improve', 'state');
 const reportDir = path.join('.improve', 'reports');
-const fixState = path.join(stateDir, SKILL + '.json');
-const fixReport = path.join(reportDir, SKILL + '.md');
+const fixState = path.join(stateDir, RUN + '.json');   // state/report keyed by the RUN slug, not the skill
+const fixReport = path.join(reportDir, RUN + '.md');
 // track whether these dirs pre-existed so we don't nuke a real .improve/ on cleanup.
 const stateDirPre = fs.existsSync(stateDir);
 const reportDirPre = fs.existsSync(reportDir);
 
 fs.mkdirSync(stateDir, { recursive: true });
 fs.writeFileSync(fixState, JSON.stringify({
-  name: SKILL, skill: SKILL, skillPath: 'plugins/lirbox/skills/fixture-skill',
-  status: 'complete', branch: 'improve/fixture-skill', worktree: '.worktrees/improve-fixture-skill',
+  name: RUN, skill: SKILL, skillPath: 'plugins/lirbox/skills/fixture-skill',
+  status: 'complete', branch: 'improve/' + RUN, worktree: '.worktrees/improve-' + RUN,
   baseline: { floorPassed: true, skillTokens: 900 },
   startedAt: '2026-06-26T00:00:00.000Z', updatedAt: '2026-06-26T00:10:00.000Z', finishedAt: '2026-06-26T00:10:00.000Z',
   humanOnly: ['x'],
@@ -217,17 +220,19 @@ fs.writeFileSync(fixState, JSON.stringify({
 try {
   // list --all must surface the fixture run with kept=1 / unresolved=1 and the new columns.
   const listOut = execFileSync('node', [LIST, '--all'], { encoding: 'utf8' });
-  eq(/\bfixture-skill\b/.test(listOut), true, 'list-improvements: fixture run shown with --all');
-  eq(/NAME\s+STATUS\s+ITEMS\s+KEPT\s+UNRESOLVED\s+DURATION/.test(listOut), true, 'list-improvements: header has ITEMS/KEPT/UNRESOLVED columns');
+  eq(new RegExp(RUN).test(listOut), true, 'list-improvements: fixture RUN slug shown with --all');
+  eq(/^RUN\s+SKILL\s+STATUS\s+ITEMS\s+KEPT\s+UNRESOLVED\s+DURATION/m.test(listOut), true, 'list-improvements: header has RUN + SKILL + ITEMS/KEPT/UNRESOLVED columns');
+  eq(new RegExp(RUN.replace(/[-]/g, '\\-') + '\\s+' + SKILL + '\\s+complete').test(listOut), true, 'list-improvements: RUN row shows the decoupled SKILL and status');
 
-  // report writes .improve/reports/fixture-skill.md with the verdict table + counts.
-  execFileSync('node', [REPORT, SKILL], { encoding: 'utf8' });
-  eq(fs.existsSync(fixReport), true, 'improve-report: writes .improve/reports/fixture-skill.md');
+  // report is keyed by the RUN slug (not the skill); it displays the decoupled skill.
+  execFileSync('node', [REPORT, RUN], { encoding: 'utf8' });
+  eq(fs.existsSync(fixReport), true, 'improve-report: writes .improve/reports/<run>.md');
   const md = fs.readFileSync(fixReport, 'utf8');
+  eq(new RegExp('Skill: ' + SKILL).test(md), true, 'improve-report: displays the decoupled target skill');
   eq(/\bkept\b/.test(md), true, 'improve-report: report mentions kept');
   eq(/\bunresolved\b/.test(md), true, 'improve-report: report mentions unresolved');
   eq(/a-kept/.test(md) && /b-unresolved/.test(md), true, 'improve-report: per-item verdict table lists both items');
-  eq(/git diff [^\n]*improve\/fixture-skill/.test(md), true, 'improve-report: includes git diff pointer to the branch');
+  eq(new RegExp('git diff [^\\n]*improve/' + RUN).test(md), true, 'improve-report: git diff pointer targets the per-run branch');
   eq(/Skill size \(est\. tokens\): 900 → 870 \(-30, -3\.3%\)/.test(md), true, 'improve-report: skill-size baseline→final line with delta');
   eq(/__consolidate/.test(md), true, 'improve-report: consolidate pass appears in the verdict table');
 } catch (e) {

@@ -66,11 +66,11 @@ The state file is the durable **ledger** merged with run state. It drives both *
 **Schema:**
 ```jsonc
 {
-  "name": "flowchart",                       // matches meta.name; the resume key
+  "name": "flowchart-20260707-143205",       // the RUN slug — matches meta.name; the resume key
   "status": "running | complete | failed | stopped",
-  "branch": "improve/flowchart",             // isolated branch holding the KEPT commits
-  "worktree": ".worktrees/improve-flowchart",
-  "skill": "flowchart",
+  "branch": "improve/flowchart-20260707-143205",   // per-run branch holding the KEPT commits
+  "worktree": ".worktrees/improve-flowchart-20260707-143205",
+  "skill": "flowchart",                      // the target skill — DECOUPLED from the run slug
   "skillPath": "plugins/lirbox/skills/flowchart",
   "baseline": { "floorPassed": true, "skillTokens": 900 },  // floor green on the unmodified skill + its token-size estimate
   "items": [                                 // one entry per ATTEMPTED item, in backlog order
@@ -89,6 +89,11 @@ The state file is the durable **ledger** merged with run state. It drives both *
 ```
 
 Field notes:
+- `name` is the **run slug** (`<skill>-<UTC-timestamp>`) and the resume key; `skill` is the target
+  it improves. They are **decoupled** so many runs on one skill get distinct
+  branch/worktree/ledger/report files instead of clobbering each other. The conductor computes
+  `skill = CONFIG.skill || NAME` (the `|| NAME` keeps pre-decouple ledgers readable). The shared
+  INPUT backlog stays keyed by `skill` (`feedback/<skill>.jsonl`), not by run.
 - `baseline.floorPassed` replaces prospector's `baseline.metric` — there is no scalar; the only
   baseline fact is "the floor was green before we started" (a red base cannot be improved).
 - Each `items[]` entry: `floor`/`check` are `"pass"`/`"fail"` (what the eval worker observed);

@@ -130,6 +130,10 @@ const BRANCH = (args && args.branch) ? args.branch : \`improve/\${NAME}\`
 const BASELINE = CONFIG.baseline || ''
 const WORKTREE = \`.worktrees/improve-\${NAME}\`
 const SKILLPATH = CONFIG.skillPath || ''
+// Run slug (NAME) is per-run and unique (e.g. flowchart-20260707-143205); SKILL is the target skill
+// it improves. They DECOUPLE so multiple runs on one skill get distinct branches/worktrees/ledgers
+// without clobbering each other — the ledger records the real skill, not the run slug.
+const SKILL = CONFIG.skill || NAME
 const EDITABLE = CONFIG.editable || ''
 const LOCKED = CONFIG.locked || []
 const FLOOR = (CONFIG.floor && CONFIG.floor.cmd) || ''
@@ -179,7 +183,7 @@ async function checkpoint(tag, status) {
     {
       name: NAME, status: status || 'running',
       branch: BRANCH, worktree: WORKTREE,
-      skill: NAME, skillPath: SKILLPATH,
+      skill: SKILL, skillPath: SKILLPATH,
       baseline: results.baseline || null,
       items: ledger,
     },
@@ -439,7 +443,7 @@ Confirm \\\`git status --porcelain\\\` is empty; report clean.\`,
 }
 
 return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE,
-  skill: NAME, humanOnly: ALL_ITEMS.filter(it => !it.acceptanceCheck).map(it => it.id),
+  skill: SKILL, humanOnly: ALL_ITEMS.filter(it => !it.acceptanceCheck).map(it => it.id),
   itemsDone, items: ledger }
 `;
 }

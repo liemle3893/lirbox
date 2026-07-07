@@ -3,7 +3,9 @@
  * List whetstone improvement runs from .improve/state/*.json.
  * Runs in the MAIN session (plain Node). Usage: node list-improvements.cjs [--all]
  * By default shows only in-progress (running/failed/stopped); --all includes complete ones.
- * Forked from prospector's list-optimizations.cjs; columns: NAME / STATUS / ITEMS / KEPT / UNRESOLVED / DURATION.
+ * Forked from prospector's list-optimizations.cjs; columns: RUN / SKILL / STATUS / ITEMS / KEPT / UNRESOLVED / DURATION.
+ * RUN is the per-run resume key (<skill>-<timestamp>); SKILL is the target it improves — many RUNs
+ * can share one SKILL, which is exactly why the run slug carries the timestamp.
  */
 const fs = require('fs');
 const path = require('path');
@@ -28,8 +30,10 @@ const rows = files.map((f) => {
   let s = {};
   try { s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch {}
   const items = Array.isArray(s.items) ? s.items : [];
+  const run = s.name || s.workflow || f.replace(/\.json$/, '');
   return {
-    name: s.name || s.workflow || s.skill || f.replace(/\.json$/, ''),
+    run,
+    skill: s.skill || run,       // decoupled: run slug is per-run, skill is the target it improves
     status: s.status || '?',
     items: items.length,
     kept: items.filter((e) => e && e.verdict === 'kept').length,
@@ -44,5 +48,5 @@ const rows = files.map((f) => {
 if (!rows.length) { console.log('No in-progress improvements. Use --all to include completed.'); process.exit(0); }
 
 const pad = (s, n) => String(s).padEnd(n);
-console.log(pad('NAME', 24) + pad('STATUS', 10) + pad('ITEMS', 7) + pad('KEPT', 6) + pad('UNRESOLVED', 12) + pad('DURATION', 12) + 'UPDATED');
-for (const r of rows) console.log(pad(r.name, 24) + pad(r.status, 10) + pad(r.items, 7) + pad(r.kept, 6) + pad(r.unresolved, 12) + pad(r.duration, 12) + r.updated);
+console.log(pad('RUN', 30) + pad('SKILL', 18) + pad('STATUS', 10) + pad('ITEMS', 7) + pad('KEPT', 6) + pad('UNRESOLVED', 12) + pad('DURATION', 12) + 'UPDATED');
+for (const r of rows) console.log(pad(r.run, 30) + pad(r.skill, 18) + pad(r.status, 10) + pad(r.items, 7) + pad(r.kept, 6) + pad(r.unresolved, 12) + pad(r.duration, 12) + r.updated);

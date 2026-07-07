@@ -58,7 +58,7 @@ run state. It drives both **resume** (re-read → continue from `best`) and the 
 **Schema:**
 ```jsonc
 {
-  "name": "search-speed",                 // matches meta.name; the resume key
+  "name": "search-speed-20260707-143205", // the RUN name (<goal>-<UTC-ts>); matches meta.name; the resume key
   "status": "running | complete | failed | stopped",
   "branch": "opt/search-speed",           // isolated branch holding the KEPT commits
   "worktree": ".worktrees/opt-search-speed",
