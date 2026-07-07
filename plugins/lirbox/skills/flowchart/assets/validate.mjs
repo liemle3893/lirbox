@@ -49,6 +49,13 @@ function spans(line) {
   for (const mm of line.matchAll(/(?:--|-\.|==)\s*([^\s>|.=-][^>|]*?)\s*(?:-->|\.->|==>)/g)) edges.push(mm[1]);
   for (const mm of line.matchAll(/\[([^\]]*)\]/g)) labels.push(mm[1]);
   for (const mm of line.matchAll(/\{([^}]*)\}/g)) labels.push(mm[1]);
+  // Round-node inners (..): innermost paren pairs, so ((circle)) yields "circle".
+  // Skip composite-shape inners like ([stadium]) / ({..}) — the [..]/{..} passes cover those.
+  for (const mm of line.matchAll(/\(([^()]*)\)/g)) {
+    const inner = mm[1];
+    if (/^\[[\s\S]*\]$/.test(inner) || /^\{[\s\S]*\}$/.test(inner)) continue;
+    labels.push(inner);
+  }
   return { labels, edges };
 }
 
