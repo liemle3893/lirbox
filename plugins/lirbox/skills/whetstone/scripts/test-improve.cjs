@@ -300,5 +300,55 @@ try {
   try { fs.rmSync(rtmp, { recursive: true, force: true }); } catch {}
 }
 
+// ============================================================================
+// PART 6 — harvest-feedback.cjs: failing TRAIN tasks → backlog items (SkillOpt reflection).
+// Pins: a failure is filed with acceptanceCheck = the task itself; passes are not filed;
+// re-runs are idempotent; the val split is refused (the held-out judge must never feed the
+// fixer); a harvested check is RED-on-baseline by construction (discrimination gate proof).
+// ============================================================================
+const HARV = path.join(__dirname, 'harvest-feedback.cjs');
+const htmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-harvest-'));
+const hSkill = path.join(htmp, 'hskill');
+fs.mkdirSync(path.join(hSkill, 'evals', 'tasks', 'train'), { recursive: true });
+fs.writeFileSync(path.join(hSkill, 'evals', 'tasks', 'train', '01-pass.test.mjs'), 'process.exit(0)\n');
+fs.writeFileSync(path.join(hSkill, 'evals', 'tasks', 'train', '02-fail.test.mjs'), 'console.error("boom: expected flowchart, got soup"); process.exit(1)\n');
+try {
+  // dry-run first: reports, writes nothing.
+  const dry = execFileSync('node', [HARV, 'hskill', '--skill-path', hSkill, '--dry-run'], { encoding: 'utf8', cwd: htmp });
+  eq(/would file/.test(dry), true, 'harvest: --dry-run reports the would-be item');
+  eq(fs.existsSync(path.join(htmp, 'feedback', 'hskill.jsonl')), false, 'harvest: --dry-run writes nothing');
+
+  // real run: exactly the failing task is filed, with the task itself as the acceptanceCheck.
+  execFileSync('node', [HARV, 'hskill', '--skill-path', hSkill], { encoding: 'utf8', cwd: htmp });
+  const lines = fs.readFileSync(path.join(htmp, 'feedback', 'hskill.jsonl'), 'utf8').split('\n').filter(Boolean);
+  eq(lines.length, 1, 'harvest: only the FAILING task is filed (1 of 2)');
+  const item = JSON.parse(lines[0]);
+  eq(item.id, 'harvest-02-fail', 'harvest: item id derives from the task name');
+  eq(item.type, 'harvested', 'harvest: item type is harvested');
+  eq(/02-fail\.test\.mjs/.test(item.acceptanceCheck), true, 'harvest: acceptanceCheck IS the failing task');
+  eq(/boom: expected flowchart/.test(item.text), true, 'harvest: failure evidence captured in the item text');
+
+  // discrimination-gate proof: the harvested check FAILS on the unmodified skill (exit 0 from the gate).
+  const cbHarv = path.join(__dirname, 'check-baseline.cjs');
+  let disc = 1; try { execFileSync('node', [cbHarv, item.acceptanceCheck], { stdio: 'pipe', cwd: htmp }); disc = 0; } catch (eD) { disc = eD.status || 1; }
+  eq(disc, 0, 'harvest: harvested check is RED-on-baseline by construction (discrimination gate passes)');
+
+  // idempotency: a second harvest files nothing new.
+  const again = execFileSync('node', [HARV, 'hskill', '--skill-path', hSkill], { encoding: 'utf8', cwd: htmp });
+  eq(/skip \(already filed\)\s+harvest-02-fail/.test(again), true, 'harvest: re-run skips the already-filed item');
+  eq(fs.readFileSync(path.join(htmp, 'feedback', 'hskill.jsonl'), 'utf8').split('\n').filter(Boolean).length, 1, 'harvest: re-run appends nothing');
+
+  // the anti-leak fence: harvesting the held-out val split is refused.
+  let valExit = 0;
+  try { execFileSync('node', [HARV, 'hskill', '--skill-path', hSkill, '--split', 'val'], { stdio: 'pipe', cwd: htmp }); }
+  catch (eV) { valExit = eV.status || 1; }
+  eq(valExit !== 0, true, 'harvest: --split val refused (the held-out judge never feeds the fixer)');
+} catch (e) {
+  fail(`harvest-feedback error: ${e.message.split('\n')[0]}`);
+  if (e.stderr) console.error(`  ${String(e.stderr).trim().split('\n').slice(-3).join('\n  ')}`);
+} finally {
+  try { fs.rmSync(htmp, { recursive: true, force: true }); } catch {}
+}
+
 if (failures) { console.error(`\n${failures} check(s) FAILED`); process.exit(1); }
 console.log(`\nAll helper checks passed.`);

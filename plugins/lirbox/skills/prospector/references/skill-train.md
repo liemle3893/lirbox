@@ -73,7 +73,22 @@ leave `repeat` at 1 unless tasks themselves are stochastic.
 Normal prospector flow (SKILL.md steps 1b → 5): propose config → confirm → baseline (gate + val
 score) → hill-climb → review `opt/<name>` + report. Nothing is auto-merged.
 
-## 4. DECLINE cases (same fit test as metric-gate.md)
+## 4. Or: harvest the failures into whetstone instead
+
+When you'd rather work *specific* failures than hill-climb the aggregate score, close the loop the
+other way:
+
+```
+node plugins/lirbox/skills/whetstone/scripts/harvest-feedback.cjs <skill>
+```
+
+Each failing **train** task becomes a `feedback/<skill>.jsonl` item whose `acceptanceCheck` IS that
+task — RED-on-baseline by construction (it was just observed failing), already inside the locked
+`evals/**` set. Then run `whetstone <skill>` normally. The harvester refuses `--split val` — the
+held-out judge must never feed the fixer. Rough guide: few, diagnosable failures → harvest +
+whetstone; many diffuse failures → skill-train hill-climb.
+
+## 5. DECLINE cases (same fit test as metric-gate.md)
 
 - **Fewer than ~8 total tasks** → the score is too coarse to hill-climb; file concerns and use
   whetstone instead.

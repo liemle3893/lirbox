@@ -238,6 +238,11 @@ and `references/checks.md` (discrimination gate §3, floor §4, locked set §5, 
   keep/revert → checkpoint → stop). Use instead of hand-authoring. Setup step 7.
 - `scripts/check-baseline.cjs "<acceptanceCheck>"` — the discrimination gate: exit 0 iff the check
   FAILS on a clean baseline (fail-before/pass-after). Setup step 3.
+- `scripts/harvest-feedback.cjs <skill> [--skill-path <dir>] [--dry-run]` — SkillOpt-style
+  reflection: runs the skill-train TRAIN tasks (`evals/tasks/train/`, from
+  `scaffold-readiness.cjs --scored`) and files each FAILURE into `feedback/<skill>.jsonl` with the
+  task itself as the `acceptanceCheck` — RED-on-baseline by construction, already in the locked
+  `evals/**` set. Idempotent; refuses the held-out val split. Run it, then `whetstone <skill>`.
 - `scripts/list-improvements.cjs [--all]` — list runs from `.improve/state/` (in-progress by
   default; `--all` for finished). List mode (step 1).
 - `scripts/improve-report.cjs <skill>` — per-item verdict table + kept/reverted/unresolved/human-only

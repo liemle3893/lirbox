@@ -154,8 +154,13 @@ recipe 1 shouldn't ship without it, or it will look better than it is.
   prospector `oversized-diff` discard); `references/skill-train.md` + `scaffold-readiness.cjs
   --scored` (train/val-split `run-scored.mjs`). All pinned by `test-improve.cjs` /
   `test-optimize.cjs` (structure markers + unit + E2E scored-runner cases).
-- ⬜ **5 (harvest mode)** — not implemented; do after a real skill-train run proves the task-set
-  format.
+- ✅ **5 (harvest mode)** — `whetstone/scripts/harvest-feedback.cjs`: failing skill-train TRAIN
+  tasks are filed into `feedback/<skill>.jsonl` with the task itself as the `acceptanceCheck`
+  (RED-on-baseline by construction → passes the discrimination gate; lives in the locked
+  `evals/**` set). Idempotent; refuses the val split so the held-out judge never feeds the fixer.
+  Scope note: this harvests *scored eval tasks*, the deterministic core of SkillOpt's
+  trajectory reflection — free-form harvesting from live usage transcripts remains future work
+  (it would need an LLM judge, which breaks whetstone's determinism contract).
 
 ## Sources
 
