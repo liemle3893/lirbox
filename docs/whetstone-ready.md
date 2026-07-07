@@ -67,6 +67,11 @@ One concern per line: `{ "id": "...", "type": "concern", "text": "..." }`. Rules
 - **Verifiably broken now** — sanity-check it actually fails before filing.
 - Subjective/taste → leave it out (it becomes human-only).
 
+> **Or harvest the backlog instead of hand-filing it.** If the skill has a scored task set
+> (`scaffold-readiness.cjs --scored` + `evals/tasks/train/*.test.mjs`), run
+> `harvest-feedback.cjs <skill>` to auto-file every failing **train** task as a
+> RED-by-construction item. See the [cookbook](./skill-improvement-cookbook.md).
+
 ### 3. Know the check shape (whetstone drafts these, but they're yours to review)
 
 Each concern → `evals/checks/<id>.check.mjs`: a self-contained Node script that runs your surface,
@@ -82,8 +87,12 @@ checks are red-on-baseline, so they **cannot share `run.mjs`**.
 
 Setup reads the backlog → RED-drafts a check per concern → runs the discrimination gate → measures
 the floor → asks you to confirm once → then loops: per item, a fixer edits the editable surface to
-turn the check green; kept iff floor + check pass and the surface-lock holds, else reverted. Leaves
-branch `improve/<skill>` + `.improve/reports/<skill>.md`. Never auto-merges.
+turn the check green; kept iff floor + check pass and the surface-lock holds (plus the optional
+`maxDiffLines` edit budget), else reverted. Each run gets a unique slug `<skill>-<UTC-timestamp>` →
+its own branch `improve/<run>` + `.improve/reports/<run>.md`, so concurrent runs never collide.
+On finish it **opens a PR** (never a merge) with the report as the body — you review and merge.
+Optional extras for this flow: `consolidate: true` (a compaction pass) and a scored task set for
+harvesting — both in the [cookbook](./skill-improvement-cookbook.md).
 
 ## Gotcha checklist (each of these bit us building `conductor`)
 

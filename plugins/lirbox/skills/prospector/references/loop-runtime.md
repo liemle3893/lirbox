@@ -58,7 +58,7 @@ run state. It drives both **resume** (re-read → continue from `best`) and the 
 **Schema:**
 ```jsonc
 {
-  "name": "search-speed",                 // matches meta.name; the resume key
+  "name": "search-speed-20260707-143205", // the RUN name (<goal>-<UTC-ts>); matches meta.name; the resume key
   "status": "running | complete | failed | stopped",
   "branch": "opt/search-speed",           // isolated branch holding the KEPT commits
   "worktree": ".worktrees/opt-search-speed",
@@ -84,7 +84,9 @@ Field notes:
   ledger.
 - Each `experiments[]` entry: `metric` is `null` when the metric failed to parse or timed out;
   `gate` is `"pass"`/`"fail"`; `kept` is the keep-or-discard verdict; `sha` is the commit on the
-  branch (only set when `kept`); `sec`/`tokens` are per-experiment cost (may be `null`).
+  branch (only set when `kept`); `sec`/`tokens` are per-experiment cost (may be `null`);
+  `diffLines` is the measured edit size (insertions+deletions incl. new files, `null` when
+  unmeasured) — it drives the opt-in `budgets.maxDiffLines` bound (discard reason `oversized-diff`).
 - `direction` (`min`/`max`) lives in `config/<name>.json`, **not** in the state file. The report
   reads the config to compute "% improvement" with the correct sign.
 
@@ -105,7 +107,7 @@ survives `git worktree remove` and stays readable for resume.
 ## 4. The loop rules: keep-or-discard, surface lock, two-clock budget
 
 ### Keep-or-discard (spec §2/§4)
-After each experiment the conductor keeps the change **iff ALL THREE hold**, else reverts:
+After each experiment the conductor keeps the change **iff ALL of these hold**, else reverts:
 
 1. **Gate passes** — the deterministic gate exited 0 (the correctness **floor**; nothing is kept
    if it breaks correctness). `gatePassed === true`.
@@ -122,6 +124,12 @@ After each experiment the conductor keeps the change **iff ALL THREE hold**, els
    (`surfaceAllows(diffFiles, surface)`). The eval worker lists changed paths with
    `git status --porcelain --untracked-files=all` (NOT `git diff --name-only`, which misses new
    untracked files — an out-of-surface new file would otherwise slip the lock).
+4. **Edit-size budget holds (opt-in)** — `withinEditBudget(diffLines, budgets.maxDiffLines)`:
+   with `maxDiffLines` unset/0 this is always true; when set, the eval worker measures
+   `diffLines` (insertions+deletions incl. new untracked files, via `git add -AN && git diff
+   --numstat HEAD`) and an oversized or unmeasured diff is a DISCARD, ledger reason
+   `oversized-diff`. Bounds HOW MUCH one experiment may change (the surface bounds WHERE) —
+   keeps diffs reviewable and stops "rewrote everything" candidates.
 
 KEEP → a worker stages the change (`git add -A`, safe because the surface lock already verified
 every changed path is ⊆ the surface) and commits on `opt/<name>`; the conductor advances `best` and

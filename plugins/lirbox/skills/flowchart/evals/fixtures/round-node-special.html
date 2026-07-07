@@ -1,0 +1,10 @@
+<!doctype html>
+<!-- TRAIN task fixture (GAP): raw " inside a ROUND (..) node label. Raw specials break the
+     Mermaid parser in round nodes just like in [..] nodes, but validate.mjs only extracts
+     [..] and {..} labels, so this slips through today. Locked. -->
+<html><head><meta charset="utf-8"/><title>t</title></head><body>
+<pre class="mermaid">
+flowchart TD
+  A(Say "hello") --> B[ok]
+</pre>
+</body></html>

@@ -25,8 +25,12 @@ JS *conductor* (the generated `.js`) driving full-tool *worker* subagents. Hard 
 - **Run the regression net after touching a generator:**
   `node plugins/lirbox/skills/<skill>/scripts/test-*.cjs` (asserts loop/phase structure + the no-fs scan +
   unit helpers). `conductor` → `test-scaffold.cjs`, `prospector` → `test-optimize.cjs`, `whetstone` → `test-improve.cjs`.
-- **Non-destructive default:** these never auto-merge — they leave a branch (`wf/`, `opt/`, `improve/<name>`),
-  a worktree, and a report for the human to review and merge.
+- **Non-destructive default:** these never auto-**merge**. `prospector`/`whetstone` finalize by
+  auto-opening a **PR** (never a merge) with the run report as the body — the human reviews and
+  merges; fall back to leaving the branch when there's no remote. Run branches are per-run and
+  timestamped (`opt/<goal>-<ts>`, `improve/<skill>-<ts>`) so concurrent runs never collide — the
+  run slug (not the skill/goal) keys the state/config/report/branch/worktree; the whetstone backlog
+  stays keyed by skill (`feedback/<skill>.jsonl`). `conductor` still leaves a `wf/` branch.
 
 ## Runtime artifacts are gitignored — never commit them
 

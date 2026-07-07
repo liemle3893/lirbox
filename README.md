@@ -23,8 +23,8 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`sequence-diagram`** | Draw a time-ordered interaction as a self-contained interactive HTML sequence diagram — Mermaid sequenceDiagram (autonumbered) + a numbered step list driving a clickable detail panel (who→who, sync/async, code at the call site). Note: renders via a CDN, so this one needs internet. |
 | **`deep-understanding`** | Interactive tutor: teaches you to deeply understand a PR/change/subsystem, incrementally — assesses what you know, fills gaps, quizzes you (problem → solution → impact), and doesn't stop until mastery is verified. Not a document — a guided session. |
 | **`conductor`** | Drive the Workflow tool with durable on-disk state, crash/restart resume, worktree isolation, opt-in enforcement gates, and a cost report. For long or interruptible multi-subagent runs (migrations, audits, staged delivery). |
-| **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE code surface — keeping a change only when it strictly beats the metric **and** passes the gate — on an isolated branch, never auto-merged. For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost. |
-| **`whetstone`** | Overnight, feedback-driven skill improver on the same backbone: works a backlog of filed concerns through a deterministic floor + per-item acceptance-check (fail-before/pass-after), keeping only changes a check confirms, on a branch never auto-merged. For sharpening skills (or other deterministic-output targets) from accumulated suggestions/concerns. |
+| **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE surface — keeping a change only when it strictly beats the metric **and** passes the gate, within an optional edit-size budget — then opens a PR for review (never auto-merges). For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost — or a skill's held-out task-pass-rate (see the [`skill-train`](./plugins/lirbox/skills/prospector/references/skill-train.md) recipe). |
+| **`whetstone`** | Overnight, eval-gated skill improver on the same backbone: grinds a backlog through a deterministic floor + per-item acceptance-check (fail-before/pass-after), keeping only changes a check confirms, plus an optional compaction pass that shrinks the skill — then opens a PR for review (never auto-merges). Backlog items are filed by hand **or harvested from failing eval tasks**; SkillOpt-derived controls (train/val scoring, edit-size budget) keep fixes general. For sharpening skills (or other deterministic-output targets). See the [cookbook](./docs/skill-improvement-cookbook.md). |
 | **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over the word budget or dense with long prose), unbalanced/missing XML structural tags, weak frontmatter triggers, and oversized inline flowcharts or reference files. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
 
 ### Agents
@@ -89,6 +89,18 @@ Or add the local checkout as a marketplace:
 The `lirbox` plugin omits a pinned `version`, so Claude Code tracks the git commit SHA —
 pushing new commits is enough for installed users to pick up updates on
 `/plugin marketplace update lirbox`.
+
+## Guides
+
+- [Making a skill whetstone-ready](./docs/whetstone-ready.md) — the floor + acceptance-check
+  scaffolding a skill needs before `whetstone` can grind it.
+- [Skill-improvement cookbook](./docs/skill-improvement-cookbook.md) — the end-to-end SkillOpt-style
+  flow: scored tasks (train/val) → harvest failures into a backlog → `whetstone` with a compaction
+  pass → review the auto-PR. Worked example with real before/after numbers.
+- [`skill-train` recipe](./plugins/lirbox/skills/prospector/references/skill-train.md) — point
+  `prospector` at a skill to hill-climb its held-out task-pass-rate.
+- [SkillOpt exploration](./docs/skillopt-exploration.md) — why these controls exist (the Microsoft
+  SkillOpt mapping onto `prospector`/`whetstone`) and the empirical run that validated them.
 
 ## Extending
 

@@ -19,10 +19,13 @@
  * add >=1 behavior characterization test under evals/floor/ before relying on whetstone.
  *
  * Usage:
- *   node scaffold-readiness.cjs --name <slug> [--skill-path <dir>] [--force]
+ *   node scaffold-readiness.cjs --name <slug> [--skill-path <dir>] [--force] [--scored]
  *     --name <slug>        required; kebab slug; the skill name (and feedback/<slug>.jsonl key).
  *     --skill-path <dir>   skill dir (default: plugins/lirbox/skills/<slug>).
  *     --force              overwrite existing scaffold files (default: skip + report).
+ *     --scored             ALSO scaffold the prospector skill-train metric: evals/run-scored.mjs
+ *                          + tasks/{train,val}/ (SkillOpt-style scored task set with a held-out
+ *                          val split). Recipe: prospector/references/skill-train.md.
  */
 const fs = require('fs');
 const path = require('path');
@@ -39,6 +42,7 @@ if (!name || name === true) { console.error('ERROR: --name <slug> is required');
 if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a kebab slug (a-z0-9-)'); process.exit(1); }
 const skillPath = arg('skill-path', path.join('plugins', 'lirbox', 'skills', name));
 const force = arg('force', false) === true;
+const scored = arg('scored', false) === true;
 
 const skillMd = path.join(skillPath, 'SKILL.md');
 if (!fs.existsSync(skillMd)) {
@@ -110,6 +114,44 @@ if (bad) { console.error(\`\\n00-structure: \${bad} assertion(s) failed\`); proc
 console.log('00-structure: ok');
 `;
 
+// SCORED RUNNER (--scored): the prospector "skill-train" metric — runs every tasks/<split>/*.test.mjs
+// and prints one machine-parseable `score=<pct>` line. It exits 0 whenever it RAN (a score below 100
+// is a valid measurement, not an error); non-zero only on structural problems (bad split, no tasks).
+// The TRAIN/VAL split is the SkillOpt-style overfitting control: the keep decision runs on --split
+// val, and only train failures may be shown to the propose/fix worker.
+const RUN_SCORED_MJS = `#!/usr/bin/env node
+// SCORED RUNNER (scaffolded by scaffold-readiness.cjs --scored) — the prospector skill-train metric.
+// Runs every tasks/<split>/*.test.mjs and prints ONE machine-parseable line:
+//     score=<pass-percentage> (passed=<k>/<n>, split=<split>)
+// prospector metric config (recipe: prospector/references/skill-train.md):
+//     { "cmd": "node ${skillPath}/evals/run-scored.mjs --split val", "parse": "score=([0-9.]+)", "direction": "max" }
+// TRAIN/VAL SPLIT: the keep decision MUST run on --split val (held out); only --split train results
+// may be shown to the propose/fix worker — otherwise the skill overfits the tasks that judge it.
+// Exit 0 iff the score was measured (any pass rate); non-zero only for structural errors.
+//
+// Locked (evals/**): a loop worker may NEVER edit this file or the tasks.
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const i = process.argv.indexOf('--split');
+const split = i > -1 ? process.argv[i + 1] : 'val';
+if (split !== 'train' && split !== 'val') { console.error('run-scored: --split must be train|val'); process.exit(1); }
+let tests;
+try { tests = readdirSync(join(HERE, 'tasks', split)).filter((f) => f.endsWith('.test.mjs')).sort(); }
+catch (e) { console.error('run-scored: cannot read tasks/' + split + '/: ' + e.message); process.exit(1); }
+if (!tests.length) { console.error('run-scored: no *.test.mjs under tasks/' + split + '/ — a score over zero tasks is meaningless'); process.exit(1); }
+
+let passed = 0;
+for (const t of tests) {
+  try { execFileSync('node', [join(HERE, 'tasks', split, t)], { stdio: 'pipe' }); passed++; console.log(\`task PASS  \${t}\`); }
+  catch { console.log(\`task FAIL  \${t}\`); }
+}
+console.log(\`score=\${(100 * passed / tests.length).toFixed(2)} (passed=\${passed}/\${tests.length}, split=\${split})\`);
+`;
+
 const floorCmd = customFloor
   ? `node ${skillPath}/evals/run.mjs`
   : `python3 <skill-creator>/scripts/quick_validate.py ${skillPath} && node ${skillPath}/evals/run.mjs`;
@@ -154,6 +196,13 @@ const targets = [
   [path.join(skillPath, 'evals', 'README.md'), README_MD],
   [path.join('feedback', name + '.jsonl'), ''],
 ];
+if (scored) {
+  targets.push(
+    [path.join(skillPath, 'evals', 'run-scored.mjs'), RUN_SCORED_MJS],
+    [path.join(skillPath, 'evals', 'tasks', 'train', '.gitkeep'), '# skill-train TRAIN tasks (*.test.mjs) — failures here may be shown to the propose/fix worker.\n'],
+    [path.join(skillPath, 'evals', 'tasks', 'val', '.gitkeep'), '# skill-train VAL tasks (*.test.mjs) — HELD OUT: the keep decision runs here; never show these to the worker.\n'],
+  );
+}
 
 let created = 0, skipped = 0;
 for (const [file, content] of targets) {
@@ -170,3 +219,9 @@ console.log(`  1. Add >=1 behavior characterization test under ${skillPath}/eval
 console.log(`  2. Verify the floor is green:  ${floorCmd}`);
 console.log(`  3. File concerns in feedback/${name}.jsonl (narrow, decided, each a deterministic check that's broken NOW).`);
 console.log(`  4. Run:  /lirbox:whetstone ${name}`);
+if (scored) {
+  console.log(`\nSkill-train (--scored) extras:`);
+  console.log(`  5. Add task checks under ${skillPath}/evals/tasks/train/ and tasks/val/ (*.test.mjs; val is HELD OUT).`);
+  console.log(`  6. Verify the metric runs:  node ${skillPath}/evals/run-scored.mjs --split val`);
+  console.log(`  7. Hill-climb with prospector — recipe: plugins/lirbox/skills/prospector/references/skill-train.md`);
+}

@@ -1,0 +1,10 @@
+<!doctype html>
+<!-- TRAIN task fixture (GAP): non-ASCII in a Mermaid DASH-FORM edge label (A -- text --> B).
+     btoa() throws at render exactly as with |text| labels, but validate.mjs only extracts
+     |..| edge labels, so this slips through today. Locked. -->
+<html><head><meta charset="utf-8"/><title>t</title></head><body>
+<pre class="mermaid">
+flowchart TD
+  A[Start] -- naïve → done --> B[End]
+</pre>
+</body></html>

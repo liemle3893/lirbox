@@ -7,7 +7,7 @@
 //   1. raw  ( ) { } [ ] "  inside a node/edge label   → parse error
 //   2. literal `\n` used for a line break               → renders as the text "\n"
 //   3. HTML entities `&#NN;` in a label                 → decoded by textContent → parse error
-//   4. non-ASCII (—, …, →, …) in an EDGE label          → btoa() InvalidCharacterError at render
+//   4. non-ASCII (—, …, →, …) in a node/edge label      → btoa() InvalidCharacterError at render
 //
 // Usage:
 //   node validate.mjs <file.html> [more.html ...]
@@ -38,13 +38,24 @@ function isStructural(t) {
     t === 'end' || /^(flowchart|graph)\b/.test(t);
 }
 
-// Label spans on a line: node-shape inners [..] {..} (covers ([..]) and [/../]) and edge labels |..|.
+// Label spans on a line: node-shape inners [..] {..} (covers ([..]) and [/../]), edge labels |..|,
+// and dash-form edge labels (A -- text --> B, A -. text .-> B, A == text ==> B).
 function spans(line) {
   const labels = [];
   const edges = [];
   for (const mm of line.matchAll(/\|([^|]*)\|/g)) edges.push(mm[1]);
+  // Dash-form: opener (--, -., ==) + label + arrow close. First label char excludes
+  // - . = > | and whitespace so plain arrows (-->, --->, -.->, ==>, ---) never match.
+  for (const mm of line.matchAll(/(?:--|-\.|==)\s*([^\s>|.=-][^>|]*?)\s*(?:-->|\.->|==>)/g)) edges.push(mm[1]);
   for (const mm of line.matchAll(/\[([^\]]*)\]/g)) labels.push(mm[1]);
   for (const mm of line.matchAll(/\{([^}]*)\}/g)) labels.push(mm[1]);
+  // Round-node inners (..): innermost paren pairs, so ((circle)) yields "circle".
+  // Skip composite-shape inners like ([stadium]) / ({..}) — the [..]/{..} passes cover those.
+  for (const mm of line.matchAll(/\(([^()]*)\)/g)) {
+    const inner = mm[1];
+    if (/^\[[\s\S]*\]$/.test(inner) || /^\{[\s\S]*\}$/.test(inner)) continue;
+    labels.push(inner);
+  }
   return { labels, edges };
 }
 
@@ -55,9 +66,9 @@ function checkLabel(text, { edge }) {
   }
   if (/&#\d+;|&#x[0-9a-f]+;/i.test(text)) issues.push(`HTML entity "&#…;" in label — textContent decodes it; use Mermaid's "#NN;" (no ampersand)`);
   if (text.includes('\\n')) issues.push(`literal "\\n" in label — use <br/> for a line break`);
-  if (edge && /[^\x00-\x7F]/.test(text)) {
+  if (/[^\x00-\x7F]/.test(text)) {
     const bad = [...new Set([...text].filter((c) => c.charCodeAt(0) > 127))].join(' ');
-    issues.push(`non-ASCII (${bad}) in edge label — btoa() throws at render; map —→- …→... →→->`);
+    issues.push(`non-ASCII (${bad}) in ${edge ? 'edge' : 'node'} label — btoa() throws at render; map —→- …→... →→->`);
   }
   return issues;
 }

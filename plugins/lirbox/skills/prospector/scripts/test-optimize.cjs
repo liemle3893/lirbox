@@ -28,7 +28,7 @@ const os = require('os');
 const path = require('path');
 
 const GEN = path.join(__dirname, 'scaffold-optimize.cjs');
-const { isBetter, shouldStop, deriveEvalCap } = require(GEN);
+const { isBetter, shouldStop, deriveEvalCap, withinEditBudget } = require(GEN);
 
 let failures = 0;
 function fail(msg) { console.error(`FAIL ${msg}`); failures++; }
@@ -58,7 +58,11 @@ const REQUIRED = [
   ['baseline gate-must-pass',  /gate failed — cannot optimize a broken base/],
   ['propose worker',           /label: `propose:\$\{g\}`/],
   ['eval worker',              /label: `eval:\$\{g\}`/],
-  ['keep-or-discard decision', /const keep = gatePassed && beats && surfaceOk/],
+  ['keep-or-discard decision', /const keep = gatePassed && beats && surfaceOk && sizeOk/],
+  ['edit-budget helper',       /function withinEditBudget\(diffLines, maxDiffLines\)/],
+  ['edit-budget check',        /const sizeOk = withinEditBudget\(diffLines, MAXDIFF\)/],
+  ['edit-budget measured incl. untracked', /git add -AN && git -c core\.quotepath=false diff --numstat HEAD/],
+  ['oversized-diff discard reason', /'oversized-diff'/],
   ['keep commits on branch',   /git commit -m "opt\(/],
   ['keep stages all (post surface-lock)', /git add -A/],
   ['discard resets whole worktree', /git reset --hard HEAD/],
@@ -185,6 +189,19 @@ eq(shouldStop(0, 5, {}, 0),                                 null,          'shou
 // precedence: experiments is checked first.
 eq(shouldStop(5, 9, { experiments: 5 }, 3),                 'experiments', 'shouldStop: experiments takes precedence over plateau');
 eq(shouldStop(0, 0, {}, 0),                                 null,          'shouldStop: empty budgets → never stops');
+
+// --- withinEditBudget(diffLines, maxDiffLines) — the edit-size budget ("textual learning rate"). ---
+// disabled (absent/0/junk max) → always true, even with no measurement (back-compat).
+eq(withinEditBudget(null, undefined), true,  'withinEditBudget: no budget, no measurement → true');
+eq(withinEditBudget(9999, 0),         true,  'withinEditBudget: budget 0 = disabled → true');
+eq(withinEditBudget(9999, -5),        true,  'withinEditBudget: negative budget = disabled → true');
+// enabled → boundary at <= max.
+eq(withinEditBudget(50, 100),  true,  'withinEditBudget: under budget → true');
+eq(withinEditBudget(100, 100), true,  'withinEditBudget: exactly at budget → true');
+eq(withinEditBudget(101, 100), false, 'withinEditBudget: over budget → false');
+// enabled + unmeasured → conservatively over-budget (a bound you cannot verify is not met).
+eq(withinEditBudget(null, 100), false, 'withinEditBudget: enabled but unmeasured → false');
+eq(withinEditBudget(NaN, 100),  false, 'withinEditBudget: enabled but NaN measurement → false');
 
 // --- deriveEvalCap(evalSec, factor) — default factor ~3 (spec §3), floored at 30. ---
 eq(deriveEvalCap(20),      60, 'deriveEvalCap: 20s × 3 = 60');
