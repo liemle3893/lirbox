@@ -221,8 +221,61 @@ eq(deriveEvalCap(100, 0), 300, 'deriveEvalCap: junk factor 0 → default 3');
 }
 
 // ============================================================================
+// PART 4 — scaffold-skilltrain-config.cjs: the SkillOpt config generator.
+// Assert it (a) emits a correct config from a scored eval set and (b) refuses when the metric would
+// be untrustworthy (missing evals, val < 4, total < 8). It only writes a config file — safe to run.
+// ============================================================================
+const SKILLTRAIN_GEN = path.join(__dirname, 'scaffold-skilltrain-config.cjs');
+
+function makeFakeSkill(root, { scored = true, floor = true, train = 5, val = 5 } = {}) {
+  const dir = path.join(root, 'skill');
+  fs.mkdirSync(path.join(dir, 'evals', 'tasks', 'train'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'evals', 'tasks', 'val'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: skill\ndescription: x\n---\nbody\n');
+  if (floor) fs.writeFileSync(path.join(dir, 'evals', 'run.mjs'), '');
+  if (scored) fs.writeFileSync(path.join(dir, 'evals', 'run-scored.mjs'), '');
+  for (let i = 0; i < train; i++) fs.writeFileSync(path.join(dir, 'evals', 'tasks', 'train', `t${i}.test.mjs`), '');
+  for (let i = 0; i < val; i++) fs.writeFileSync(path.join(dir, 'evals', 'tasks', 'val', `v${i}.test.mjs`), '');
+  return dir;
+}
+function runSkilltrain(dir, out) {
+  try {
+    const stdout = execFileSync('node', [SKILLTRAIN_GEN, '--name', 'skill', '--skill-path', dir,
+      '--ts', '20260708-120000', '--out', out], { encoding: 'utf8' });
+    return { ok: true, stdout };
+  } catch (e) { return { ok: false, stdout: String(e.stdout || ''), stderr: String(e.stderr || '') }; }
+}
+
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'skilltrain-'));
+  // Happy path: ready skill (train 5 + val 5) → config emitted, evals/ excluded from surface.
+  const ok = runSkilltrain(makeFakeSkill(path.join(tmp, 'ok'), {}), path.join(tmp, 'ok.json'));
+  if (assert(ok.ok, 'skilltrain: ready skill → exit 0') && assert(fs.existsSync(path.join(tmp, 'ok.json')), 'skilltrain: config written')) {
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmp, 'ok.json'), 'utf8'));
+    eq(/run-scored\.mjs --split val$/.test(cfg.metric.cmd), true, 'skilltrain: metric runs the val split');
+    eq(cfg.metric.direction, 'max', 'skilltrain: metric maximizes');
+    eq(/run\.mjs$/.test(cfg.gate.cmd), true, 'skilltrain: gate is the floor run.mjs');
+    eq(/evals/.test(cfg.surface), false, 'skilltrain: surface EXCLUDES evals/ (locked by omission)');
+    eq(/SKILL\.md/.test(cfg.surface) && /references\/\*\*/.test(cfg.surface), true, 'skilltrain: surface includes SKILL.md + references');
+    eq(/--split train/.test(cfg.goal) && /NEVER run --split val/.test(cfg.goal), true, 'skilltrain: goal points the worker at train and forbids val');
+    eq(cfg.budgets.maxDiffLines > 0 && cfg.budgets.minDelta >= 1, true, 'skilltrain: budgets carry a learning-rate + minDelta floor');
+    eq(/RUN=skill-20260708-120000/.test(ok.stdout), true, 'skilltrain: prints machine-readable RUN=');
+  }
+  // Guard rails: each must REFUSE (non-zero) and never write a config.
+  const refuse = (opts, label) => {
+    const out = path.join(tmp, label + '.json');
+    const r = runSkilltrain(makeFakeSkill(path.join(tmp, label), opts), out);
+    eq(r.ok, false, `skilltrain: refuses ${label} (non-zero exit)`);
+    eq(fs.existsSync(out), false, `skilltrain: writes no config on ${label}`);
+  };
+  refuse({ scored: false }, 'missing-scored-runner');
+  refuse({ val: 3 }, 'val-below-4');
+  refuse({ train: 2, val: 4 }, 'total-below-8');
+}
+
+// ============================================================================
 if (failures) {
   console.error(`\n${failures} check(s) FAILED`);
   process.exit(1);
 }
-console.log(`\nAll checks passed (${MATRIX.length} slug(s) + unit suite).`);
+console.log(`\nAll checks passed (${MATRIX.length} slug(s) + unit suite + skilltrain generator).`);
