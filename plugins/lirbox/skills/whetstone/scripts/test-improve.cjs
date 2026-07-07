@@ -14,7 +14,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const GEN = path.join(__dirname, 'scaffold-improve.cjs');
-const { surfaceAllows, verdictOf, shouldStop } = require(GEN);
+const { surfaceAllows, verdictOf, shouldStop, withinEditBudget, tokensShrank } = require(GEN);
 
 let failures = 0;
 function fail(m){ console.error(`FAIL ${m}`); failures++; }
@@ -37,7 +37,17 @@ const REQUIRED = [
   ['fixer retry bound',      /RETRIES/],
   ['eval worker',            /label: `eval:\$\{item\.id\}/],
   ['surface-lock untracked', /status --porcelain --untracked-files=all/],
-  ['keep-or-revert decision',/verdictOf\(floorPassed, checkPassed, surfaceOk\)/],
+  ['keep-or-revert decision',/verdictOf\(floorPassed, checkPassed, surfaceOk, sizeOk\)/],
+  ['edit-budget helper',     /function withinEditBudget\(diffLines, maxDiffLines\)/],
+  ['edit-budget check',      /const sizeOk = withinEditBudget\(diffLines, MAXDIFF\)/],
+  ['edit-budget measured incl. untracked', /git add -AN && git -c core\.quotepath=false diff --numstat HEAD/],
+  ['skill-size measured (skillTokens)', /const TOKENS_CMD/],
+  ['Consolidate phase',      /phase\('Consolidate'\)/],
+  ['consolidate is opt-in',  /const CONSOLIDATE = CONFIG\.consolidate === true/],
+  ['consolidate resume-skip',/doneIds\.has\('__consolidate'\)/],
+  ['consolidate needs kept checks', /Consolidate: no KEPT items this run/],
+  ['consolidate strict-shrink keep-half', /tokensShrank\(tokensBefore, cTokens\)/],
+  ['consolidate ledger entry', /id: '__consolidate', type: 'consolidate'/],
   ['keep commits on branch', /git commit -m "whetstone\(/],
   ['baseline resolves via rev-parse', /git rev-parse --verify --quiet "\$BASEREF\^\{commit\}"/],
   ['baseline unresolvable hard-errors', /refusing to fall back to HEAD"; exit 1/],
@@ -98,8 +108,8 @@ const FORBIDDEN = [
       if (re.test(body)) { fail(`[${slug}] conductor body uses restricted primitive \`${name}\` (must live in a worker)`); okStruct = false; }
     }
 
-    // Sanity: the generator reported its structure line.
-    if (!/^Phases: Setup → Baseline → Items/m.test(stdout)) {
+    // Sanity: the generator reported its structure line (incl. the opt-in Consolidate phase).
+    if (!/^Phases: Setup → Baseline → Items → Consolidate/m.test(stdout)) {
       fail(`[${slug}] generator did not print the expected Phases line`);
     }
 
@@ -134,6 +144,24 @@ eq(verdictOf(true,  true,  true ), 'kept',     'verdict: all green → kept');
 eq(verdictOf(false, true,  true ), 'reverted', 'verdict: floor broke → reverted');
 eq(verdictOf(true,  false, true ), 'reverted', 'verdict: check failed → reverted');
 eq(verdictOf(true,  true,  false), 'reverted', 'verdict: surface violated → reverted');
+// 4th arg (edit-size budget): omitted → defaults true (back-compat, pinned by the 3-arg cases above).
+eq(verdictOf(true,  true,  true,  true ), 'kept',     'verdict: all green + size ok → kept');
+eq(verdictOf(true,  true,  true,  false), 'reverted', 'verdict: oversized diff → reverted');
+
+// withinEditBudget — the whetstone copy behaves identically to prospector's.
+eq(withinEditBudget(null, undefined), true,  'withinEditBudget: no budget → true');
+eq(withinEditBudget(9999, 0),         true,  'withinEditBudget: budget 0 = disabled → true');
+eq(withinEditBudget(100, 100),        true,  'withinEditBudget: exactly at budget → true');
+eq(withinEditBudget(101, 100),        false, 'withinEditBudget: over budget → false');
+eq(withinEditBudget(null, 100),       false, 'withinEditBudget: enabled but unmeasured → false');
+
+// tokensShrank — the consolidation keep-half: STRICT shrink, unknowns never pass.
+eq(tokensShrank(1000, 900),  true,  'tokensShrank: strictly smaller → true');
+eq(tokensShrank(1000, 1000), false, 'tokensShrank: equal → false (no shrink, no commit)');
+eq(tokensShrank(1000, 1100), false, 'tokensShrank: grew → false');
+eq(tokensShrank(null, 900),  false, 'tokensShrank: unknown before → false');
+eq(tokensShrank(1000, null), false, 'tokensShrank: unknown after → false');
+eq(tokensShrank(NaN, 900),   false, 'tokensShrank: NaN before → false');
 
 eq(shouldStop(3, { items: 3 }), 'items',     'stop: all items done');
 eq(shouldStop(2, { items: 3 }), null,        'stop: items remain → continue');
@@ -176,12 +204,13 @@ fs.mkdirSync(stateDir, { recursive: true });
 fs.writeFileSync(fixState, JSON.stringify({
   name: SKILL, skill: SKILL, skillPath: 'plugins/lirbox/skills/fixture-skill',
   status: 'complete', branch: 'improve/fixture-skill', worktree: '.worktrees/improve-fixture-skill',
-  baseline: { floorPassed: true },
+  baseline: { floorPassed: true, skillTokens: 900 },
   startedAt: '2026-06-26T00:00:00.000Z', updatedAt: '2026-06-26T00:10:00.000Z', finishedAt: '2026-06-26T00:10:00.000Z',
   humanOnly: ['x'],
   items: [
-    { id: 'a-kept',       type: 'concern',    change: 'fixed a',     floor: 'pass', check: 'pass', verdict: 'kept',       sha: 'deadbeefcafe1234' },
-    { id: 'b-unresolved', type: 'suggestion', change: '(no change)', floor: 'pass', check: 'fail', verdict: 'unresolved', sha: null },
+    { id: 'a-kept',       type: 'concern',    change: 'fixed a',     floor: 'pass', check: 'pass', verdict: 'kept',       sha: 'deadbeefcafe1234', skillTokens: 940 },
+    { id: 'b-unresolved', type: 'suggestion', change: '(no change)', floor: 'pass', check: 'fail', verdict: 'unresolved', sha: null, skillTokens: 940 },
+    { id: '__consolidate', type: 'consolidate', change: 'deduped guidance', floor: 'pass', check: 'pass', verdict: 'kept', sha: 'beefdeadcafe5678', skillTokens: 870 },
   ],
 }, null, 2));
 
@@ -199,6 +228,8 @@ try {
   eq(/\bunresolved\b/.test(md), true, 'improve-report: report mentions unresolved');
   eq(/a-kept/.test(md) && /b-unresolved/.test(md), true, 'improve-report: per-item verdict table lists both items');
   eq(/git diff [^\n]*improve\/fixture-skill/.test(md), true, 'improve-report: includes git diff pointer to the branch');
+  eq(/Skill size \(est\. tokens\): 900 → 870 \(-30, -3\.3%\)/.test(md), true, 'improve-report: skill-size baseline→final line with delta');
+  eq(/__consolidate/.test(md), true, 'improve-report: consolidate pass appears in the verdict table');
 } catch (e) {
   fail(`fixture-state report/list error: ${e.message.split('\n')[0]}`);
   if (e.stderr) console.error(`  ${String(e.stderr).trim().split('\n').slice(-3).join('\n  ')}`);
@@ -238,6 +269,30 @@ try {
   // idempotency: a second run must skip every file.
   const out2 = execFileSync('node', [SCAF, '--name', 'tskill', '--skill-path', rSkill], { encoding: 'utf8', cwd: rtmp });
   eq((out2.match(/skip \(exists\)/g) || []).length, 5, 'scaffold-readiness: idempotent re-run skips all 5 files');
+
+  // --scored: adds the skill-train metric (run-scored.mjs + tasks/{train,val}) on top, idempotently.
+  const out3 = execFileSync('node', [SCAF, '--name', 'tskill', '--skill-path', rSkill, '--scored'], { encoding: 'utf8', cwd: rtmp });
+  eq(/3 written, 5 skipped\./.test(out3), true, 'scaffold-readiness --scored: adds exactly the 3 scored files, skips the base 5');
+  eq(fs.existsSync(path.join(rSkill, 'evals', 'run-scored.mjs')), true, 'scaffold-readiness --scored: writes evals/run-scored.mjs');
+  eq(fs.existsSync(path.join(rSkill, 'evals', 'tasks', 'train', '.gitkeep')), true, 'scaffold-readiness --scored: writes tasks/train/');
+  eq(fs.existsSync(path.join(rSkill, 'evals', 'tasks', 'val', '.gitkeep')), true, 'scaffold-readiness --scored: writes tasks/val/');
+
+  // E2E: the scored runner measures a pass FRACTION and exits 0 (a sub-100 score is a measurement,
+  // not an error) — one passing + one failing val task must yield score=50.00.
+  fs.writeFileSync(path.join(rSkill, 'evals', 'tasks', 'val', '01-pass.test.mjs'), 'process.exit(0)\n');
+  fs.writeFileSync(path.join(rSkill, 'evals', 'tasks', 'val', '02-fail.test.mjs'), 'process.exit(1)\n');
+  const scoreOut = execFileSync('node', [path.join(rSkill, 'evals', 'run-scored.mjs'), '--split', 'val'], { encoding: 'utf8' });
+  eq(/score=50\.00 \(passed=1\/2, split=val\)/.test(scoreOut), true, 'run-scored: 1 pass + 1 fail → score=50.00, exit 0');
+  // an EMPTY split is a structural error (score over zero tasks is meaningless) → non-zero exit.
+  let emptyExit = 0;
+  try { execFileSync('node', [path.join(rSkill, 'evals', 'run-scored.mjs'), '--split', 'train'], { stdio: 'pipe' }); }
+  catch (e2) { emptyExit = e2.status || 1; }
+  eq(emptyExit !== 0, true, 'run-scored: empty split → structural error (non-zero exit)');
+  // a bad split name is rejected.
+  let badExit = 0;
+  try { execFileSync('node', [path.join(rSkill, 'evals', 'run-scored.mjs'), '--split', 'test'], { stdio: 'pipe' }); }
+  catch (e3) { badExit = e3.status || 1; }
+  eq(badExit !== 0, true, 'run-scored: unknown split name rejected (non-zero exit)');
 } catch (e) {
   fail(`scaffold-readiness error: ${e.message.split('\n')[0]}`);
   if (e.stderr) console.error(`  ${String(e.stderr).trim().split('\n').slice(-3).join('\n  ')}`);

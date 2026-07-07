@@ -64,6 +64,16 @@ const unresolved = items.filter((e) => e && e.verdict === 'unresolved').length;
 // In-loop token total from the ledger's per-item `tokens` (separate from the time-window sum).
 const ledgerTokens = items.reduce((s, e) => s + (e && typeof e.tokens === 'number' ? e.tokens : 0), 0);
 
+// Skill-size trajectory (SkillOpt-style compactness telemetry): baseline skillTokens vs the last
+// measured value in the ledger. Makes accretion visible in the morning review — the consolidate
+// pass exists to push this back down.
+const sizeBase = (baseline && typeof baseline.skillTokens === 'number' && isFinite(baseline.skillTokens)) ? baseline.skillTokens : null;
+let sizeFinal = null;
+for (let i = items.length - 1; i >= 0; i--) {
+  const t = items[i] && items[i].skillTokens;
+  if (typeof t === 'number' && isFinite(t)) { sizeFinal = t; break; }
+}
+
 // --- Token usage by time window over transcripts (same method as optimize-report.cjs) ---
 function collectJsonl(dir) {
   let out = [];
@@ -129,6 +139,12 @@ md += `- Skill: ${state.skill || name}${state.skillPath ? ` (\`${state.skillPath
 md += `- Status: ${state.status || '?'}\n`;
 md += `- Branch / worktree: ${state.branch || '—'} / ${state.worktree || '—'}\n`;
 md += `- Baseline floor: ${baseline && baseline.floorPassed ? 'passed' : '— (not recorded)'}\n`;
+if (sizeBase != null || sizeFinal != null) {
+  const delta = (sizeBase != null && sizeFinal != null) ? sizeFinal - sizeBase : null;
+  md += `- Skill size (est. tokens): ${sizeBase != null ? sizeBase : '?'} → ${sizeFinal != null ? sizeFinal : '?'}`;
+  if (delta != null) md += ` (${delta >= 0 ? '+' : ''}${delta}${sizeBase ? `, ${(100 * delta / sizeBase).toFixed(1)}%` : ''})`;
+  md += `\n`;
+}
 md += `- Duration: ${fmtDur(durMs)} (${state.startedAt || '?'} → ${state.finishedAt || state.updatedAt || '?'})\n\n`;
 
 md += `## Verdicts\n\n`;

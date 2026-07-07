@@ -145,6 +145,18 @@ recipe 1 shouldn't ship without it, or it will look better than it is.
 4. Skill-train recipe doc + scored runner with train/val split (1 + 5, shipped together).
 5. Harvest mode (4).
 
+## Implementation status (this branch)
+
+- ✅ **1–4 implemented.** `skillTokens` telemetry (baseline + per-item, `improve-report.cjs` size
+  line); opt-in `config.consolidate` Consolidate phase in `scaffold-improve.cjs` (kept iff floor +
+  every kept check + surface-lock hold AND the skill strictly shrinks); opt-in
+  `budgets.maxDiffLines` edit budget in **both** generators (`withinEditBudget`, whetstone revert /
+  prospector `oversized-diff` discard); `references/skill-train.md` + `scaffold-readiness.cjs
+  --scored` (train/val-split `run-scored.mjs`). All pinned by `test-improve.cjs` /
+  `test-optimize.cjs` (structure markers + unit + E2E scored-runner cases).
+- ⬜ **5 (harvest mode)** — not implemented; do after a real skill-train run proves the task-set
+  format.
+
 ## Sources
 
 - [microsoft/SkillOpt (GitHub)](https://github.com/microsoft/SkillOpt)

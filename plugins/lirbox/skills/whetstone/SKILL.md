@@ -121,7 +121,9 @@ and the DECLINE rule are in `references/checks.md`. The flow:
      "locked":  ["<skillPath>/evals/**", "feedback/<skill>.jsonl"],
      "floor":   { "cmd": "python3 <skill-creator>/quick_validate.py <skillPath> && node <skillPath>/evals/run.mjs" },
      "items": [ { "id": "...", "type": "concern", "text": "...", "acceptanceCheck": "node <skillPath>/evals/<id>.test.mjs" } ],
-     "budgets": { "agentCapSec": 600, "checkRetries": 2, "total": { "items": <N> } },
+     "budgets": { "agentCapSec": 600, "checkRetries": 2, "total": { "items": <N> },
+                  "maxDiffLines": 0 },              // >0 → per-fix edit-size budget (lines in+out); oversized ⇒ revert
+     "consolidate": false,                          // true → one final compress-the-skill pass (kept iff floor + all kept checks + surface hold AND the skill strictly shrinks)
      "baseline": "origin/main"
    }
    ```
@@ -147,7 +149,8 @@ and the DECLINE rule are in `references/checks.md`. The flow:
    Workflow({ scriptPath: ".improve/<skill>.js", args: { config: <config JSON> } })
    ```
    The conductor runs Setup → Baseline (floor MUST pass) → the per-item fix → floor+check+surface →
-   keep/revert loop → stop. Each item's checkpoint worker appends to the ledger.
+   keep/revert loop → optional Consolidate (only when `config.consolidate: true`) → stop. Each
+   item's checkpoint worker appends to the ledger.
 </step>
 
 <step n="3" name="Launch (resume)">
@@ -208,6 +211,14 @@ and `references/checks.md` (discrimination gate §3, floor §4, locked set §5, 
   reported. Don't invent a weak proxy to drag it in.
 - **Baseline floor must be green.** The loop throws if the floor fails on the unmodified skill — you
   can't tell a real fix from a pre-existing pass. Fix the skill first or DECLINE.
+- **Consolidate (opt-in) can only shrink.** With `config.consolidate: true`, one final compress/
+  dedupe pass runs after the backlog — kept **iff** floor + EVERY check a kept item turned green +
+  surface-lock hold AND the skill entrypoint got **strictly smaller** (`skillTokens`, measured by
+  the eval workers). Equal size or any red check ⇒ reverted. It fights the accretion a
+  fix-only loop causes; the per-fix `maxDiffLines` budget deliberately does not apply to it.
+- **`maxDiffLines` bounds edit SIZE (opt-in), the surface bounds edit LOCATION.** When set (>0),
+  a fix whose diff exceeds it (insertions+deletions, incl. new files) is reverted even if the
+  check went green — small bounded steps keep diffs reviewable. Unset/0 = unbounded (default).
 - **Non-destructive revert.** A non-keep resets the WHOLE worktree (`git reset --hard HEAD && git
   clean -fd`). Prior KEPT commits are on the branch; only the uncommitted candidate drops. The
   branch is **never auto-merged**.

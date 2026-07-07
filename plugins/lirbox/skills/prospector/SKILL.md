@@ -86,7 +86,8 @@ prompt template are in `references/metric-gate.md`. The flow:
        "total": { "experiments": 100 },   // OR { "wallclockMin": 480 } OR { "tokens": N } — first wins
        "plateauStop": 15,
        "maxRestarts": 0,                  // >0 → on plateau, restart proposing from a NON-incumbent (baseline / kept-but-not-best) for that many rounds before stopping
-       "minDelta": 0.5                    // ignore sub-noise metric moves
+       "minDelta": 0.5,                   // ignore sub-noise metric moves
+       "maxDiffLines": 0                  // >0 → per-experiment edit-size budget (insertions+deletions); oversized ⇒ discard ('oversized-diff')
      },
      "baseline": "origin/main"
    }
@@ -209,4 +210,8 @@ Full rules in `references/loop-runtime.md` (keep/discard §4, surface lock §4, 
   two-clock budget, resume protocol, common mistakes. Load before authoring.
 - `references/metric-gate.md` — step-1b derivation (metric/parse/direction/gate per goal), DECLINE
   rule, surface-lock guidance, baseline measurement, setup-agent prompt template. Load before proposing.
+- `references/skill-train.md` — the SkillOpt recipe: point prospector at a SKILL (surface = skill
+  text minus `evals/`, metric = held-out `run-scored.mjs --split val` pass rate, gate = the
+  whetstone floor, `maxDiffLines` as the textual learning rate). Load when the goal is "make skill
+  X better", not "make code Y faster".
 </resources>

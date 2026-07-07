@@ -52,8 +52,25 @@ function surfaceAllows(files, editable, locked) {
     return eds.some(r => r.test(file));
   });
 }
-function verdictOf(floorPassed, checkPassed, surfaceOk) {
-  return (floorPassed && checkPassed && surfaceOk) ? 'kept' : 'reverted';
+function verdictOf(floorPassed, checkPassed, surfaceOk, sizeOk) {
+  const size = (sizeOk === undefined) ? true : !!sizeOk;
+  return (floorPassed && checkPassed && surfaceOk && size) ? 'kept' : 'reverted';
+}
+// EDIT-SIZE BUDGET (SkillOpt "textual learning rate"): bound HOW MUCH a single fix may change, not
+// just WHERE (the surface lock). Disabled when maxDiffLines is absent/0 → always true. When enabled,
+// an unknown diffLines (worker failed to measure) is conservatively over-budget — the bound only
+// matters if it is actually measured.
+function withinEditBudget(diffLines, maxDiffLines) {
+  const max = (typeof maxDiffLines === 'number' && isFinite(maxDiffLines) && maxDiffLines > 0) ? Math.floor(maxDiffLines) : 0;
+  if (!max) return true;
+  return typeof diffLines === 'number' && isFinite(diffLines) && diffLines <= max;
+}
+// CONSOLIDATION keep-half (SkillOpt "slow/meta update"): a consolidation pass is kept only when the
+// skill got STRICTLY smaller — equal size means the pass did nothing worth a commit; unknown sizes
+// never pass (can't prove a shrink you didn't measure).
+function tokensShrank(before, after) {
+  return typeof before === 'number' && isFinite(before) &&
+         typeof after === 'number' && isFinite(after) && after < before;
 }
 function shouldStop(itemsDone, total, elapsedMin, tokensUsed) {
   total = total || {};
@@ -62,7 +79,7 @@ function shouldStop(itemsDone, total, elapsedMin, tokensUsed) {
   if (typeof total.tokens === 'number' && typeof tokensUsed === 'number' && tokensUsed >= total.tokens) return 'tokens';
   return null;
 }
-const HELPERS_SRC = [globToRe, surfaceAllows, verdictOf, shouldStop].map(fn => fn.toString()).join('\n\n');
+const HELPERS_SRC = [globToRe, surfaceAllows, verdictOf, shouldStop, withinEditBudget, tokensShrank].map(fn => fn.toString()).join('\n\n');
 
 // --- CLI arg parser (forked from scaffold-optimize.cjs) ---
 function arg(name, def) {
@@ -81,13 +98,15 @@ function generate(name) {
 // cannot read the filesystem). To change the LOOP STRUCTURE, re-run the generator with --force.
 //
 // Loop shape (spec §2): Setup → Baseline (floor MUST pass) → fixed-backlog GREEN loop (fix → eval
-// floor+check+surface → keep-or-revert with surface-lock → checkpoint) → stop on the FIRST of
-// {items, wallclockMin, tokens}. KEPT commits accumulate on improve/<name>; never merged (spec §4).
+// floor+check+surface → keep-or-revert with surface-lock → checkpoint) → optional Consolidate
+// (opt-in slow/meta pass: compress the skill; kept iff floor + ALL kept checks + surface hold AND
+// the skill got strictly smaller) → stop on the FIRST of {items, wallclockMin, tokens}. KEPT
+// commits accumulate on improve/<name>; never merged (spec §4).
 
 export const meta = {
   name: '${name}',
   description: 'Skill improver loop: ${name} (feedback backlog → fix → floor+check gate → keep/revert)',
-  phases: [ { title: 'Setup' }, { title: 'Baseline' }, { title: 'Items' } ],
+  phases: [ { title: 'Setup' }, { title: 'Baseline' }, { title: 'Items' }, { title: 'Consolidate' } ],
 }
 
 // Some Workflow harnesses deliver \`args\` as a JSON STRING; normalize to an object before any read.
@@ -96,8 +115,10 @@ if (typeof args === 'string') args = JSON.parse(args)
 // ---------------------------------------------------------------------------
 // Pure decision helpers — inlined from scaffold-improve.cjs (legal in the restricted layer).
 // surfaceAllows(files, editable, locked) — the surface-lock fence (editable minus locked).
-// verdictOf(floorPassed, checkPassed, surfaceOk) — binary keep iff all three.
+// verdictOf(floorPassed, checkPassed, surfaceOk, sizeOk) — binary keep iff all hold (sizeOk optional).
 // shouldStop(itemsDone, total, elapsedMin, tokensUsed) — first stop reason or null.
+// withinEditBudget(diffLines, maxDiffLines) — the edit-size budget; true when disabled (0/absent).
+// tokensShrank(before, after) — consolidation keep-half: the skill got STRICTLY smaller.
 // ---------------------------------------------------------------------------
 ${HELPERS_SRC}
 
@@ -119,6 +140,13 @@ const BUDGETS = CONFIG.budgets || {}
 const RETRIES = (typeof BUDGETS.checkRetries === 'number') ? BUDGETS.checkRetries : 2
 const AGENTCAP = (typeof BUDGETS.agentCapSec === 'number') ? BUDGETS.agentCapSec : 600
 const TOTAL = BUDGETS.total || { items: ITEMS.length }
+// Edit-size budget (opt-in): max inserted+deleted lines per fix. 0/absent → unbounded (as before).
+const MAXDIFF = (typeof BUDGETS.maxDiffLines === 'number' && BUDGETS.maxDiffLines > 0) ? Math.floor(BUDGETS.maxDiffLines) : 0
+// Consolidation pass (opt-in): one slow/meta compress-the-skill pass after the backlog.
+const CONSOLIDATE = CONFIG.consolidate === true
+// The token-estimate one-liner for the skill entrypoint (words × 4/3, integer). Used by the
+// baseline + eval workers so every measurement is the same formula on the same file.
+const TOKENS_CMD = \`echo skillTokens=$(( ( $(wc -w < "\${SKILLPATH}/SKILL.md") * 4 + 2 ) / 3 ))\`
 
 // resume: re-passed ledger so the conductor skips already-done items.
 const priorItems = (args && Array.isArray(args.items)) ? args.items : []
@@ -228,12 +256,15 @@ if (!(results.baseline && results.baseline.floorPassed)) {
 
 BASELINE: run the FLOOR for skill "\${NAME}" on the unmodified worktree — it MUST exit 0:
     \${FLOOR || '(no floor configured — FAIL)'}
-Report floorPassed (did it exit 0?) and floorOut (last ~20 lines). Do NOT edit anything.\`,
+Report floorPassed (did it exit 0?) and floorOut (last ~20 lines).
+Also report skillTokens — the integer token estimate of the unmodified skill entrypoint, via:
+    \${TOKENS_CMD}
+Do NOT edit anything.\`,
     { label: 'baseline', phase: 'Baseline',
       schema: { type: 'object', additionalProperties: false, required: ['floorPassed'],
-        properties: { floorPassed: { type: 'boolean' }, floorOut: { type: 'string' } } } })
+        properties: { floorPassed: { type: 'boolean' }, floorOut: { type: 'string' }, skillTokens: { type: 'number' } } } })
   if (!base || !base.floorPassed) throw new Error('Baseline floor failed — cannot improve a skill whose floor is red: ' + ((base && base.floorOut) || ''))
-  results.baseline = { floorPassed: true }
+  results.baseline = { floorPassed: true, skillTokens: (typeof base.skillTokens === 'number' && isFinite(base.skillTokens)) ? base.skillTokens : null }
   await checkpoint('baseline')
 }
 
@@ -246,12 +277,15 @@ for (let i = 0; i < ITEMS.length; i++) {
   if (stop) { log(\`Stopping: \${stop} budget reached (itemsDone=\${itemsDone})\`); break }
 
   // (a) FIX (GREEN) — bounded; edit ONLY the editable surface to turn the FROZEN check green. Retry ≤ RETRIES.
+  // With an edit-size budget configured, tell the fixer up front — an oversized diff is a revert.
+  const sizeNote = MAXDIFF ? \`Keep the edit SMALL: total inserted+deleted lines must be ≤ \${MAXDIFF} (the edit-size budget) or the item is REVERTED — prefer the smallest change that turns the check green.
+\` : ''
   const fix = await agent(
     \`\${inWorktree(\`fix-\${item.id}\`)}
 
 FIX item "\${item.id}" (\${item.type}): \${item.text}
 Edit ONLY files in the editable surface \${EDITABLE} (NEVER touch \${JSON.stringify(LOCKED)} — that is locked).
-Make the item's FROZEN acceptance-check pass:
+\${sizeNote}Make the item's FROZEN acceptance-check pass:
     \${item.acceptanceCheck}
 You have a soft budget of \${AGENTCAP}s and up to \${RETRIES + 1} attempts; re-run the check yourself and iterate.
 Do NOT edit the check, any evals/ file, or the backlog. Do NOT commit — the eval step decides keep/revert.
@@ -270,17 +304,25 @@ EVAL item "\${item.id}" — measure, do NOT commit/revert:
 2. ACCEPTANCE CHECK: \${item.acceptanceCheck}  → report checkPassed (exit 0?).
 3. SURFACE: report diffFiles = EVERY changed path incl. untracked, via:
        git -c core.quotepath=false status --porcelain --untracked-files=all
-   (the path after the 2-char status; for \\\`R old -> new\\\` the NEW path).\`,
+   (the path after the 2-char status; for \\\`R old -> new\\\` the NEW path).
+4. EDIT SIZE: report diffLines = total inserted+deleted lines INCLUDING new untracked files, via:
+       git add -AN && git -c core.quotepath=false diff --numstat HEAD | awk '{i=($1=="-")?0:$1; d=($2=="-")?0:$2; s+=i+d} END{print s+0}' && git reset -q
+5. SKILL SIZE: report skillTokens — the integer token estimate of the skill entrypoint, via:
+       \${TOKENS_CMD}\`,
     { label: \`eval:\${item.id}\`, phase: 'Items',
       schema: { type: 'object', additionalProperties: false, required: ['floorPassed','checkPassed','diffFiles'],
         properties: { floorPassed: { type: 'boolean' }, checkPassed: { type: 'boolean' },
-          diffFiles: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } } } })
+          diffFiles: { type: 'array', items: { type: 'string' } }, diffLines: { type: 'number' },
+          skillTokens: { type: 'number' }, summary: { type: 'string' } } } })
 
   const floorPassed = !!(evalRes && evalRes.floorPassed)
   const checkPassed = !!(evalRes && evalRes.checkPassed)
   const diffFiles = (evalRes && Array.isArray(evalRes.diffFiles)) ? evalRes.diffFiles : []
+  const diffLines = (evalRes && typeof evalRes.diffLines === 'number' && isFinite(evalRes.diffLines)) ? evalRes.diffLines : null
+  const skillTokens = (evalRes && typeof evalRes.skillTokens === 'number' && isFinite(evalRes.skillTokens)) ? evalRes.skillTokens : null
   const surfaceOk = surfaceAllows(diffFiles, EDITABLE, LOCKED)
-  const verdict = verdictOf(floorPassed, checkPassed, surfaceOk)
+  const sizeOk = withinEditBudget(diffLines, MAXDIFF)
+  const verdict = verdictOf(floorPassed, checkPassed, surfaceOk, sizeOk)
 
   let sha = null
   if (verdict === 'kept') {
@@ -295,7 +337,7 @@ Report the commit \\\`sha\\\`. Do not push or merge.\`,
   } else {
     await agent(
       \`\${inWorktree(\`revert-\${item.id}\`, { notes: false })}
-REVERT item "\${item.id}" (\${!floorPassed ? 'floor broke' : !surfaceOk ? 'touched a locked/out-of-surface file' : 'check did not pass'}).
+REVERT item "\${item.id}" (\${!floorPassed ? 'floor broke' : !surfaceOk ? 'touched a locked/out-of-surface file' : !sizeOk ? 'diff exceeded the maxDiffLines edit budget' : 'check did not pass'}).
 Reset the WHOLE worktree so it is clean for the next item (prior KEPT commits stay on \${BRANCH}):
     git reset --hard HEAD && git clean -fd
 Confirm \\\`git status --porcelain\\\` is empty; report clean.\`,
@@ -303,10 +345,97 @@ Confirm \\\`git status --porcelain\\\` is empty; report clean.\`,
         schema: { type: 'object', additionalProperties: false, required: ['clean'], properties: { clean: { type: 'boolean' } } } })
   }
 
-  const finalVerdict = (verdict === 'kept') ? 'kept' : (floorPassed && surfaceOk && !checkPassed ? 'unresolved' : 'reverted')
-  ledger.push({ id: item.id, type: item.type, change, floor: floorPassed ? 'pass' : 'fail', check: checkPassed ? 'pass' : 'fail', verdict: finalVerdict, sha })
+  // unresolved = well-behaved fix (floor + surface + size all held) whose check never went green;
+  // an over-budget diff is a REVERT (the loop misbehaved), not an unresolved concern.
+  const finalVerdict = (verdict === 'kept') ? 'kept' : (floorPassed && surfaceOk && sizeOk && !checkPassed ? 'unresolved' : 'reverted')
+  ledger.push({ id: item.id, type: item.type, change, floor: floorPassed ? 'pass' : 'fail', check: checkPassed ? 'pass' : 'fail', verdict: finalVerdict, sha, diffLines, skillTokens })
   itemsDone = ledger.length
   await checkpoint(\`item-\${item.id}\`)
+}
+
+// --- Consolidate (opt-in, SkillOpt-style "slow/meta update"): the backlog only ever ADDS text —
+// this one bounded compress/dedupe pass fights that accretion. KEPT iff the floor passes AND every
+// check a KEPT item turned green THIS RUN is still green AND the surface-lock holds AND the skill
+// entrypoint got STRICTLY smaller (tokensShrank). The per-item maxDiffLines budget deliberately
+// does NOT apply here — the strict-shrink requirement is this pass's own bound.
+phase('Consolidate')
+const keptChecks = ITEMS.filter(it => ledger.some(e => e && e.id === it.id && e.verdict === 'kept')).map(it => it.acceptanceCheck)
+let tokensBefore = (results.baseline && typeof results.baseline.skillTokens === 'number' && isFinite(results.baseline.skillTokens)) ? results.baseline.skillTokens : null
+for (let i = ledger.length - 1; i >= 0; i--) { const t = ledger[i] && ledger[i].skillTokens; if (typeof t === 'number' && isFinite(t)) { tokensBefore = t; break } }
+if (!CONSOLIDATE) { /* not requested (config.consolidate !== true) — the run ends after the backlog as before */ }
+else if (doneIds.has('__consolidate')) { log('Consolidate: already recorded in the ledger (resume) — skipping') }
+else if (!keptChecks.length) { log('Consolidate: no KEPT items this run — nothing to consolidate') }
+else if (tokensBefore == null) { log('Consolidate: no skillTokens measurement available — cannot prove a shrink, skipping') }
+else {
+  const cfix = await agent(
+    \`\${inWorktree('fix-consolidate')}
+
+CONSOLIDATE the skill (a slow/meta pass): the kept fixes above each ADDED text. Compress, dedupe,
+and reorganize the skill WITHOUT changing behavior — merge overlapping guidance, remove repetition,
+tighten wording. Edit ONLY files in the editable surface \${EDITABLE} (NEVER touch
+\${JSON.stringify(LOCKED)} — that is locked).
+Every check that is currently green MUST STAY green:
+\${keptChecks.map(c => '    ' + c).join('\\n')}
+and the floor must stay green: \${FLOOR}
+This pass is KEPT only if the skill entrypoint gets STRICTLY smaller (current estimate:
+\${tokensBefore} tokens) — if you cannot shrink it without changing behavior, make NO edit and say so.
+You have a soft budget of \${AGENTCAP}s. Do NOT commit — the eval step decides keep/revert.
+Describe your consolidation in one line as \\\`change\\\`.\`,
+    { label: 'fix:consolidate', phase: 'Consolidate',
+      schema: { type: 'object', additionalProperties: false, required: ['change'],
+        properties: { change: { type: 'string' }, summary: { type: 'string' } } } })
+  const cchange = (cfix && cfix.change) || '(no change)'
+
+  const ceval = await agent(
+    \`\${inWorktree('eval-consolidate', { notes: false })}
+
+EVAL the consolidation pass — measure, do NOT commit/revert:
+1. FLOOR (must still pass): \${FLOOR}  → report floorPassed (exit 0?).
+2. EVERY KEPT CHECK (run each; checksPassed = ALL exited 0):
+\${keptChecks.map(c => '    ' + c).join('\\n')}
+3. SURFACE: report diffFiles = EVERY changed path incl. untracked, via:
+       git -c core.quotepath=false status --porcelain --untracked-files=all
+4. SKILL SIZE: report skillTokens — the integer token estimate of the skill entrypoint, via:
+       \${TOKENS_CMD}\`,
+    { label: 'eval:consolidate', phase: 'Consolidate',
+      schema: { type: 'object', additionalProperties: false, required: ['floorPassed','checksPassed','diffFiles'],
+        properties: { floorPassed: { type: 'boolean' }, checksPassed: { type: 'boolean' },
+          diffFiles: { type: 'array', items: { type: 'string' } }, skillTokens: { type: 'number' }, summary: { type: 'string' } } } })
+
+  const cFloor = !!(ceval && ceval.floorPassed)
+  const cChecks = !!(ceval && ceval.checksPassed)
+  const cFiles = (ceval && Array.isArray(ceval.diffFiles)) ? ceval.diffFiles : []
+  const cTokens = (ceval && typeof ceval.skillTokens === 'number' && isFinite(ceval.skillTokens)) ? ceval.skillTokens : null
+  const cSurfaceOk = surfaceAllows(cFiles, EDITABLE, LOCKED)
+  const cKeep = verdictOf(cFloor, cChecks, cSurfaceOk) === 'kept' && tokensShrank(tokensBefore, cTokens)
+
+  let csha = null
+  if (cKeep) {
+    const cc = await agent(
+      \`\${inWorktree('keep-consolidate', { notes: false })}
+KEEP the consolidation pass: floor + every kept check passed, surface-lock held, and the skill
+shrank (\${tokensBefore} → \${cTokens} tokens).
+    git add -A && git commit -m "whetstone(\${NAME}) consolidate: \${cchange}"
+Report the commit \\\`sha\\\`. Do not push or merge.\`,
+      { label: 'keep:consolidate', phase: 'Consolidate',
+        schema: { type: 'object', additionalProperties: false, required: ['sha'], properties: { sha: { type: 'string' } } } })
+    csha = (cc && cc.sha) || null
+  } else {
+    await agent(
+      \`\${inWorktree('revert-consolidate', { notes: false })}
+REVERT the consolidation pass (\${!cFloor ? 'floor broke' : !cChecks ? 'a kept check went red' : !cSurfaceOk ? 'touched a locked/out-of-surface file' : 'the skill did not get strictly smaller'}).
+Reset the WHOLE worktree so it is clean (prior KEPT commits stay on \${BRANCH}):
+    git reset --hard HEAD && git clean -fd
+Confirm \\\`git status --porcelain\\\` is empty; report clean.\`,
+      { label: 'revert:consolidate', phase: 'Consolidate',
+        schema: { type: 'object', additionalProperties: false, required: ['clean'], properties: { clean: { type: 'boolean' } } } })
+  }
+
+  ledger.push({ id: '__consolidate', type: 'consolidate', change: cchange,
+    floor: cFloor ? 'pass' : 'fail', check: cChecks ? 'pass' : 'fail',
+    verdict: cKeep ? 'kept' : 'reverted', sha: csha, diffLines: null, skillTokens: cTokens })
+  itemsDone = ledger.length
+  await checkpoint('consolidate')
 }
 
 return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE,
@@ -315,7 +444,7 @@ return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE,
 `;
 }
 
-module.exports = { surfaceAllows, verdictOf, shouldStop, generate };
+module.exports = { surfaceAllows, verdictOf, shouldStop, withinEditBudget, tokensShrank, generate };
 
 // --- CLI entry (skip when require()'d by the test net; forked from scaffold-optimize.cjs) ---
 if (require.main === module) {
@@ -330,6 +459,6 @@ if (require.main === module) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, src);
   console.log(`Generated ${out}`);
-  console.log('Phases: Setup → Baseline → Items');
+  console.log('Phases: Setup → Baseline → Items → Consolidate (opt-in via config.consolidate)');
   console.log('Launch via the Workflow tool with args.config = the approved .improve/config/' + name + '.json (config is data-in, NOT baked).');
 }

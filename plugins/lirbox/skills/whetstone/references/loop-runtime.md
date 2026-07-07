@@ -72,12 +72,14 @@ The state file is the durable **ledger** merged with run state. It drives both *
   "worktree": ".worktrees/improve-flowchart",
   "skill": "flowchart",
   "skillPath": "plugins/lirbox/skills/flowchart",
-  "baseline": { "floorPassed": true },       // the floor passed on the unmodified skill (measured once)
+  "baseline": { "floorPassed": true, "skillTokens": 900 },  // floor green on the unmodified skill + its token-size estimate
   "items": [                                 // one entry per ATTEMPTED item, in backlog order
     { "id": "node-nonascii", "type": "concern", "change": "flag non-ASCII in node labels too",
-      "floor": "pass", "check": "pass", "verdict": "kept",     "sha": "abc123…" },
+      "floor": "pass", "check": "pass", "verdict": "kept",     "sha": "abc123…", "diffLines": 14, "skillTokens": 940 },
     { "id": "floor-breaker", "type": "suggestion", "change": "deleted the edge check",
-      "floor": "fail", "check": "pass", "verdict": "reverted", "sha": null }
+      "floor": "fail", "check": "pass", "verdict": "reverted", "sha": null, "diffLines": 8, "skillTokens": 940 },
+    { "id": "__consolidate", "type": "consolidate", "change": "deduped guidance",   // only when config.consolidate: true
+      "floor": "pass", "check": "pass", "verdict": "kept",     "sha": "def456…", "diffLines": null, "skillTokens": 870 }
   ],
   "humanOnly": ["prettier"],                 // backlog items with no acceptanceCheck — reported, never attempted
   "startedAt": "ISO-8601 — set once, then preserved by every checkpoint",
@@ -91,7 +93,14 @@ Field notes:
   baseline fact is "the floor was green before we started" (a red base cannot be improved).
 - Each `items[]` entry: `floor`/`check` are `"pass"`/`"fail"` (what the eval worker observed);
   `verdict` ∈ {`kept`, `reverted`, `unresolved`}; `sha` is the commit on the branch (set only when
-  `kept`). There is **no** `metric` field.
+  `kept`). There is **no** `metric` field. `diffLines` (insertions+deletions incl. new files) and
+  `skillTokens` (token-size estimate of the skill entrypoint after this item) are telemetry —
+  `diffLines` also drives the opt-in `budgets.maxDiffLines` edit-size bound, and `skillTokens`
+  drives the report's size line and the consolidation pass's strict-shrink keep rule.
+- The `__consolidate` entry (id is reserved) exists only when `config.consolidate: true` and at
+  least one item was KEPT: one compress/dedupe pass, kept iff floor + every kept item's check +
+  surface-lock hold AND `skillTokens` strictly decreased. `check` here means "ALL kept checks
+  still green". On resume its presence in the ledger skips the pass.
 - `humanOnly[]` lists backlog item ids that had **no** `acceptanceCheck` — they never enter the
   loop (no way to verify a fix), so they are surfaced in the report for a human, not attempted.
 
@@ -112,8 +121,9 @@ The state file lives in the **main repo** (`.improve/state/`), NOT in the worktr
 ## 4. The loop rules: keep-or-revert, surface lock
 
 ### Keep-or-revert (the trust boundary)
-After each item the conductor keeps the change **iff ALL THREE hold**, else reverts —
-`verdictOf(floorPassed, checkPassed, surfaceOk)`:
+After each item the conductor keeps the change **iff ALL of these hold**, else reverts —
+`verdictOf(floorPassed, checkPassed, surfaceOk, sizeOk)` (`sizeOk` =
+`withinEditBudget(diffLines, budgets.maxDiffLines)`, always true when the budget is unset/0):
 
 1. **Floor passes** — the deterministic floor exited 0 (the correctness **floor**:
    `quick_validate.py <skill>` + `node <skill>/evals/run.mjs`). Nothing is kept if it breaks the
