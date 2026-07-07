@@ -162,6 +162,28 @@ recipe 1 shouldn't ship without it, or it will look better than it is.
   trajectory reflection — free-form harvesting from live usage transcripts remains future work
   (it would need an LLM judge, which breaks whetstone's determinism contract).
 
+## Empirical run (2026-07-07, flowchart)
+
+First real harvest → whetstone run with all the SkillOpt controls on, against
+`flowchart/assets/validate.mjs` (9 scored tasks: 5 train / 4 held-out val; baseline train 60.00,
+val 50.00; floor green; 3 discriminating items — 1 filed concern + 2 harvested; `consolidate:
+true`, `maxDiffLines: 120`). Result — 19 workers, 22m36s, ~547k subagent tokens:
+
+| Measure | Baseline | After | 
+|---|---|---|
+| Train split | 60.00 | **100.00** |
+| **Held-out val split** (never shown to workers) | 50.00 | **100.00** |
+| Floor | green | green |
+| SKILL.md size (est. tokens) | 892 | **711 (−20.3%)** |
+
+All 4 items KEPT (100% keep rate, 0 reverted/unresolved): non-ASCII check extended to node labels
+(6 lines), dash-form `A -- text --> B` edge-label extraction (6 lines), round-node `(..)` label
+extraction (7 lines), plus the consolidation pass (SKILL.md 4548→3734 bytes, all checks green).
+Locked set byte-untouched on the branch; every fix within the 120-line budget. The val jump
+50→100 on fixtures the workers never saw is the SkillOpt claim reproduced in miniature: the loop
+learned the *bug classes*, not the train fixtures. Branch: `improve/flowchart` (never
+auto-merged; run report in `.improve/reports/flowchart.md`).
+
 ## Sources
 
 - [microsoft/SkillOpt (GitHub)](https://github.com/microsoft/SkillOpt)
