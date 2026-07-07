@@ -34,6 +34,10 @@ Write each task as a small deterministic `*.test.mjs` that exercises the skill's
 
 ## 2. The config (what makes it SkillOpt and not overfitting)
 
+**You don't hand-write this.** `scaffold-skilltrain-config.cjs --name <skill>` (invoked for you by
+prospector's `skill <name>` mode) emits it verbatim from the skill's scored eval set — every field
+below is mechanically derived from the skill path. The template, annotated:
+
 ```jsonc
 {
   "goal": "improve <skill>: raise the held-out task pass rate. To see what is failing, run `node <skillPath>/evals/run-scored.mjs --split train` — NEVER run --split val (it is the held-out judge; using it is gaming the metric).",
@@ -70,8 +74,18 @@ leave `repeat` at 1 unless tasks themselves are stochastic.
 
 ## 3. Run it
 
-Normal prospector flow (SKILL.md steps 1b → 5): propose config → confirm → baseline (gate + val
-score) → hill-climb → review `opt/<name>` + report. Nothing is auto-merged.
+One trigger — prospector generates the config, confirms once, and launches:
+
+```
+/lirbox:prospector skill <skill>
+```
+
+(SKILL.md step 1c → 2 → 3: generate config → confirm → baseline (gate + val score) → hill-climb →
+review `opt/<name>` + report. Nothing is auto-merged.) The gate defaults to the floor `run.mjs`
+alone — always runnable; its `00-structure.test.mjs` is the lenient `quick_validate` stand-in. If
+the skill has no `argument-hint` and you want the stricter frontmatter check, add
+`python3 <skill-creator>/scripts/quick_validate.py <skillPath> &&` in front of the gate in the
+generated config before confirming.
 
 ## 4. Or: harvest the failures into whetstone instead
 

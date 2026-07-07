@@ -14,12 +14,15 @@ allowed-tools:
 $ARGUMENTS
 
 <arguments>
-`$ARGUMENTS` (top of file) is ONE free-text field — no flags, auto-detected three ways:
+`$ARGUMENTS` (top of file) is ONE free-text field — no flags, auto-detected four ways:
 
 1. **empty / `list`** → list mode: `node <skill-dir>/scripts/list-optimizations.cjs` (`--all` for
    finished). Launch nothing.
 2. **matches `.optimize/state/<arg>.json`** → resume that run from its ledger.
-3. **anything else** → new goal: derive a kebab goal slug, then a unique run name
+3. **`skill <name>`** (arg begins with `skill `) → **skill-train mode**: `<name>` is a skill to
+   improve. The whole run config (goal/surface/metric/gate) is DERIVED from the skill's scored eval
+   set — no prose goal to hand-write. Go to step 1c. Recipe: `references/skill-train.md`.
+4. **anything else** → new goal: derive a kebab goal slug, then a unique run name
    `<name> = <goalslug>-$(date -u +%Y%m%d-%H%M%S)`, tell the user, auto-propose a config (step 1b),
    and — only if not declined — start fresh. The timestamp keeps two runs of the same goal from
    clobbering each other's branch/worktree/ledger.
@@ -39,7 +42,9 @@ name). Code edits happen on branch `opt/<name>` in worktree `.worktrees/opt-<nam
 touched** until the human merges.
 
 Examples: `make the /search endpoint faster` → proposes config, run name `search-speed-20260707-143205`,
-confirm, run · `search-speed-20260707-143205` → resume · `list` → show in-progress.
+confirm, run · `skill flowchart` → skill-train mode: generates the config from `flowchart`'s scored
+evals, run name `flowchart-20260708-120000`, confirm, run · `search-speed-20260707-143205` → resume ·
+`list` → show in-progress.
 </arguments>
 
 <execution-model>
@@ -61,12 +66,33 @@ conductor.
 
 <step n="1" name="Resolve $ARGUMENTS">
 - **empty / `list`** → run `list-optimizations.cjs` (`--all` for finished), show the table, stop.
+- **`skill <name>`** (arg begins with `skill `) → **skill-train mode**: go to step 1c (config is
+  generated, not proposed), then step 2 → 3.
 - else read `.optimize/state/<arg>.json` directly (the skill runs in the main session):
   - `running` / `stopped` / `failed` → **resume** (step 4); goal + config come from `config/`. Don't
     regenerate the loop script if it already exists unchanged.
   - no file → **new goal**: derive slug, tell the user, run step 1b; if not declined → step 2 → 3.
   - `complete` → tell the user it's done (offer `optimize-report.cjs <name>`); start fresh only if
     they meant a new run.
+</step>
+
+<step n="1c" name="Skill-train mode — generate config, confirm once, measure baseline" note="`skill <name>` only — the short trigger; recipe: references/skill-train.md">
+No prose goal to write: the config is DERIVED from the skill's scored eval set. The flow:
+
+1. **Generate** the config deterministically (fails loudly if the skill isn't skill-train-ready —
+   missing `evals/run-scored.mjs`/`run.mjs`, or val < 4 / total < 8 tasks — pointing you at
+   `scaffold-readiness.cjs --scored`):
+   ```
+   node <skill-dir>/scripts/scaffold-skilltrain-config.cjs --name <name>   # --skill-path if not under plugins/lirbox/skills/<name>
+   ```
+   It writes `.optimize/config/<name>-<ts>.json` and prints `RUN=<name>-<ts>` + `CONFIG=<path>`. Use
+   that `RUN` as `<name>` for the rest of the run (steps 2–5). Surface EXCLUDES `evals/**` (the
+   metric/tasks are locked by omission); metric = `run-scored.mjs --split val`; gate = the floor
+   `run.mjs`. Read `references/skill-train.md` for why (held-out val, learning-rate `maxDiffLines`).
+2. **Measure the baseline ONCE** — gate (must pass) + metric (val score). Same as step 1b.4: proves
+   the commands run and records `evalSec` → `evalCapSec`.
+3. **Report throughput** (as step 1b.5) and **confirm once** via `AskUserQuestion`: the generated
+   config + baseline val score + throughput. The only human gate. If declined, stop.
 </step>
 
 <step n="1b" name="Auto-propose metric + gate, confirm once, measure baseline" note="new goals only — the heart of the skill">
@@ -215,6 +241,10 @@ Full rules in `references/loop-runtime.md` (keep/discard §4, surface lock §4, 
 - `scripts/scaffold-optimize.cjs` — **generates** the loop conductor from the approved config (SoT
   for all loop boilerplate: baseline → experiment loop → keep/discard → surface-lock → checkpoint →
   stop). Use instead of hand-authoring. Step 2.
+- `scripts/scaffold-skilltrain-config.cjs --name <skill>` — **generates** the SkillOpt run config
+  from a skill's scored eval set (surface = skill minus `evals/`, metric = `run-scored.mjs --split
+  val`, gate = floor). Refuses when the skill isn't skill-train-ready (val < 4 / total < 8 tasks).
+  The `skill <name>` short trigger (step 1c). Recipe: `references/skill-train.md`.
 - `scripts/optimize-report.cjs <name>` — baseline→best % improvement, runs/kept, plateau, duration,
   tokens, est cost → `.optimize/reports/<name>.md`. Step 5.
 - `scripts/list-optimizations.cjs [--all]` — list runs from `.optimize/state/` (in-progress by
