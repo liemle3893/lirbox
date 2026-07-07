@@ -38,11 +38,15 @@ function isStructural(t) {
     t === 'end' || /^(flowchart|graph)\b/.test(t);
 }
 
-// Label spans on a line: node-shape inners [..] {..} (covers ([..]) and [/../]) and edge labels |..|.
+// Label spans on a line: node-shape inners [..] {..} (covers ([..]) and [/../]), edge labels |..|,
+// and dash-form edge labels (A -- text --> B, A -. text .-> B, A == text ==> B).
 function spans(line) {
   const labels = [];
   const edges = [];
   for (const mm of line.matchAll(/\|([^|]*)\|/g)) edges.push(mm[1]);
+  // Dash-form: opener (--, -., ==) + label + arrow close. First label char excludes
+  // - . = > | and whitespace so plain arrows (-->, --->, -.->, ==>, ---) never match.
+  for (const mm of line.matchAll(/(?:--|-\.|==)\s*([^\s>|.=-][^>|]*?)\s*(?:-->|\.->|==>)/g)) edges.push(mm[1]);
   for (const mm of line.matchAll(/\[([^\]]*)\]/g)) labels.push(mm[1]);
   for (const mm of line.matchAll(/\{([^}]*)\}/g)) labels.push(mm[1]);
   return { labels, edges };
