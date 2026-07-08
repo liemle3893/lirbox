@@ -30,6 +30,7 @@ reordering sections, **renumber the `.sec-num` badges (01, 02, …)** and fix th
 - **Effort, table counts, surface counts, flag names** in the summary must be grounded — derive from the spec or the codebase you inspected, or omit the card. Never invent a `~2 weeks` you can't defend.
 - **Milestone `dot done`** only for slices that are actually complete. For a fresh plan, all dots are pending (no `done` class).
 - **Risks** must be specific to this plan (a real race, a real migration lock, a real auth gap), not generic ("bugs may occur").
+- **Decisions (lead)** list only genuine soft spots — decisions this plan actually leaves open and that a reviewer could push back on. Don't manufacture likely-to-change calls to fill the block; omit the whole section if the plan has none.
 - **Open questions** are real decisions you can't make alone — omit the section if there are none.
 - **Code snippets** are illustrative and must be consistent with the actual stack/schema; HTML-escape `<`, `>`, `&`.
 
