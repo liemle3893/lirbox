@@ -44,7 +44,11 @@ const path = require('path');
 // A non-finite metric (failed parse / timeout) never beats best.
 function isBetter(metric, best, direction, minDelta, spread) {
   if (typeof metric !== 'number' || !isFinite(metric)) return false;
-  const d = (minDelta == null ? 0 : minDelta);
+  // Normalize the required-improvement floor to a finite, NON-negative number: a NaN/string minDelta
+  // (a config typo) must not silently disable the floor (improvement < NaN is always false → a worse
+  // metric would "win"), and a negative minDelta must not admit a regression. Both collapse to 0.
+  const dn = Number(minDelta);
+  const d = isFinite(dn) ? Math.max(0, dn) : 0;
   if (typeof best !== 'number' || !isFinite(best)) return true; // no baseline yet → any valid metric wins
   const improvement = direction === 'max' ? metric - best : best - metric;
   if (improvement < d) return false;
@@ -489,7 +493,8 @@ conductor decides keep-or-discard). Run in order, each step under its cap:
    lock). Use, from the worktree root:
        git -c core.quotepath=false status --porcelain --untracked-files=all
    and report the path from each line (the part after the 2-char status; for a rename \\\`R  old -> new\\\`
-   report the NEW path). The conductor verifies they are ALL within the surface \\\`\${SURFACE}\\\` — any
+   report BOTH the old and new paths — a rename whose SOURCE leaves the surface must not slip the
+   lock). The conductor verifies they are ALL within the surface \\\`\${SURFACE}\\\` — any
    file outside (or an empty list) ⇒ discard.
 4. EDIT SIZE: report \\\`diffLines\\\` = total inserted+deleted lines INCLUDING new untracked files, via:
        git add -AN && git -c core.quotepath=false diff --numstat HEAD | awk '{i=($1=="-")?0:$1; d=($2=="-")?0:$2; s+=i+d} END{print s+0}' && git reset -q
