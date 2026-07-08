@@ -1,0 +1,13 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Plan check — Ceph OSD swap</title></head><body>
+<div class="verdict" data-verdict="GO-WITH-CONDITIONS"><span class="badge">GO-WITH-CONDITIONS</span><span class="summary">No refutations; two open risks to clear.</span></div>
+<ul class="conditions">
+  <li class="condition">Confirm cluster is HEALTH_OK with no active backfill (run <code>ceph -s</code>).</li>
+  <li class="condition">Confirm the <code>noout</code> flag is cleared after the swap.</li>
+</ul>
+<ul class="risks"><li><span class="q">unknown-unknown</span> noout may be left set on failure mid-procedure.</li></ul>
+<table><tbody>
+  <tr class="claim" data-quadrant="known-known" data-status="VERIFIED"><td><code>ceph osd out N</code> drains the OSD</td><td>known-known</td><td>VERIFIED</td><td>docs.ceph.com/reef</td><td>high</td></tr>
+  <tr class="claim" data-quadrant="known-unknown" data-status="UNVERIFIED"><td>cluster is healthy at start</td><td>known-unknown</td><td>UNVERIFIED (needs: ceph -s)</td><td>—</td><td>—</td></tr>
+  <tr class="claim" data-quadrant="unknown-unknown" data-status="BLIND-SPOT-RISK"><td>noout not cleared on partial failure</td><td>unknown-unknown</td><td>BLIND-SPOT-RISK</td><td>reasoning</td><td>med</td></tr>
+</tbody></table>
+</body></html>
