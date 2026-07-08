@@ -9,6 +9,7 @@ reordering sections, **renumber the `.sec-num` badges (01, 02, …)** and fix th
 | Section id | Always? | Drop / adapt when… |
 |---|---|---|
 | summary stats (header) | Always (2–4 cards) | Drop a card if you can't justify its number; never guess an effort/table count |
+| `decisions` (lead) | Recommended | **Un-numbered lead block, before `milestones`.** The decisions most likely to change, ordered by likelihood (data models → contracts → user-facing). Lead with them so reviewers react to what matters; the mechanical plan follows. Omit only if the plan truly has no soft spots |
 | `milestones` | Always | — (this is the backbone: sequenced, independently shippable slices) |
 | `dataflow` | Usually | Pure refactor/docs with no new runtime path → drop it |
 | `mockups` | UI work only | Backend / infra / library / CLI plans → **delete** (and TOC link) |
@@ -33,6 +34,16 @@ reordering sections, **renumber the `.sec-num` badges (01, 02, …)** and fix th
 - **Code snippets** are illustrative and must be consistent with the actual stack/schema; HTML-escape `<`, `>`, `&`.
 
 ## Snippets (copy into the template)
+
+### Decision likely to change (lead block)
+Order these by likelihood of change — a data-model/contract/UX decision the reader
+should react to *before* reading the mechanical plan. Reuses the `.question` card.
+```html
+<div class="question">
+  <p class="q">Comment identity: soft-delete + edit history, or hard delete?</p>
+  <span class="owner">Changes the schema &amp; every read path · blocks slice 2</span>
+</div>
+```
 
 ### Extra milestone
 ```html

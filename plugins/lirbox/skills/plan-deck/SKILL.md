@@ -32,10 +32,17 @@ Read the request. If a codebase is in scope, explore the relevant surfaces (the 
 tools or search) to learn the real package/file names, existing schema, and the runtime
 path the change touches. The plan's credibility comes from these specifics.
 
-### 2. Shape the slices
+### 2. Shape the slices — and find the soft spots
 Decompose into **independently shippable milestones** in sequence — each one a slice
 that can ship on its own (ideally behind a flag), not a waterfall phase. Identify the
 data flow, the genuine risks, and any decisions that need a human.
+
+Then do a **quick blind-spot pass**: beyond what the request states, what could bite —
+a data-model choice that ripples, a missed caller, a migration that isn't reversible,
+an auth/concurrency edge? Feed what you find into risks and into the **Decisions**
+lead block. Surface the decisions **most likely to change** (data models, contracts,
+user-facing behaviour) at the top so the reader reacts to them before the mechanical
+plan — bury the routine work below.
 
 ### 3. Choose sections for this plan type
 Read `references/components.md` → "Adapting by plan type" and the section catalogue.
@@ -52,12 +59,15 @@ Default output path: `./<slug>-plan-deck.html` (slug from the plan title).
 
 ### 5. Verify before claiming done
 - Valid standalone HTML: one `<h1 class="title">`, section ids match TOC `href`s,
-  section badges run 01..N with no gaps, zero leftover `{{...}}` and no leftover
-  TEMPLATE comments.
+  the **numbered** section badges run 01..N with no gaps (the `decisions` lead block
+  is intentionally un-numbered), zero leftover `{{...}}` and no leftover TEMPLATE comments.
 - Honesty pass (see `references/components.md`): every summary stat is grounded or its
   card is dropped; milestone dots are `done` only if truly complete; risks are specific
-  to this plan; open questions are real (or the section is omitted). Delete rather than fabricate.
-- Report the output path and a one-line description of the plan.
+  to this plan; the `decisions` lead and open questions are real (or the section is
+  omitted). Delete rather than fabricate.
+- Report the output path and a one-line description of the plan. For a high-blast-radius
+  plan (infra/migration/data), suggest running **`plan-check`** on it before execution —
+  plan-deck writes the map; plan-check tests it against the territory.
 
 ## Quality bar
 

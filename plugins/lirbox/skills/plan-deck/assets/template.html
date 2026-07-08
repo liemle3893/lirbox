@@ -165,6 +165,20 @@
 <div class="wrap layout">
   <main>
 
+    <!-- LEAD (un-numbered, before the numbered plan): the decisions most likely to change.
+         Surface them FIRST so reviewers react to what matters; the mechanical plan follows.
+         Order by likelihood of change — data models, contracts/interfaces, user-facing behaviour.
+         Omit this whole section (and its TOC link) only if the plan genuinely has no soft spots. -->
+    <section id="decisions">
+      <div class="sec-head"><h2 class="h">Decisions you'll revisit first</h2></div>
+      <p>{{ONE_LINE — the parts most likely to change; react here before reading the plan.}}</p>
+      <div class="question">
+        <p class="q">{{DECISION_MOST_LIKELY_TO_CHANGE — data model / contract / UX flow}}</p>
+        <span class="owner">{{WHY_IT_MIGHT_CHANGE · what it blocks}}</span>
+      </div>
+      <!-- repeat .question, ordered by likelihood of change -->
+    </section>
+
     <!-- 01 MILESTONES — always. Independently shippable slices, in sequence.
          Mark a dot `done` only if that slice is genuinely complete. -->
     <section id="milestones">
@@ -278,6 +292,7 @@
   <aside>
     <nav class="toc">
       <p class="toc-lbl">On this page</p>
+      <a href="#decisions">Decisions first</a>
       <a href="#milestones">01 · Milestones</a>
       <a href="#dataflow">02 · Data flow</a>
       <a href="#mockups">03 · Mockups</a>
