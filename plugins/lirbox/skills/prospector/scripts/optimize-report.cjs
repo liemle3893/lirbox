@@ -25,6 +25,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { scanRun, contaminationSection } = require('./check-val-contamination.cjs');
 
 // --- Pricing: USD per 1,000,000 tokens. EDIT or override via RATES_JSON. Keyed by model substring. ---
 const DEFAULT_RATES = {
@@ -48,11 +49,14 @@ try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); }
 catch { console.error(`ERROR: cannot read ${statePath} — no such optimization run`); process.exit(1); }
 
 // metric.direction lives in the CONFIG, not the state file — read it so % improvement is signed right.
+// metric.cmd gates the held-out val-split audit below (only skill-train runs read a val split).
 let direction = 'min';
+let metricCmd = null;
 try {
   const cfg = JSON.parse(fs.readFileSync(path.join('.optimize', 'config', name + '.json'), 'utf8'));
   if (cfg && cfg.metric && (cfg.metric.direction === 'max' || cfg.metric.direction === 'min')) direction = cfg.metric.direction;
-} catch { /* no config → assume min (lower better) */ }
+  metricCmd = cfg && cfg.metric && cfg.metric.cmd;
+} catch { /* no config → assume min (lower better); metricCmd stays null → audit skipped */ }
 
 const start = state.startedAt ? Date.parse(state.startedAt) : null;
 const end = state.finishedAt ? Date.parse(state.finishedAt)
@@ -180,7 +184,13 @@ if (rows.length) {
   md += `_No transcript usage found in the run window._\n\n`;
 }
 if (ledgerTokens) md += `In-loop tokens recorded in the ledger (per-experiment, sum): ${k(ledgerTokens)}.\n\n`;
-md += `> Estimate. Time-window token attribution is over transcripts in \`${projDir}\` `;
+// Held-out val-split audit (skill-train runs only): did any PROPOSE worker EXECUTE a read of the
+// val split? The surface lock stops val EDITS but not val READS — a peek means the score is gamed.
+// Emits nothing for non-val metrics (a plain code-optimization run).
+try { md += contaminationSection(scanRun(projDir, name, metricCmd), name); }
+catch (e) { md += `\n## Held-out val-split audit\n\n> ⚠️ Audit failed to run: ${e.message}\n`; }
+
+md += `\n> Estimate. Time-window token attribution is over transcripts in \`${projDir}\` `;
 md += `(a concurrent unrelated session in the same window would inflate it). Rates are editable in this script or via the RATES_JSON env var. `;
 md += `Review the change with \`git diff ${state.baseline ? '' : '<baseline>..'}${state.branch || 'opt/' + name}\`; nothing is auto-merged.\n`;
 

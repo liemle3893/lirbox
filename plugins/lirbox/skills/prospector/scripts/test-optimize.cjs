@@ -281,8 +281,68 @@ function runSkilltrain(dir, out) {
 }
 
 // ============================================================================
+// PART 4 — VAL-CONTAMINATION detector pure core (check-val-contamination.cjs).
+// The held-out val split must never be READ by a propose worker; the detector flags it.
+// Critical property: the propose PROMPT embeds "NEVER run --split val" (goal text), so the
+// detector must key on EXECUTED tool_use inputs, not prompt text — else every propose worker
+// false-positives.
+// ============================================================================
+{
+  const { analyzeWorker } = require(path.join(__dirname, 'check-val-contamination.cjs'));
+
+  // Helpers to fabricate a worker transcript (the shape optimize-report/detector parse).
+  const userMsg = (text) => ({ type: 'user', message: { role: 'user', content: text } });
+  const toolUse = (name, input) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name, input }] } });
+
+  // Real propose prompt embeds the goal, which literally forbids val — this is the trap.
+  const PROPOSE_PROMPT = 'PROPOSE (experiment 3, spec §2). Goal: "improve foo: … run `node p/evals/run-scored.mjs --split train` — NEVER run --split val …". Make ONE focused edit.';
+
+  // (a) Honest propose worker: prompt mentions val, but it only ran --split train.
+  const honest = analyzeWorker([userMsg(PROPOSE_PROMPT), toolUse('Bash', { command: 'node p/evals/run-scored.mjs --split train' })]);
+  eq(honest.role, 'propose', 'contam: classifies propose worker from prompt');
+  eq(honest.hits.length, 0, 'contam: prompt mentioning val is NOT a hit (false-positive guard)');
+
+  // (b) Contaminated HIGH: propose worker RAN the val scorer.
+  const peeked = analyzeWorker([userMsg(PROPOSE_PROMPT), toolUse('Bash', { command: 'timeout 60 node p/evals/run-scored.mjs --split val' })]);
+  eq(peeked.hits.length, 1, 'contam: executed --split val IS a hit');
+  eq(peeked.hits[0].severity, 'high', 'contam: running the val scorer is HIGH');
+
+  // (c) Contaminated HIGH via a Read of a tasks/val file (reads contents).
+  const catted = analyzeWorker([userMsg(PROPOSE_PROMPT), toolUse('Read', { file_path: 'p/evals/tasks/val/20-conductor-purity.test.mjs' })]);
+  eq(catted.hits.length, 1, 'contam: reading a tasks/val file IS a hit');
+  eq(catted.hits[0].severity, 'high', 'contam: Read of a val file is HIGH');
+
+  // (c1) HIGH: `cat` of val contents in a Bash command.
+  const catBash = analyzeWorker([userMsg(PROPOSE_PROMPT), toolUse('Bash', { command: 'cd wt && cat p/evals/tasks/val/*.mjs' })]);
+  eq(catBash.hits[0].severity, 'high', 'contam: cat of val contents is HIGH');
+
+  // (c1b) HIGH: `for f in <val-glob>; do cat "$f"` (content verb not adjacent to the val path).
+  const forCat = analyzeWorker([userMsg(PROPOSE_PROMPT), toolUse('Bash', { command: 'for f in p/evals/tasks/val/*.test.mjs; do echo "== $f =="; cat "$f"; done' })]);
+  eq(forCat.hits[0].severity, 'high', 'contam: for-loop cat over a val glob is HIGH');
+
+  // (c2) Writing implementation-notes whose PROSE mentions tasks/val (heredoc body) is NOT a read.
+  const noteCmd = "mkdir -p implementation-notes && cat >> implementation-notes/propose-3.html <<'EOF'\n<p>I avoided tasks/val and only used tasks/train.</p>\nEOF";
+  const noting = analyzeWorker([userMsg(PROPOSE_PROMPT), toolUse('Bash', { command: noteCmd })]);
+  eq(noting.hits.length, 0, 'contam: heredoc note body mentioning tasks/val is NOT a hit');
+
+  // (c3) LOW: merely LISTING the val dir leaks filenames, not contents.
+  const lsVal = analyzeWorker([userMsg(PROPOSE_PROMPT), toolUse('Bash', { command: 'ls -la p/evals/tasks/train/ p/evals/tasks/val/' })]);
+  eq(lsVal.hits.length, 1, 'contam: listing val IS a hit');
+  eq(lsVal.hits[0].severity, 'low', 'contam: ls of val is LOW (filenames only)');
+
+  // (c4) LOW: a compound where the content verb targets a NON-val file and val is only ls|wc.
+  const compound = analyzeWorker([userMsg(PROPOSE_PROMPT), toolUse('Bash', { command: 'git log -8 && cat ../../.optimize/state/x.json | head -60 && ls p/evals/tasks/val/ | wc -l' })]);
+  eq(compound.hits[0].severity, 'low', 'contam: cat(non-val) + ls(val)|wc stays LOW (per-segment)');
+
+  // (d) An EVAL worker legitimately runs --split val — must NOT be flagged (role gate).
+  const evalWorker = analyzeWorker([userMsg('EVAL (experiment 3, spec §2/§3). Measure the candidate edit;'), toolUse('Bash', { command: 'node p/evals/run-scored.mjs --split val' })]);
+  eq(evalWorker.role, 'eval', 'contam: classifies eval worker');
+  eq(evalWorker.hits.length, 0, 'contam: eval worker running val is not contamination (only propose is)');
+}
+
+// ============================================================================
 if (failures) {
   console.error(`\n${failures} check(s) FAILED`);
   process.exit(1);
 }
-console.log(`\nAll checks passed (${MATRIX.length} slug(s) + unit suite + skilltrain generator).`);
+console.log(`\nAll checks passed (${MATRIX.length} slug(s) + unit suite + skilltrain generator + contamination detector).`);

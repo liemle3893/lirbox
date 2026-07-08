@@ -60,9 +60,19 @@ The four load-bearing choices:
    held-out validation gate: the proposer learns from train failures, but a change is KEPT only if
    *val* — tasks it never saw — improves. Without this the loop learns the eval tasks, not the task
    family, and the score is a lie. Known limit: the propose worker has full tools and *could* run
-   `--split val` despite the instruction; the surface lock stops it *editing* val, not *reading*
-   it. Acceptable for v1 — the branch is human-reviewed — but check the propose transcripts if a
-   run looks too good.
+   `--split val` (or `cat` a `tasks/val/*` file) despite the instruction; the surface lock stops it
+   *editing* val, not *reading* it. This is now AUDITED, not trusted: `optimize-report.cjs` runs
+   `check-val-contamination.cjs`, which scans each propose worker's transcript for an EXECUTED val
+   touch (tool_use inputs only — the prompt itself embeds "NEVER run --split val", so a text grep
+   would false-positive on every worker; heredoc note bodies are excluded too) and prints a
+   **Held-out val-split audit** section. Touches are tiered so the signal isn't drowned by routine
+   orientation: **HIGH** = read val *contents* (`cat`/`for…cat`/`grep` a val file, or a `Read`/`Grep`
+   tool on val) or ran the val *scorer* (`--split val`) — this leaks assertions or the objective, so
+   the run's baseline→best is NOT a clean held-out gain (report flags it; CLI exits 2). **LOW** =
+   merely *enumerated* val (`ls`/`wc`/`find`) — leaks filenames, not answers; shown but not treated as
+   invalidating. Bash is classified per shell-segment so a benign compound (`cat state.json && ls
+   tasks/val | wc`) stays LOW. Inspect HIGH transcripts before trusting a run. (Detection, not
+   prevention: it can't stop a full-tool worker reading a committed file, only surface that it did.)
 3. **Gate = the whetstone floor** (`run.mjs`, plus `quick_validate.py` when applicable) — validity
    and characterization stay non-negotiable regardless of score.
 4. **`maxDiffLines`** (the textual learning rate) — bound each step so the diff stays reviewable
