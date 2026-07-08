@@ -58,6 +58,9 @@ marked region. Use snippets from `references/components.md` for variable-length 
 Default output path: `./<slug>-plan-deck.html` (slug from the plan title).
 
 ### 5. Verify before claiming done
+- **Run the headless validator on the output** — `node assets/validate.mjs <slug>-plan-deck.html`
+  (exit 0 = valid). It catches leftover `{{placeholder}}` tokens, section-badge gaps,
+  and TOC/section-order mismatches mechanically. Fix everything it flags before shipping.
 - Valid standalone HTML: one `<h1 class="title">`, section ids match TOC `href`s,
   the **numbered** section badges run 01..N with no gaps (the `decisions` lead block
   is intentionally un-numbered), zero leftover `{{...}}` and no leftover TEMPLATE comments.
