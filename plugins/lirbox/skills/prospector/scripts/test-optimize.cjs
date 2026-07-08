@@ -173,6 +173,13 @@ eq(isBetter(42, NaN, 'max', 5),  true, 'isBetter: NaN best → any finite metric
 eq(isBetter(NaN, 10, 'min', 0),       false, 'isBetter: NaN metric never beats');
 eq(isBetter(Infinity, 10, 'min', 0),  false, 'isBetter: Infinity metric never beats');
 eq(isBetter('9', 10, 'min', 0),       false, 'isBetter: non-number metric never beats');
+// minDelta floor is normalized to finite + non-negative: a malformed/adversarial minDelta must
+// NOT disable the floor (a worse metric slipping through) nor admit a regression.
+eq(isBetter(9, 10, 'max', NaN),   false, 'isBetter: NaN minDelta → floor 0, worse metric rejected');
+eq(isBetter(9, 10, 'max', 'abc'), false, 'isBetter: non-numeric minDelta → floor 0, worse rejected');
+eq(isBetter(9, 10, 'max', -5),    false, 'isBetter: negative minDelta clamped to 0, regression rejected');
+eq(isBetter(10, 10, 'max', -5),   true,  'isBetter: negative minDelta clamped to 0, tie still keeps');
+eq(isBetter(9.5, 10, 'min', '0.5'), true, 'isBetter: numeric-string minDelta still coerces (0.5)');
 
 // --- shouldStop(experimentsDone, sinceKept, total, plateauStop, elapsedMin, tokensUsed) ---
 // each budget on its own.
