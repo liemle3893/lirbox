@@ -1,0 +1,9 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Plan check — bad verdict</title></head><body>
+<!-- BROKEN: a REFUTED row but verdict is not NO-GO. validate.mjs must flag this. -->
+<div class="verdict" data-verdict="GO-WITH-CONDITIONS"><span class="badge">GO-WITH-CONDITIONS</span><span class="summary">wrong</span></div>
+<ul class="conditions"><li class="condition">something</li></ul>
+<table><tbody>
+  <tr class="claim" data-quadrant="known-known" data-status="REFUTED"><td>step is safe with clients connected</td><td>known-known</td><td>REFUTED</td><td>docs say otherwise</td><td>high</td></tr>
+  <tr class="claim" data-quadrant="known-unknown" data-status="UNVERIFIED"><td>x</td><td>known-unknown</td><td>UNVERIFIED</td><td>—</td><td>—</td></tr>
+</tbody></table>
+</body></html>

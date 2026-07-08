@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan check — {{PLAN_TITLE}}</title>
+<style>
+:root{
+  --bg:#f2efe6; --paper:#fffdf8; --ink:#22201c; --muted:#6d675c; --line:#e4ded0;
+  --go:#3f7d3f; --cond:#b8862b; --nogo:#b23b32;
+  --kk:#3f7d3f; --ku:#b8862b; --uk:#8a6d3b; --uu:#b23b32;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:900px;margin:0 auto;padding:40px 22px 96px;}
+h1{font-family:Georgia,serif;font-size:34px;line-height:1.15;margin:0 0 4px;}
+.sub{color:var(--muted);font-size:14px;margin-bottom:26px;}
+.verdict{display:flex;align-items:center;gap:16px;border-radius:14px;padding:20px 24px;margin:22px 0 8px;background:var(--paper);border:1px solid var(--line);border-left-width:8px;}
+.verdict[data-verdict="GO"]{border-left-color:var(--go);}
+.verdict[data-verdict="GO-WITH-CONDITIONS"]{border-left-color:var(--cond);}
+.verdict[data-verdict="NO-GO"]{border-left-color:var(--nogo);}
+.verdict .badge{font-family:Georgia,serif;font-weight:700;font-size:26px;letter-spacing:-.5px;}
+.verdict[data-verdict="GO"] .badge{color:var(--go);}
+.verdict[data-verdict="GO-WITH-CONDITIONS"] .badge{color:var(--cond);}
+.verdict[data-verdict="NO-GO"] .badge{color:var(--nogo);}
+.verdict .summary{color:#403b33;font-size:15px;}
+h2{font-family:Georgia,serif;font-size:22px;margin:44px 0 10px;padding-top:10px;border-top:1px solid var(--line);}
+.lead{color:var(--muted);font-size:13px;margin:-4px 0 14px;}
+ul.conditions{list-style:none;padding:0;margin:0;}
+ul.conditions li.condition{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:8px 0;display:flex;gap:12px;}
+ul.conditions li.condition::before{content:"☐";color:var(--cond);font-weight:700;}
+ul.risks{list-style:none;padding:0;margin:0;}
+ul.risks li{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:8px 0;}
+ul.risks li .q{font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--uu);}
+table{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px;}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;}
+th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+tr:last-child td{border-bottom:none;}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;padding:2px 8px;border-radius:999px;white-space:nowrap;}
+.q-known-known{background:#e6f0e6;color:var(--kk);}
+.q-known-unknown{background:#f6ecd4;color:var(--ku);}
+.q-unknown-known{background:#efe6d2;color:var(--uk);}
+.q-unknown-unknown{background:#f4dedb;color:var(--uu);}
+.s-VERIFIED{color:var(--go);font-weight:700;}
+.s-REFUTED{color:var(--nogo);font-weight:700;}
+.s-UNVERIFIED{color:var(--cond);font-weight:700;}
+.s-UNSTATED-ASSUMPTION{color:var(--uk);font-weight:700;}
+.s-BLIND-SPOT-RISK{color:var(--uu);font-weight:700;}
+code{background:#efeadd;padding:1px 5px;border-radius:5px;font-size:13px;}
+footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>{{PLAN_TITLE}}</h1>
+  <div class="sub">plan-check · {{PLAN_CLASS}} · {{DATE}}</div>
+
+  <!-- data-verdict MUST be GO | GO-WITH-CONDITIONS | NO-GO and match the claim rows -->
+  <div class="verdict" data-verdict="{{VERDICT}}">
+    <span class="badge">{{VERDICT}}</span>
+    <span class="summary">{{VERDICT_SUMMARY}}</span>
+  </div>
+
+  <!-- LEAD WITH THE RISKS. Conditions-to-clear: one <li class="condition"> per
+       open item (UNVERIFIED or BLIND-SPOT-RISK). Count MUST equal open rows. -->
+  <h2>Conditions to clear before GO</h2>
+  <p class="lead">Every open risk below must be resolved first. Delete this whole section only if there are none.</p>
+  <ul class="conditions">
+    <li class="condition">{{CONDITION_1}}</li>
+    <!-- repeat <li class="condition"> per open item -->
+  </ul>
+
+  <h2>Blind spots &amp; unstated assumptions</h2>
+  <p class="lead">Unknown-unknowns found beyond the plan's own claims, and tacit assumptions surfaced by interrogation.</p>
+  <ul class="risks">
+    <li><span class="q">unknown-unknown</span><br>{{BLIND_SPOT_1}}</li>
+    <!-- repeat per blind-spot / unstated assumption -->
+  </ul>
+
+  <h2>Claim ledger</h2>
+  <p class="lead">Every proposition, tagged to its quadrant and adjudicated. Verified/mechanical rows last.</p>
+  <table>
+    <thead><tr><th>Proposition</th><th>Quadrant</th><th>Status</th><th>Evidence</th><th>Conf.</th></tr></thead>
+    <tbody>
+      <!-- One <tr class="claim"> per proposition. data-quadrant and data-status are REQUIRED
+           and machine-checked. Put "(needs: …)" detail in the Status cell text, not the attribute. -->
+      <tr class="claim" data-quadrant="{{QUADRANT}}" data-status="{{STATUS}}">
+        <td>{{PROPOSITION}}</td>
+        <td><span class="tag q-{{QUADRANT}}">{{QUADRANT}}</span></td>
+        <td><span class="s-{{STATUS}}">{{STATUS}}</span>{{STATUS_DETAIL}}</td>
+        <td>{{EVIDENCE}}</td>
+        <td>{{CONFIDENCE}}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <footer>Generated by lirbox:plan-check. Read-only verification — no live systems were touched. A plan is a map; this report is what the territory says back.</footer>
+</div>
+</body>
+</html>
