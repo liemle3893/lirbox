@@ -41,6 +41,14 @@ dry-run / reproduction happens ONLY against an environment the human explicitly
 hands over. When in doubt, reason and flag rather than run.
 </non-negotiable>
 
+<non-negotiable>
+No verdict while an askable question is open. You may NOT emit a verdict (step 7) or
+the report (step 8) while any UNVERIFIED proposition is still **askable of the human**.
+Ask it first (step 5). Only propositions tagged `needs: run on target` — answerable
+solely by touching a live system that was NOT handed to you — may remain open, and only
+as conditions-to-clear. A verdict emitted with an unasked askable question is invalid.
+</non-negotiable>
+
 ## Workflow
 
 1. **Ingest & classify** the plan: `ops` / `code` / `mixed`. State it back — it routes §3.
@@ -55,8 +63,13 @@ hands over. When in doubt, reason and flag rather than run.
 4. **Blind-spot pass** — go beyond the plan's claims; hunt unknown-unknowns via the
    per-type checklists in `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/references/blind-spot.md`.
    Highest-value step; don't skip.
-5. **Interrogate** — when a proposition can't be confirmed, stop and grill: one
-   question at a time, hardest where the answer flips the verdict. Rules in
+5. **Interrogation gate (BLOCKS the verdict).** Before step 7, enumerate every
+   proposition still `UNVERIFIED`. For each one that is **askable** — resolvable by the
+   human, i.e. NOT tagged `needs: run on target` — you MUST stop and ask, one question at
+   a time, hardest first where the answer flips the verdict. **Do not proceed to the
+   verdict while an askable `UNVERIFIED` remains open.** Only `needs: run on target` items
+   (answerable solely by touching a live system you weren't given) pass unasked, as
+   conditions-to-clear. Rules in
    `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/references/interrogation.md`.
 6. **Adjudicate** — every proposition gets a **quadrant** + **status**: `VERIFIED` ·
    `REFUTED` · `UNVERIFIED` (name what would resolve it) · `UNSTATED-ASSUMPTION` ·
