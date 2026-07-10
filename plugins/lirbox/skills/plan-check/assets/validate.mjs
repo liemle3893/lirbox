@@ -45,12 +45,19 @@ const attr = (tag, name) => {
   return m ? m[1] : null;
 };
 
-// 1. placeholders
+// 1. placeholders (whole file — a leftover token anywhere is a broken render)
 const ph = html.match(/\{\{[^}]+\}\}/g);
 if (ph) errors.push(`leftover placeholder(s): ${[...new Set(ph)].join(', ')}`);
 
+// Element-level checks (2-5) run on markup only: strip <style> blocks (their
+// `.verdict[data-verdict="..."]` attribute selectors are CSS, not verdict
+// elements) and HTML comments (template guidance mentions the attributes).
+const markup = html
+  .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+  .replace(/<!--[\s\S]*?-->/g, '');
+
 // 2. verdict
-const verdicts = [...html.matchAll(/data-verdict="([^"]*)"/g)].map((m) => m[1]);
+const verdicts = [...markup.matchAll(/data-verdict="([^"]*)"/g)].map((m) => m[1]);
 if (verdicts.length !== 1) {
   errors.push(`expected exactly one data-verdict, found ${verdicts.length}`);
 } else if (!VERDICTS.has(verdicts[0])) {
@@ -58,7 +65,7 @@ if (verdicts.length !== 1) {
 }
 
 // 3. claim rows
-const rows = [...html.matchAll(/<tr\b[^>]*\bclass="[^"]*\bclaim\b[^"]*"[^>]*>/g)].map((m) => m[0]);
+const rows = [...markup.matchAll(/<tr\b[^>]*\bclass="[^"]*\bclaim\b[^"]*"[^>]*>/g)].map((m) => m[0]);
 if (rows.length === 0) errors.push('no <tr class="claim"> rows found');
 
 let refuted = 0;
@@ -81,7 +88,7 @@ if (verdicts.length === 1 && rows.length > 0) {
 }
 
 // 5. conditions == open
-const conditions = (html.match(/class="[^"]*\bcondition\b[^"]*"/g) || []).length;
+const conditions = (markup.match(/class="[^"]*\bcondition\b[^"]*"/g) || []).length;
 if (conditions !== open) {
   errors.push(`conditions-to-clear count (${conditions}) != open items (${open})`);
 }
