@@ -269,6 +269,13 @@ ${body}
 const DOD_DECL = "const dod = results.brief ? `\\n\\nScope this gate to the task's actual goal — judge findings against what the task set out to achieve; do NOT drift into changes unrelated to it.\\nGOAL: ${results.brief.goal || '(none)'}` + ((results.brief.acceptanceCriteria || []).length ? `\\nACCEPTANCE CRITERIA:\\n- ${results.brief.acceptanceCriteria.join('\\n- ')}` : '') : ''";
 const CARRY_DECL = "const carry = round > 1 && last ? `\\n\\nROUND ${round} of up to 3 — a prior round already ran; BUILD ON what it already found/fixed, do NOT re-review from scratch. Prior round summary: ${last.summary || '(no summary)'}` : ''";
 
+// Explicit output contract for the fix-gates (panel CodeGate lead, single-agent CodeGate, merged
+// Review). The generated loop trusts gatePassed alone and its throw message assumes "unresolved"
+// semantics, so the prompt must pin both down: what gatePassed=true requires, and that
+// critical/high count findings LEFT unresolved (not findings fixed). Plain text only — no
+// backticks/${}/backslashes — so it interpolates safely into the emitted template literals.
+const GATE_CONTRACT = 'OUTPUT CONTRACT: return gatePassed=true ONLY if every Critical and High finding is fixed or skipped-with-explicit-reason AND the build/lint passes; report critical and high as the counts of findings of each severity left UNRESOLVED after your fixes (both 0 when gatePassed=true).';
+
 // A bounded 3-round gate: run the agent up to 3× until `flag` is truthy, else throw.
 // `prompt`/`schema` are template-literal source fragments; `agentFrag` is the optional
 // `agentType: '...',` (or '' for a generic subagent). Output is indented for the else-block.
@@ -349,10 +356,11 @@ Return the score and a one-line reason.\`,
           \`\${inWorktree('codegate-lead')}
 
 You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. You may skip a finding ONLY with an explicit reason it is wrong.
+${GATE_CONTRACT}
 
 FINDINGS (JSON): \${JSON.stringify(confirmed)}\` + dod + carry,
           { label: \`codegate:lead-r\${round}\`, phase: 'CodeGate', ${at(agentCode)}${mdl('think') ? ' ' + mdl('think') : ''}
-            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed'])} },
+            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed', 'critical', 'high'])} },
         )
         passed = last && last.gatePassed
       }
@@ -468,8 +476,9 @@ Do NOT delete/alter source branches just to raise coverage. Commit new tests + n
       flag: 'gatePassed', resultKey: 'codeGate', label: 'codegate', phase: 'CodeGate', agentFrag: at(agentCode), modelFrag: mdl('think'),
       prompt: `\`\${inWorktree('codegate')}
 
-Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}). Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality). Re-run the build after fixes and commit them.\``,
-      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed']),
+Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}). Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality). Re-run the build after fixes and commit them.
+${GATE_CONTRACT}\``,
+      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed', 'critical', 'high']),
       throwMsg: `'CodeGate failed: unresolved Critical/High after 3 rounds — ' + (last && last.summary || '')`,
     })) },
 
@@ -533,8 +542,8 @@ Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base
 1. Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality).
 2. Decide what testing the change warrants (none for docs/config/non-behavioral; unit for pure logic; e2e for new/changed behavior or endpoints) and ensure those tests EXIST and PASS — do NOT change source to game coverage, do NOT fake a pass if an integration env is unavailable (say so).
 3. Re-run build + tests after fixes and commit them.
-Return whether the gate passed.\``,
-      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed']),
+${GATE_CONTRACT} For this merged gate the required tests (step 2) count as part of the build/lint pass condition.\``,
+      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed', 'critical', 'high']),
       throwMsg: `'Review failed: unresolved Critical/High or tests not green after 3 rounds — ' + (last && last.summary || '')`,
     })) },
 
