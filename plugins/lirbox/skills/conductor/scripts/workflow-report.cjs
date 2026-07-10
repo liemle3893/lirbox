@@ -103,6 +103,26 @@ md += `- Status: ${state.status || '?'}\n`;
 md += `- Duration: ${fmtDur(durMs)} (${state.startedAt || '?'} → ${state.finishedAt || state.updatedAt || '?'})\n`;
 md += `- Phases done: ${(state.phasesDone || []).join(', ') || '—'}\n`;
 md += `- Branch / worktree: ${state.branch || '—'} / ${state.worktree || '—'}\n\n`;
+// --- DoD scorecard (present when the run carried a definition of done) ---
+const dodSpec = state.dod && Array.isArray(state.dod.criteria) ? state.dod.criteria : null;
+if (dodSpec) {
+  const res = state.results || {};
+  const verdicts = Object.fromEntries((((res.dodGate || {}).criteria) || []).map((c) => [c.id, c]));
+  const baselines = Object.fromEntries((((res.dodBaseline || {}).baselines) || []).map((b) => [b.id, b.status]));
+  const met = dodSpec.filter((c) => (verdicts[c.id] || {}).verdict === 'MET').length;
+  const cell = (s) => String(s == null || s === '' ? '—' : s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  md += `## Definition of done — ${met}/${dodSpec.length} MET\n\n`;
+  md += `| Criterion | Tier | Verdict | Evidence | Baseline |\n|---|---|---|---|---|\n`;
+  for (const c of dodSpec) {
+    const v = verdicts[c.id] || {};
+    const b = baselines[c.id];
+    const baseNote = b === 'met' ? 'met ⚠ already met pre-work — did not discriminate this run' : b;
+    md += `| ${cell(c.id + ': ' + c.text)} | ${c.tier} | ${cell(v.verdict || 'UNVERIFIED')} | ${cell(v.evidence)} | ${cell(baseNote)} |\n`;
+  }
+  md += `\n`;
+}
+const panel = state.results && state.results.codeGate && state.results.codeGate.panel;
+if (panel) md += `Code-review panel: ${panel.raw} raw finding(s) → ${panel.deduped} deduped → ${panel.confirmed} confirmed (>=80 confidence).\n\n`;
 md += `## Tokens & estimated cost\n\n`;
 md += `| Model | Input | Cache write | Cache read | Output | Est. cost (USD) |\n|---|--:|--:|--:|--:|--:|\n`;
 for (const r of rows) md += `| ${r.model} | ${k(r.input)} | ${k(r.cacheWrite)} | ${k(r.cacheRead)} | ${k(r.output)} | ${r.cost != null ? '$' + r.cost.toFixed(2) : 'n/a (no rate)'} |\n`;
