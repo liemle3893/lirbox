@@ -61,6 +61,22 @@ More phases = more subagent round-trips; reserve them for work that warrants the
   then enforces+loops (≤3) via `lirbox:lirbox-tryve-enhancer`; hard-fails if not green.
 - `--enforce-docs` — adds a **DocsGate**: writes an implementation summary to `docs/changes/` via
   `lirbox:lirbox-docs-writer`, folding in the `implementation-notes/` fragments; hard-fails if missing.
+- `--dod-file <json>` — the run's **definition of done**, frozen in as DATA:
+  `{ "criteria": [{ "id", "text", "tier": "checkable"|"judged", "check"? }] }` (`check` required
+  for `checkable`). Emits **DoDBaseline** (pre-work honesty measurement of every checkable
+  criterion — one already met at baseline is flagged as non-discriminating) and **DoDGate**
+  (before Writeup/PR: verify every criterion — checkable = run the command, judged =
+  evidence-cited MET/UNMET/PARTIAL — then fix-loop ≤3 and hard-fail; the PR body carries the
+  scorecard). **Required** under `--profile lite`/`delivery`; providing the file is the opt-in
+  for bare runs. Changing the DoD = regenerate with `--force`.
+- `--no-dod` — explicit opt-out: suppress DoDBaseline/DoDGate even under a profile.
+- `--review-panel` / `--no-review-panel` — swap the CodeGate's single review+fix agent for a
+  **panel**: a diff guard (docs/config-only changes skip the gate), 4 parallel read-only
+  dimension reviewers (bugs, security, reuse, conventions; + git-history under delivery),
+  per-finding confidence scoring (0–100 rubric, drop <80), then a lead adjudicator+fixer
+  (default `lirbox:lirbox-code-reviewer`, ≤3 rounds, hard-fail). Default ON under
+  `--profile delivery`; the collapsed Review phase (lite / `--merge-gates`) always stays
+  single-agent.
 - `--cycle` — enforces the full TDD cycle, reordering the core to
   **RED → GREEN(work) → Verify → PathGap → IMPROVE/SIMPLIFY(CodeGate) → ReVerify**:
   - **RED** (`lirbox:lirbox-test-writer`) writes AC tests first and confirms they fail.
@@ -71,7 +87,9 @@ More phases = more subagent round-trips; reserve them for work that warrants the
   - **CodeGate** then improves/simplifies; **ReVerify** re-runs the suite to catch refactor
     regressions. (Supersedes the standalone TestGate.)
 - `--profile delivery` — shorthand for `--cycle --ticket --pr --enforce-docs` (full, big tasks).
+  Requires `--dod-file` (or an explicit `--no-dod`).
 - `--profile lite` — shorthand for `--ticket --pr --merge-gates` (routine, small tasks).
+  Requires `--dod-file` (or an explicit `--no-dod`).
 
 ## Model selection (`--model-mode`)
 

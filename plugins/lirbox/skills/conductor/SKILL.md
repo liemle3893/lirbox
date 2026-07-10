@@ -105,6 +105,28 @@ touched · behavioral/endpoint change · needs review/tests/docs/PR/ticket. With
 pick the lowest tier. When the signals are genuinely ambiguous, ask the user **one**
 `AskUserQuestion` (decline / bare / lite / delivery) rather than guessing big.
 
+### 1c. Acquire the DoD — the meter for "was the goal met" (new lite/delivery runs)
+
+Every lite/delivery run carries a **definition of done**: criteria in
+`{ "criteria": [{ "id", "text", "tier": "checkable"|"judged", "check"? }] }` form — `checkable`
+= a frozen command (exit 0 = met, run against the worktree), `judged` = a verdict that must cite
+evidence. Guidance 3–7 criteria, **no hard cap** — never drop ticket-supplied ACs to fit; above
+~10, propose splitting into independently-shippable slices in the SAME confirmation question
+(run 2 starts only after run 1's PR merges — never stack branches; record the deferred slice's
+goal + ACs in run 1's state so they survive scrollback). Source precedence:
+
+1. **Ticket / plan ACs** — fetch them now (main session) and refine into checkable form.
+2. **plan-check report** — if the goal references one, read its
+   `<script type="application/json" id="dod">` block as the seed.
+3. **Bare goal** — derive the criteria yourself.
+
+Whatever the source, confirm ONCE with the human (one `AskUserQuestion`: accept / edit), then
+freeze: write the JSON to `.workflows/<name>.dod.json` and pass `--dod-file` in step 2. bare-tier
+runs may skip the DoD entirely; lite/delivery require it (`--no-dod` is the explicit opt-out).
+At the end of the run the **DoDGate** verifies every criterion (fix-loop ≤3, then hard-fail), the
+PR body and run report carry the scorecard, and a criterion already met at baseline is flagged
+as non-discriminating.
+
 ### 2. Generate the conductor (pass prompts as data; do NOT hand-edit)
 
 Generate the conductor deterministically from `scripts/scaffold-workflow.cjs` — never copy/author or
@@ -115,7 +137,7 @@ NOT default to the full profile.
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
-  --prompts-file <prompts.json> \
+  --prompts-file <prompts.json> --dod-file .workflows/<name>.dod.json \
   [--ticket] [--pr] [--merge-gates] [--base <ref>] [--desc "..."]
 ```
 
