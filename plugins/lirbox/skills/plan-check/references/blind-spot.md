@@ -18,6 +18,10 @@ form to rubber-stamp — the goal is to generate risks the plan is silent on.
 - **Idempotency** — safe to re-run after an interruption, or does re-running corrupt?
 - **Concurrency** — anything else touching the same resource during the window?
 - **The rollback is itself an unverified plan** — has it ever been exercised?
+- **No definition of done** — the plan never states verifiable success criteria (what would be
+  checked, how, and what result proves it worked). Without a DoD, "done" is unfalsifiable and
+  partial failure is invisible. Flag as `BLIND-SPOT-RISK`; the report must still derive and emit
+  a DoD (see SKILL.md step 8), but the plan's silence itself blocks a clean GO.
 
 ## Ops / infra (e.g. Ceph, k8s, DB, network)
 
