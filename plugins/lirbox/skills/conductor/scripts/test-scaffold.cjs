@@ -243,6 +243,23 @@ try {
   check(genFails(['--phases', 'Work', '--dod-file', badDod]), 'bad tier rejected');
   fs.writeFileSync(badDod, JSON.stringify({ criteria: [] }));
   check(genFails(['--phases', 'Work', '--dod-file', badDod]), 'empty criteria array rejected');
+
+  // 10. Panel CodeGate: delivery default ON (guard → dimensions → ≥80 filter → lead loop);
+  //     lite/merged Review stays single-agent; --review-panel/--no-review-panel override.
+  const panel = gen('panel', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]);
+  check(/codegate:guard/.test(panel) && /const DIMENSIONS = \[/.test(panel),
+    'panel: delivery emits diff guard + dimension fan-out');
+  check(/"key":"history"/.test(panel), 'panel: delivery includes the git-history dimension');
+  check(/confidence >= 80/.test(panel), 'panel: findings below 80 confidence dropped');
+  check(/codegate:lead-r/.test(panel) && /agentType: 'lirbox:lirbox-code-reviewer'/.test(panel),
+    'panel: lead fix-loop runs on the code-reviewer agent');
+  const forced = gen('panel-forced', ['--phases', 'Work', '--enforce-code', '--review-panel']);
+  check(/const DIMENSIONS = \[/.test(forced) && !/"key":"history"/.test(forced),
+    '--review-panel: panel outside delivery has no history dimension');
+  check(!/const DIMENSIONS/.test(gen('panel-off', ['--phases', 'Implement', '--profile', 'delivery', '--no-review-panel', '--dod-file', dodFile])),
+    '--no-review-panel: delivery reverts to the single-agent CodeGate');
+  check(!/const DIMENSIONS/.test(gen('lite-single', ['--phases', 'Work', '--profile', 'lite', '--dod-file', dodFile])),
+    'lite: merged Review phase stays single-agent');
 } catch (e) {
   console.error(`FAIL [eval] generation error: ${e.message.split('\n')[0]}`);
   failures++;

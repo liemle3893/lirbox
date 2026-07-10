@@ -26,6 +26,9 @@
  *                        definition of done, frozen in as DATA; emits DoDBaseline + DoDGate.
  *                        REQUIRED under --profile lite/delivery (or pass --no-dod).
  *   --no-dod             suppress the DoD gate (explicit opt-out, even under a profile)
+ *   --review-panel       multi-dimension panel CodeGate (parallel reviewers + confidence filter
+ *                        + lead fixer). Default ON under --profile delivery.
+ *   --no-review-panel    keep the single review+fix CodeGate agent even under delivery
  *   --model-mode <m>     default (inherit session model, no opt emitted) | auto (tier by phase)
  *   --model-think <m>    auto thinking-tier model: sonnet|opus|haiku|fable (default opus)
  *   --model-work <m>     auto work-phase model:    sonnet|opus|haiku|fable (default sonnet)
@@ -102,6 +105,36 @@ if (!noDod && !dodCriteria && (profileLite || profileDelivery)) {
 }
 const withDod = !!dodCriteria;
 const dodCheckable = withDod ? dodCriteria.filter((c) => c.tier === 'checkable') : [];
+
+// --- Panel code review: parallel dimension reviewers + confidence filter + lead fixer ---
+// delivery default ON; --review-panel forces it wherever a CodeGate exists (--enforce-code /
+// --cycle); --no-review-panel keeps the single review+fix agent. The collapsed Review phase
+// (lite / --merge-gates) ALWAYS stays single-agent — lite is the cheap tier by design.
+const reviewPanel = (arg('no-review-panel', false) === true) ? false
+  : (profileDelivery || arg('review-panel', false) === true);
+if (reviewPanel && !(enforceCode || withCycle)) {
+  console.error('WARN: --review-panel has no effect without a CodeGate (--enforce-code or --cycle)');
+}
+
+// Panel dimensions (generator-time data). history rides only under --profile delivery.
+const PANEL_DIMENSIONS = [
+  { key: 'bugs', focus: 'Correctness: shallow-scan the diff itself for real bugs — logic errors, off-by-one, broken contracts, null/undefined misuse. Focus on the changed lines; skip nitpicks a senior engineer would not raise and anything a linter/typechecker would catch.' },
+  { key: 'security', focus: 'Security on the CHANGED paths only: injection, missing authz/authn, secrets committed, unsafe deserialization, path traversal, SSRF.' },
+  { key: 'reuse', focus: 'Reuse & simplification: duplicated logic, existing helpers/utilities the change should have used, dead code introduced, needless complexity.' },
+  { key: 'conventions', focus: 'Conventions: violations of CLAUDE.md guidance (repo root + every directory the diff touches) and of guidance in code comments adjacent to the changes. Cite the exact guidance line for every finding.' },
+];
+if (profileDelivery) PANEL_DIMENSIONS.push(
+  { key: 'history', focus: 'Git history: read git blame/log for the modified code; flag changes that contradict the reason a prior fix was made or reintroduce a previously-fixed bug. Cite the commit.' });
+
+// The /code-review confidence rubric, given to each scorer verbatim.
+const CONFIDENCE_RUBRIC = `Score 0-100 how confident you are the finding is REAL and WORTH FIXING:
+- 0: Not confident at all. False positive that does not stand up to light scrutiny, or a pre-existing issue.
+- 25: Somewhat confident. Might be real, might be a false positive; could not verify.
+- 50: Moderately confident. Verified real, but may be a nitpick or rarely hit in practice.
+- 75: Highly confident. Double-checked and verified: very likely real, will be hit in practice, directly impacts functionality (or is explicitly required by CLAUDE.md).
+- 100: Absolutely certain. Double-checked, definitely real, will happen frequently; evidence directly confirms it.
+Automatic false positives (score 0): pre-existing issues; linter/typechecker/compiler-catchable; pedantic nitpicks; issues on lines the diff did not modify; intentional changes related to the goal.`;
+
 const out = arg('out', path.join('.workflows', name + '.js'));
 const force = arg('force', false) === true;
 
@@ -258,6 +291,77 @@ ${decls}
   results.${resultKey} = last`;
 }
 
+// Panel CodeGate body: guard → parallel dimension reviewers (read-only, findings schema) →
+// deterministic dedup → per-finding confidence scorers (drop <80) → lead adjudicator+fixer
+// loop (≤3, hard-fail). Fan-out lives HERE in the conductor JS — the lead is a worker, never
+// a spawner. Output is indented for the emitPhase else-block.
+function panelBody() {
+  const findingsSchema = SCHEMA({ findings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['file', 'line', 'severity', 'title'], properties: { file: { type: 'string' }, line: { type: 'number' }, severity: { type: 'string', enum: ['Critical', 'High', 'Medium', 'Low'] }, title: { type: 'string' }, detail: { type: 'string' } } } } }, ['findings']);
+  return `  // Panel review: guard → parallel dimensions → dedup → confidence filter → lead fixer.
+  const guard = await agent(
+    \`\${inWorktree('codegate-guard', { notes: false })}
+
+Inspect the diff of \${BRANCH} vs \${BASE || 'the base branch'} (git diff in \${WORKTREE}). Is this a CODE change (source/test code — not solely docs, config, comments, or generated artifacts)? Return isCode and a one-line reason. Do NOT edit anything.\`,
+    { label: 'codegate:guard', phase: 'CodeGate',${mdl('mechanical') ? ' ' + mdl('mechanical') : ''}
+      schema: ${SCHEMA({ isCode: { type: 'boolean' }, reason: { type: 'string' } }, ['isCode'])} },
+  )
+  if (!guard || !guard.isCode) {
+    log('CodeGate: not a code change (' + ((guard && guard.reason) || 'no reason') + ') — panel skipped')
+    results.codeGate = { gatePassed: true, skipped: true, critical: 0, high: 0, summary: 'skipped: not a code change' }
+  } else {
+    const DIMENSIONS = ${JSON.stringify(PANEL_DIMENSIONS)}
+    const rawResults = await parallel(DIMENSIONS.map((d) => () => agent(
+      \`\${inWorktree('codegate-' + d.key, { notes: false })}
+
+READ-ONLY panel review of the changes on \${BRANCH} vs \${BASE || 'the base branch'} (git diff in \${WORKTREE}) — do NOT edit or fix anything; you only report findings.
+DIMENSION — \${d.focus}
+Return findings with exact repo-relative file + line + severity (Critical|High|Medium|Low) + title + detail. No findings is a valid answer.\`,
+      { label: 'codegate:' + d.key, phase: 'CodeGate',${mdl('think') ? ' ' + mdl('think') : ''}
+        schema: ${findingsSchema} },
+    )))
+    const all = rawResults.filter(Boolean).flatMap((r) => r.findings || [])
+    const seen = new Set()
+    const deduped = []
+    for (const f of all) {
+      const k = (f.file || '') + ':' + (f.line || 0)
+      if (!seen.has(k)) { seen.add(k); deduped.push(f) }
+    }
+    const scored = deduped.length ? await parallel(deduped.map((f, i) => () => agent(
+      \`\${inWorktree('codegate-score-' + i, { notes: false })}
+
+Verify ONE code-review finding against the actual code (read the files; do NOT edit).
+FINDING (JSON): \${JSON.stringify(f)}
+${escTpl(CONFIDENCE_RUBRIC)}
+Return the score and a one-line reason.\`,
+      { label: 'codegate:score-' + i, phase: 'CodeGate',${mdl('mechanical') ? ' ' + mdl('mechanical') : ''}
+        schema: ${SCHEMA({ score: { type: 'number' }, reason: { type: 'string' } }, ['score'])} },
+    ).then((v) => ({ ...f, confidence: v ? v.score : 0 })))) : []
+    const confirmed = scored.filter(Boolean).filter((f) => f.confidence >= 80)
+    if (!confirmed.length) {
+      log('CodeGate panel: 0 of ' + all.length + ' raw findings survived verification — passing')
+      results.codeGate = { gatePassed: true, critical: 0, high: 0, summary: 'panel: ' + all.length + ' raw, 0 confirmed', panel: { raw: all.length, deduped: deduped.length, confirmed: 0 } }
+    } else {
+      let passed = false, last = null
+      for (let round = 1; round <= 3 && !passed; round++) {
+        ${DOD_DECL}
+        ${CARRY_DECL}
+        last = await agent(
+          \`\${inWorktree('codegate-lead')}
+
+You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. You may skip a finding ONLY with an explicit reason it is wrong.
+
+FINDINGS (JSON): \${JSON.stringify(confirmed)}\` + dod + carry,
+          { label: \`codegate:lead-r\${round}\`, phase: 'CodeGate', ${at(agentCode)}${mdl('think') ? ' ' + mdl('think') : ''}
+            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed'])} },
+        )
+        passed = last && last.gatePassed
+      }
+      if (!passed) throw new Error('CodeGate failed: unresolved Critical/High after 3 rounds — ' + (last && last.summary || ''))
+      results.codeGate = { ...last, panel: { raw: all.length, deduped: deduped.length, confirmed: confirmed.length } }
+    }
+  }`;
+}
+
 // A single agent call whose result is stored at results[key], with an optional hard-fail check.
 // Output is indented for the else-block; interior prompt lines stay column-0.
 function agentCall({ key, prompt, schema, agentFrag, modelFrag, label, phase: ph, check }) {
@@ -358,8 +462,9 @@ Do NOT delete/alter source branches just to raise coverage. Commit new tests + n
     })) },
 
   // CodeGate = IMPROVE+SIMPLIFY; emitted when --enforce-code OR --cycle (cycle always reviews).
+  // reviewPanel swaps the single review+fix agent for the multi-dimension panel.
   { title: 'CodeGate', enabledWhen: enforceCode || withCycle, build: () => emitPhase('CodeGate',
-    gateLoop({
+    reviewPanel ? panelBody() : gateLoop({
       flag: 'gatePassed', resultKey: 'codeGate', label: 'codegate', phase: 'CodeGate', agentFrag: at(agentCode), modelFrag: mdl('think'),
       prompt: `\`\${inWorktree('codegate')}
 
