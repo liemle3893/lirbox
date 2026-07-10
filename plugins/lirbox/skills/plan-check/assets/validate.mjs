@@ -17,6 +17,9 @@
 //      data-verdict must equal the derived verdict.
 //   5. Count of class="condition" items == count of open items (every open risk
 //      is a condition-to-clear).
+//   6. Exactly one <script type="application/json" id="dod"> block whose JSON is
+//      { criteria: [{ id, text, tier: 'checkable'|'judged', check? }] } — the
+//      machine-readable definition of done consumed by lirbox:conductor.
 
 import { readFileSync } from 'node:fs';
 
@@ -93,9 +96,32 @@ if (conditions !== open) {
   errors.push(`conditions-to-clear count (${conditions}) != open items (${open})`);
 }
 
+// 6. machine-readable DoD block (consumed by lirbox:conductor)
+let dodCount = 0;
+const dodBlocks = [...html.matchAll(/<script type="application\/json" id="dod">([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+if (dodBlocks.length !== 1) {
+  errors.push(`expected exactly one <script type="application/json" id="dod"> block, found ${dodBlocks.length}`);
+} else {
+  let dod = null;
+  try { dod = JSON.parse(dodBlocks[0]); } catch (e) { errors.push(`#dod block is not valid JSON: ${e.message}`); }
+  const list = dod && Array.isArray(dod.criteria) ? dod.criteria : null;
+  if (dod && (!list || !list.length)) errors.push('#dod block needs a non-empty criteria array');
+  if (list) {
+    dodCount = list.length;
+    for (const [i, c] of list.entries()) {
+      if (!c.id || !c.text || (c.tier !== 'checkable' && c.tier !== 'judged')) {
+        errors.push(`#dod criterion ${i + 1}: needs id, text, and tier=checkable|judged`);
+      }
+      if (c.tier === 'checkable' && (typeof c.check !== 'string' || !c.check.trim())) {
+        errors.push(`#dod criterion ${i + 1} ('${c.id || '?'}'): checkable needs a non-empty check command`);
+      }
+    }
+  }
+}
+
 if (errors.length) {
   console.error(`INVALID ${path}`);
   for (const e of errors) console.error(`  - ${e}`);
   process.exit(1);
 }
-console.log(`VALID ${path} — verdict ${verdicts[0]}, ${rows.length} claim(s), ${open} open, ${conditions} condition(s)`);
+console.log(`VALID ${path} — verdict ${verdicts[0]}, ${rows.length} claim(s), ${open} open, ${conditions} condition(s), ${dodCount} DoD criteria`);
