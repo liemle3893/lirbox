@@ -1,0 +1,1 @@
+Include a "## Definition of done" section in the PR body — headline "DoD: <met>/<total> MET", then one line per criterion (id, verdict, evidence) from this JSON: ${JSON.stringify((results.dodGate && results.dodGate.criteria) || [])}

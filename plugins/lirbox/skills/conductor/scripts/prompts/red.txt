@@ -1,0 +1,3 @@
+${inWorktree('red')}
+
+RED (test-first): from the goal${TICKET ? ' / ticket ' + TICKET : ''} and its acceptance criteria, write the tests BEFORE any implementation. Decide per behavior whether it needs a tryve E2E (tests/e2e/*.yaml) or a Jest unit test, and write them. Run them and CONFIRM THEY FAIL for the right reason — a test that already passes is not exercising the new behavior; fix it until it fails. Commit the failing tests.

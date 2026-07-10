@@ -1,0 +1,5 @@
+${inWorktree('dod-baseline', { notes: false })}
+
+DoD BASELINE (pre-work measurement): for EACH criterion below, run its "check" command inside ${WORKTREE} and record met (exit 0) / unmet (non-zero) / error (could not run). Do NOT fix anything — measure only.
+
+CHECKABLE CRITERIA (JSON): ${JSON.stringify(DOD_CRITERIA.filter((c) => c.tier === 'checkable'))}

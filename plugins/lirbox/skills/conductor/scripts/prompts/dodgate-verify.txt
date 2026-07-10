@@ -1,0 +1,8 @@
+${inWorktree('dodgate-verify', { notes: false })}
+
+DoD VERIFY (round ${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate EVERY criterion below against the work on ${BRANCH} vs ${BASE || 'the base branch'}:
+- tier "checkable": run the "check" command inside ${WORKTREE}; exit 0 = MET, non-zero = UNMET; the command output is the evidence.
+- tier "judged": verdict from real evidence you CITE (file:line, command output, test result). No evidence = not MET.
+Verdicts: MET | UNMET | PARTIAL.
+
+CRITERIA (JSON): ${JSON.stringify(DOD_CRITERIA)}

@@ -1,0 +1,4 @@
+Fetch tracker ticket ${TICKET} and write a concise goal + acceptance criteria.
+Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase AC/DoD):
+- Jira:   mcp__atlassian__getJiraIssue (issueIdOrKey: "${TICKET}")
+- Linear: the Linear MCP get-issue tool, ONLY if a Linear server is connected.

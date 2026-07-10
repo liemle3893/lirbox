@@ -1,0 +1,26 @@
+Create an isolated git worktree. Run idempotently:
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not a git repo"; exit 1; }
+ROOT="$(git rev-parse --show-toplevel)"
+if git worktree list --porcelain | grep -q "/${WORKTREE}$"; then
+  echo "worktree exists — reusing"
+elif git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+  git worktree add "${WORKTREE}" "${BRANCH}"
+else
+  # Branch from the FRESH remote tip, not a possibly-stale local ref.
+  git fetch origin --quiet 2>/dev/null || echo "WARN: git fetch origin failed — using local refs (may be stale)"
+  BASEREF="${BASE}"
+  # Auto-detect the remote's default branch when no --base was given.
+  [ -n "$BASEREF" ] || BASEREF="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+  if [ -n "$BASEREF" ] && git show-ref --verify --quiet "refs/remotes/origin/$BASEREF"; then
+    START="origin/$BASEREF"
+  elif [ -n "$BASEREF" ]; then
+    echo "WARN: origin/$BASEREF not found — branching from local $BASEREF (may be stale)"; START="$BASEREF"
+  else
+    echo "WARN: could not detect remote default branch — branching from current HEAD (may be stale)"; START="HEAD"
+  fi
+  echo "Branching ${BRANCH} from $START"
+  git worktree add "${WORKTREE}" -b "${BRANCH}" "$START"
+fi
+[ -e "${WORKTREE}/node_modules" ] || [ ! -d "$ROOT/node_modules" ] || ln -s "$ROOT/node_modules" "${WORKTREE}/node_modules"
+test -d "${WORKTREE}" && echo OK

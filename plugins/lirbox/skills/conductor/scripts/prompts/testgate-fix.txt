@@ -1,0 +1,6 @@
+${inWorktree('testgate')}
+
+The change needs ${assess.level} coverage (${assess.reason || ''}). Ensure the right tests for the changes on ${BRANCH} vs ${BASE || 'the base branch'} EXIST and PASS:
+- unit → add/fix Jest tests; run with coverage; >90% on changed files.
+- tryve-e2e → add/fix tryve E2E YAML in tests/e2e/; run \`yarn e2e:run\` and confirm green (some tryve suites need external integration envs — if unavailable, say so, do NOT fake a pass).
+Do NOT change source to game coverage. Commit new tests.

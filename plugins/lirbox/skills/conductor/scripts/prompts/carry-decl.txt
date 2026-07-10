@@ -1,0 +1,1 @@
+const carry = round > 1 && last ? `\n\nROUND ${round} of up to 3 — a prior round already ran; BUILD ON what it already found/fixed, do NOT re-review from scratch. Prior round summary: ${last.summary || '(no summary)'}` : ''

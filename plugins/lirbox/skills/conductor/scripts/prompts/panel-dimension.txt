@@ -1,0 +1,5 @@
+${inWorktree('codegate-' + d.key, { notes: false })}
+
+READ-ONLY panel review of the changes on ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WORKTREE}) — do NOT edit or fix anything; you only report findings.
+DIMENSION — ${d.focus}
+Return findings with exact repo-relative file + line + severity (Critical|High|Medium|Low) + title + detail. No findings is a valid answer.

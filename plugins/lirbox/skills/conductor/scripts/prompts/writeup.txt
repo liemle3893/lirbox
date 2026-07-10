@@ -1,0 +1,8 @@
+${inWorktree('writeup', { notes: false })}
+
+Produce reviewer-facing delivery artifacts for the changes on ${BRANCH} vs ${BASE || 'the base branch'}, all COMMITTED under docs/changes/${NAME}/ in the worktree so they ride the PR:
+1. PRESERVE design notes — mkdir -p docs/changes/${NAME}/notes, then copy every implementation-notes/*.html into it (if any exist). These are the per-worker decision notes; keep them, do NOT discard.
+2. WRITE-UP — invoke the lirbox:pr-writeup skill (via the Skill tool, by name) to produce a self-contained reviewer write-up of this branch's diff; save it to docs/changes/${NAME}/writeup.html. If the Skill tool is unavailable, read plugins/lirbox/skills/pr-writeup/SKILL.md + assets/template.html and follow them.
+3. DESIGN DIAGRAM — invoke the lirbox:flowchart skill (via the Skill tool, by name) to visualize the design of this change; choose the Mermaid diagram type (flowchart OR sequenceDiagram) that best fits; save to docs/changes/${NAME}/design.html. The flowchart skill validates its own output — ensure that validation passes before continuing. If the Skill tool is unavailable, read plugins/lirbox/skills/flowchart/SKILL.md + assets/template.html, follow them, and run that skill's assets/validate.mjs on the result.
+4. COMMIT all of docs/changes/${NAME}/ on ${BRANCH}.
+Return what was written.

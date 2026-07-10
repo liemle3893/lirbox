@@ -10,6 +10,16 @@
  *   4. asserts the emitted body has no runtime `meta.` access — the Workflow engine
  *      consumes `export const meta` as metadata, so `meta` is not a runtime binding.
  *
+ * It then byte-compares a canonical combo set against committed golden snapshots in
+ * scripts/snapshots/ (regenerated from the pinned inputs in scripts/snapshots/inputs/ —
+ * generator output is deterministic and cwd-/out-path-/input-path-independent). After an
+ * INTENTIONAL generator change, refresh the fixtures and commit them with the change:
+ *
+ *   node test-scaffold.cjs --update-snapshots
+ *
+ * The snapshot dir can be overridden (tamper/regen experiments) with the SNAPSHOT_DIR env
+ * var or --snapshot-dir <dir>; the flag wins over the env var.
+ *
  * Exits non-zero on the first failure (or summarises all and exits 1).
  *
  *   node test-scaffold.cjs
@@ -263,6 +273,65 @@ try {
 } catch (e) {
   console.error(`FAIL [eval] generation error: ${e.message.split('\n')[0]}`);
   failures++;
+}
+
+// --- Golden snapshots: byte-pin the emitted output for a canonical combo set -------------
+// The structural gates above only sample the output; these snapshots pin every byte of six
+// canonical combos, so ANY unintended change to emitted worker prompts or conductor logic
+// fails loudly. Inputs are the committed fixtures under <snapshotDir>/inputs/ (prompt text
+// and DoD criteria are baked into output verbatim, so byte-equality needs pinned inputs;
+// input file PATHS are not embedded, so regenerating against copies is safe).
+const argv = process.argv.slice(2);
+const snapDirFlag = argv.indexOf('--snapshot-dir');
+const SNAP_DIR = snapDirFlag !== -1 && argv[snapDirFlag + 1]
+  ? path.resolve(argv[snapDirFlag + 1])
+  : (process.env.SNAPSHOT_DIR ? path.resolve(process.env.SNAPSHOT_DIR) : path.join(__dirname, 'snapshots'));
+const UPDATE_SNAPSHOTS = argv.includes('--update-snapshots');
+const SNAP_PROMPTS = path.join(SNAP_DIR, 'inputs', 'prompts.json');
+const SNAP_DOD = path.join(SNAP_DIR, 'inputs', 'dod.json');
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..');
+
+// Canonical combo set (label → generator args). Every run is
+//   node scaffold-workflow.cjs --name snap --out <tmp>/<label>.js --force <args>
+// with cwd = repo root. Keep in lockstep with evals/checks/scaffold-golden-snapshots.check.mjs.
+const SNAP_COMBOS = [
+  ['default',    ['--phases', 'Work', '--prompts-file', SNAP_PROMPTS]],
+  ['lite',       ['--phases', 'Work', '--profile', 'lite', '--dod-file', SNAP_DOD, '--prompts-file', SNAP_PROMPTS]],
+  ['delivery',   ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', SNAP_DOD, '--prompts-file', SNAP_PROMPTS]],
+  ['cycle',      ['--phases', 'Implement', '--cycle', '--prompts-file', SNAP_PROMPTS]],
+  ['panel',      ['--phases', 'Work', '--enforce-code', '--review-panel', '--prompts-file', SNAP_PROMPTS]],
+  ['model-auto', ['--phases', 'Work', '--model-mode', 'auto', '--prompts-file', SNAP_PROMPTS]],
+];
+
+if (!fs.existsSync(SNAP_PROMPTS) || !fs.existsSync(SNAP_DOD)) {
+  console.error(`FAIL [snapshot] pinned input fixtures missing under ${path.join(SNAP_DIR, 'inputs')} (prompts.json + dod.json are committed data — restore them)`);
+  failures++;
+} else {
+  for (const [label, extra] of SNAP_COMBOS) {
+    const snapPath = path.join(SNAP_DIR, `${label}.js`);
+    const outPath = path.join(tmp, `snap-${label}.js`);
+    try {
+      execFileSync('node', [GEN, '--name', 'snap', '--out', outPath, '--force', ...extra],
+        { encoding: 'utf8', stdio: 'pipe', cwd: REPO_ROOT });
+      if (UPDATE_SNAPSHOTS) {
+        fs.mkdirSync(SNAP_DIR, { recursive: true });
+        fs.copyFileSync(outPath, snapPath);
+        console.log(`UPDATE [snapshot:${label}] wrote ${snapPath}`);
+      } else if (!fs.existsSync(snapPath)) {
+        console.error(`FAIL [snapshot:${label}] missing golden snapshot ${snapPath} — run \`node test-scaffold.cjs --update-snapshots\` and commit it`);
+        failures++;
+      } else if (!fs.readFileSync(outPath).equals(fs.readFileSync(snapPath))) {
+        console.error(`FAIL [snapshot:${label}] regenerated output differs from ${snapPath}`);
+        console.error('  If the generator change is INTENTIONAL: node test-scaffold.cjs --update-snapshots, review the fixture diff, commit it with the change.');
+        failures++;
+      } else {
+        console.log(`PASS [snapshot:${label}] byte-equals golden snapshot`);
+      }
+    } catch (e) {
+      console.error(`FAIL [snapshot:${label}] generation error: ${e.message.split('\n')[0]}`);
+      failures++;
+    }
+  }
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -1,0 +1,6 @@
+${inWorktree('dodgate-fix')}
+
+DoD FIX (round ${round}/3): the definition-of-done criteria below are NOT met. Make them met — implement what is missing, run the relevant checks yourself, then re-run the project test suite (your fix must not regress it) and commit. Do NOT weaken, game, or delete a check; if a criterion is genuinely impossible, say so in the summary instead of faking it.
+
+UNMET (JSON): ${JSON.stringify(unmet)}
+FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}

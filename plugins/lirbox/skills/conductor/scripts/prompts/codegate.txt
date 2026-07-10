@@ -1,0 +1,5 @@
+${inWorktree('codegate')}
+
+Review AND fix the changes on branch ${BRANCH} relative to ${BASE || 'the base branch'} (run git diff in ${WORKTREE}). Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality). Re-run the build after fixes and commit them.
+{{GATE_CONTRACT}}
+{{BUILD_EVIDENCE}}

@@ -1,0 +1,1 @@
+const dod = results.brief ? `\n\nScope this gate to the task's actual goal — judge findings against what the task set out to achieve; do NOT drift into changes unrelated to it.\nGOAL: ${results.brief.goal || '(none)'}` + ((results.brief.acceptanceCriteria || []).length ? `\nACCEPTANCE CRITERIA:\n- ${results.brief.acceptanceCriteria.join('\n- ')}` : '') : ''

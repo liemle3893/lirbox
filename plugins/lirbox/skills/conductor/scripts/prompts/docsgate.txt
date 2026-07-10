@@ -1,0 +1,3 @@
+${inWorktree('docsgate')}
+
+Write an implementation summary for the changes on ${BRANCH} vs ${BASE || 'the base branch'} into docs/changes/${NAME}/summary.md with proper frontmatter (mkdir -p the dir). Read the diff, the goal${TICKET ? ' and ticket ' + TICKET : ''}, and ALL fragments in the implementation-notes/ directory — fold their design decisions / deviations / tradeoffs / open questions into the summary. Commit it.

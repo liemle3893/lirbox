@@ -123,6 +123,20 @@ if (dodSpec) {
 }
 const panel = state.results && state.results.codeGate && state.results.codeGate.panel;
 if (panel) md += `Code-review panel: ${panel.raw} raw finding(s) → ${panel.deduped} deduped → ${panel.confirmed} confirmed (>=80 confidence).\n\n`;
+// Audit trail: confirmed findings the panel LEAD chose to skip (overrule) rather than fix.
+const skips = state.results && state.results.codeGate && state.results.codeGate.skippedFindings;
+if (Array.isArray(skips) && skips.length) {
+  md += `Lead-skipped findings (confirmed by the panel, overruled by the lead — review these):\n\n`;
+  for (const s of skips) md += `- **${(s && s.title) || '(untitled)'}** — ${(s && s.reason) || '(no reason recorded)'}\n`;
+  md += `\n`;
+}
+// Audit trail: confirmed Medium/Low findings the lead left unfixed (real, but below the fix bar).
+const knownOpen = state.results && state.results.codeGate && state.results.codeGate.knownOpen;
+if (Array.isArray(knownOpen) && knownOpen.length) {
+  md += `Known-open findings (confirmed Medium/Low the lead left unfixed — triage these):\n\n`;
+  for (const f of knownOpen) md += `- **${(f && f.title) || '(untitled)'}** (${(f && f.severity) || '?'}) — ${(f && f.file) || '?'}:${(f && f.line) || '?'}\n`;
+  md += `\n`;
+}
 md += `## Tokens & estimated cost\n\n`;
 md += `| Model | Input | Cache write | Cache read | Output | Est. cost (USD) |\n|---|--:|--:|--:|--:|--:|\n`;
 for (const r of rows) md += `| ${r.model} | ${k(r.input)} | ${k(r.cacheWrite)} | ${k(r.cacheRead)} | ${k(r.output)} | ${r.cost != null ? '$' + r.cost.toFixed(2) : 'n/a (no rate)'} |\n`;

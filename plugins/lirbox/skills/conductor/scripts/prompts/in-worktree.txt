@@ -1,0 +1,15 @@
+// Per-worker instruction. `slot` makes the notes file UNIQUE so parallel / multiple agents
+// never clobber each other. For a parallel fan-out, pass a slot unique per item (e.g. `phase-${i}`).
+// Pass { notes: false } for mechanical steps (PR push, etc.) that make no design decisions —
+// they should NOT create a notes file at all. Where notes ARE offered they are judgment-gated:
+// write one ONLY if there is something a reviewer genuinely needs.
+function inWorktree(slot, opts) {
+  const base = `Work ONLY inside the git worktree at ${WORKTREE} (run \`cd ${WORKTREE}\` first; it is on ` +
+    `branch ${BRANCH}). Do NOT edit any file outside ${WORKTREE}. Commit your changes there.`
+  if (opts && opts.notes === false) return base
+  return base + `\n\nIf — and ONLY if — this step involved a non-trivial design decision, an ` +
+    `intentional deviation from the spec, a tradeoff between real alternatives, or an open question a ` +
+    `reviewer must confirm, append it to a notes file UNIQUE to you at implementation-notes/${slot}.html ` +
+    `in the worktree (mkdir -p the dir; create if missing; APPEND — never clobber). For mechanical or ` +
+    `no-decision work, SKIP the file — do not create empty or boilerplate notes.`
+}

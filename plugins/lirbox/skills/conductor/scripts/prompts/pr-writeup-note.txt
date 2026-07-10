@@ -1,0 +1,1 @@
+. Reviewer artifacts are committed under docs/changes/{{NAME}}/ — link writeup.html, design.html, and notes/ in the PR body

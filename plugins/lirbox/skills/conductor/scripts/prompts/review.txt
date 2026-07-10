@@ -1,0 +1,8 @@
+${inWorktree('review')}
+
+Review AND fix the changes on branch ${BRANCH} relative to ${BASE || 'the base branch'} (run git diff in ${WORKTREE}) in ONE pass:
+1. Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality).
+2. Decide what testing the change warrants (none for docs/config/non-behavioral; unit for pure logic; e2e for new/changed behavior or endpoints) and ensure those tests EXIST and PASS — do NOT change source to game coverage, do NOT fake a pass if an integration env is unavailable (say so).
+3. Re-run build + tests after fixes and commit them.
+{{GATE_CONTRACT}} For this merged gate the required tests (step 2) count as part of the build/lint pass condition.
+{{BUILD_EVIDENCE}}

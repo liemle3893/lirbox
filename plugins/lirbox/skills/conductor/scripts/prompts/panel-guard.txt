@@ -1,0 +1,3 @@
+${inWorktree('codegate-guard', { notes: false })}
+
+Inspect the diff of ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WORKTREE}). Is this a CODE change (source/test code — not solely docs, config, comments, or generated artifacts)? Return isCode and a one-line reason. Do NOT edit anything.

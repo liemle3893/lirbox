@@ -1,0 +1,3 @@
+${inWorktree('reverify')}
+
+RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branch coverage for the changes on ${BRANCH} vs ${BASE || 'the base branch'}. Everything green before must STILL be green and coverage must not have regressed. If a refactor broke anything, STOP and report; do NOT weaken tests.
