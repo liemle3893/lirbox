@@ -14,7 +14,7 @@
 - All names kebab-case; agents are flat `*.md` files at `plugins/lirbox/agents/` (never inside `.claude-plugin/`).
 - Commit identity is enforced by `.githooks/pre-commit` — author must be `liemle3893 <33980597+liemle3893@users.noreply.github.com>`. If a commit is rejected, run the three `git config` lines from CONTRIBUTING.md §Commit identity; do not bypass the hook.
 - **Do NOT edit `plugins/lirbox/skills/conductor/scripts/scaffold-workflow.cjs` or any conductor skill file.** Generator changes go only into `feedback/conductor.jsonl` (Task 3).
-- **Do NOT commit `feedback/conductor.jsonl`.** It has pre-existing uncommitted entries belonging to a pending whetstone run; Task 3 appends one line and leaves the file dirty.
+- `feedback/conductor.jsonl` is clean as of the merged whetstone run #23 (its former pending batch landed); Task 3 appends one line and commits it on this branch.
 - `claude plugin validate .` must pass before every commit that touches `plugins/`.
 - Never commit runtime artifacts (`.workflows/`, `.worktrees/`, `implementation-notes/`, dogfood scratch dirs).
 - Dogfood scratch lives under the session scratchpad (`$SCRATCHPAD` below), never `/tmp`, never inside the repo.
@@ -39,7 +39,6 @@ Write `plugins/lirbox/agents/lirbox-web-verifier.md` with exactly this content:
 ---
 name: lirbox-web-verifier
 description: Verifies a UI-touching WEB change end-to-end — writes runnable E2E specs (Playwright preferred) for criteria that can be asserted, and captures evidence (screenshots, console/network logs, responsive viewport matrix) for criteria that must be judged. Engine-pluggable with graceful fallback (Playwright → browser-MCP → OS-scripted), honoring a frozen engine chain when the caller supplies one. Use as the web half of a frontend verification gate in a delivery workflow, or standalone to verify a web change. Distinguishes tooling failure from app failure; never silently passes.
-tools: Read, Write, Edit, Bash, Grep, Glob, ToolSearch
 color: cyan
 ---
 
@@ -66,8 +65,9 @@ Probe IN ORDER and use the first engine that works. When the caller supplies a f
 probe ONLY that chain, in that order.
 1. **playwright** — a Playwright config exists, or `@playwright/test` is installed (or cleanly
    installable) in the repo. Write real spec files; run `npx playwright test <specs>`.
-2. **browser-mcp** — any reachable MCP browser toolset (load via ToolSearch, e.g.
-   `mcp__claude-in-chrome__*` or another browser MCP). Drive the page, screenshot per viewport,
+2. **browser-mcp** — any connected MCP browser toolset available among your tools (e.g.
+   `mcp__claude-in-chrome__*` or another browser MCP; you inherit all session tools, so use
+   whichever browser server is present). Drive the page, screenshot per viewport,
    read the console. Evidence-first; still write Playwright spec files when the repo can host
    them (they become checkable criteria for later runs even if you could not execute them here —
    say so in the manifest notes).
@@ -119,6 +119,11 @@ manifest: implementation-notes/frontend-evidence/manifest.json
 On tooling exhaustion: `## WEB VERIFY FAILED (tooling): <engine>: <log excerpt>`.
 </output>
 ````
+
+The missing `tools:` line is DELIBERATE (plan-check finding, human-approved): an explicit
+allowlist blocks all MCP tools and `ToolSearch` is not valid in one, which would kill the
+browser-mcp engine tier. Inherit-all keeps the agent platform-agnostic. Do not "fix" it to match
+the other agents' restricted lists.
 
 - [ ] **Step 2: Add the README catalog row**
 
@@ -276,7 +281,7 @@ git commit -m "feat(lirbox): add lirbox-mobile-verifier agent (mobile half of fr
 Append exactly this single line (one JSON object, no trailing comma, newline-terminated) to `feedback/conductor.jsonl`:
 
 ```json
-{"id":"frontend-gate-phase","type":"concern","text":"conductor's gate layer has no frontend/mobile enforcement: a UI-touching delivery run's DoD degrades to lint/typecheck because no phase produces E2E specs or an evidence manifest for visual/device criteria. Approved design: docs/specs/2026-07-10-frontend-mobile-verification-gate-design.md (the two verifier agents ship separately on branch design/frontend-mobile-gate). Fix in the GENERATOR (scaffold-workflow.cjs; regenerate; test-scaffold.cjs stays green as the floor): add --frontend web|mobile|both emitting a FrontendGate phase positioned AFTER the code-quality gate (CodeGate/ReVerify under --cycle; the merged Review phase under lite) and BEFORE DoDGate/Writeup so DoDGate can cite the evidence manifest at implementation-notes/frontend-evidence/manifest.json; a diff guard skips the gate when the diff touches no UI files (same pattern as the review-panel diff guard); standard gate semantics (fix-loop <=3 then hard-fail, conductor throws, run goes failed); agent swap flags --agent-web (default lirbox:lirbox-web-verifier) and --agent-mobile (default lirbox:lirbox-mobile-verifier) with 'none' supported like the other --agent-* flags; the phase prompt splices the dod.json frontend block (engine chain, viewports) as DATA — the generator never probes the machine. Skill-side companion (same item, same commit): SKILL.md step 1c gains the machine probe (playwright config, maestro/appium binaries, Xcode/adb, MCP reachability) and folds the proposed frontend block into the SAME one-shot DoD AskUserQuestion, frozen into .workflows/<name>.dod.json per the design's §4. Discriminating check (RED on current generator, GREEN after): node scripts/scaffold-workflow.cjs --name fgcheck --phases Implement --frontend web --profile delivery --no-dod --out <scratch>/fgcheck.js --force must exit 0 AND the emitted script must contain phase('FrontendGate') ordered after phase('CodeGate') and before phase('Writeup'); today the flag is unknown/rejected (or ignored with no FrontendGate emitted), so the check is RED. Floor: the existing test-scaffold.cjs matrix stays green; natural same-commit stretch (not part of the frozen check): add --frontend entries to the test-scaffold.cjs matrix."}
+{"id":"frontend-gate-phase","type":"concern","text":"conductor's gate layer has no frontend/mobile enforcement: a UI-touching delivery run's DoD degrades to lint/typecheck because no phase produces E2E specs or an evidence manifest for visual/device criteria. Approved design: docs/specs/2026-07-10-frontend-mobile-verification-gate-design.md (the two verifier agents ship separately on branch design/frontend-mobile-gate). Fix in the GENERATOR (scaffold-workflow.cjs; regenerate; test-scaffold.cjs stays green as the floor): add --frontend web|mobile|both emitting a FrontendGate phase positioned AFTER the code-quality gate (CodeGate/ReVerify under --cycle; the merged Review phase under lite) and BEFORE DoDGate/Writeup so DoDGate can cite the evidence manifest at implementation-notes/frontend-evidence/manifest.json; a diff guard skips the gate when the diff touches no UI files (same pattern as the review-panel diff guard); standard gate semantics (fix-loop <=3 then hard-fail, conductor throws, run goes failed); agent swap flags --agent-web (default lirbox:lirbox-web-verifier) and --agent-mobile (default lirbox:lirbox-mobile-verifier) with 'none' supported like the other --agent-* flags; the phase prompt splices the dod.json frontend block (engine chain, viewports) as DATA — the generator never probes the machine. Skill-side companion (same item, same commit): SKILL.md step 1c gains the machine probe (playwright config, maestro/appium binaries, Xcode/adb, MCP reachability) and folds the proposed frontend block into the SAME one-shot DoD AskUserQuestion, frozen into .workflows/<name>.dod.json per the design's §4. Promotion companion (same item, same commit — plan-check found the gap): prompts/writeup.txt step 1 currently copies only implementation-notes/*.html (flat, HTML-only), so the gate's evidence would silently never reach the PR; extend it to ALSO copy implementation-notes/frontend-evidence/** (manifest.json, screenshots, logs — all types, recursive) into docs/changes/<name>/evidence/. DEPENDENCY: the default agents ship on branch design/frontend-mobile-gate — merge it and update the installed plugin BEFORE running this item; and the emitted FrontendGate must degrade gracefully: if the lirbox:lirbox-web-verifier / lirbox:lirbox-mobile-verifier agentType is unavailable at dispatch, rerun the same prompt with no agentType (generic subagent) and log a warning instead of hard-failing on the missing agent. Discriminating check (RED on current generator, GREEN after): node scripts/scaffold-workflow.cjs --name fgcheck --phases Implement --frontend web --profile delivery --no-dod --out <scratch>/fgcheck.js --force must exit 0 AND the emitted script must contain phase('FrontendGate') ordered after phase('CodeGate') and before phase('Writeup'); today the flag is unknown/rejected (or ignored with no FrontendGate emitted), so the check is RED. Floor: the existing test-scaffold.cjs matrix stays green; natural same-commit stretch (not part of the frozen check): add --frontend entries to the test-scaffold.cjs matrix."}
 ```
 
 - [ ] **Step 2: Verify the file still parses and the id is unique**
@@ -284,9 +289,14 @@ Append exactly this single line (one JSON object, no trailing comma, newline-ter
 Run: `jq -r '.id' feedback/conductor.jsonl`
 Expected: every existing id plus `frontend-gate-phase`, each exactly once; jq exits 0 (valid JSONL).
 
-- [ ] **Step 3: Do NOT commit**
+- [ ] **Step 3: Commit**
 
-Leave `feedback/conductor.jsonl` dirty — it carries pre-existing uncommitted entries that belong to the user's pending whetstone preparation. State this in the task report.
+The file is clean since whetstone run #23 merged its former pending batch, so the appended line commits safely:
+
+```bash
+git add feedback/conductor.jsonl
+git commit -m "feedback(conductor): file frontend-gate-phase (FrontendGate + evidence promotion)"
+```
 
 ---
 
@@ -329,11 +339,11 @@ Expected: install succeeds, chromium downloaded.
 ```bash
 cd "$SCRATCHPAD/webverify-dogfood"
 claude -p --plugin-dir /Users/liemlhd/Documents/git/Personal/lirbox/plugins/lirbox \
-  --dangerously-skip-permissions \
+  --permission-mode auto \
   "Use the Agent tool to dispatch the lirbox-web-verifier agent on the app in the current directory. Criteria: [{id: c1, text: 'GET / shows an h1 reading Dogfood', tier: checkable}, {id: c2, text: 'the page renders acceptably at a mobile viewport', tier: judged}]. App start command: python3 -m http.server 4173. Relay the agent's full report verbatim."
 ```
 
-(`--dangerously-skip-permissions` is confined to the scratch dir; nothing repo-side is writable from the task.)
+(Permissions, human-approved via plan-check: try `--permission-mode auto` FIRST — it auto-approves the sandboxed majority with a safer default. If the run fails on permission denials (visible in the transcript), rerun once with `--dangerously-skip-permissions`; that flag grants FULL filesystem access — no directory confinement — acceptable only because the prompt is fixed and benign and the target is a 3-file scratch app we authored. Either way, run the `npm install` / `npx playwright install chromium` from Step 1 FIRST and fail fast: an install failure is an environment blocker, reported as such — distinct from an agent defect.)
 
 - [ ] **Step 3: Verify the behavioral success criteria**
 
@@ -368,7 +378,7 @@ No commit (scratch only).
 ```bash
 mkdir -p "$SCRATCHPAD/mobileverify-smoke" && cd "$SCRATCHPAD/mobileverify-smoke"
 claude -p --plugin-dir /Users/liemlhd/Documents/git/Personal/lirbox/plugins/lirbox \
-  --dangerously-skip-permissions \
+  --permission-mode auto \
   "Use the Agent tool to dispatch the lirbox-mobile-verifier agent on the app in the current directory. Criteria: [{id: m1, text: 'the home screen shows a greeting', tier: judged}]. Relay the agent's full report verbatim."
 ```
 
@@ -383,7 +393,17 @@ Expected: all three hold. If the agent improvises a pass, fix the Task 2 agent f
 
 - [ ] **Step 3: Record the manual simulator dogfood as follow-up (do not attempt headless)**
 
-The full-positive mobile dogfood needs a booted iOS Simulator plus an RN/Flutter scratch app (`npx create-expo-app`, `maestro test`) — environment-dependent and slow, so it is a MANUAL follow-up for the user before merging, not a plan step. Include in the final task report: "Manual pre-merge check: run lirbox-mobile-verifier against a scratch Expo app on the iOS Simulator (spec §Verification)."
+The full-positive mobile dogfood needs a booted iOS Simulator plus an RN/Flutter scratch app — environment-dependent and slow, so it is a MANUAL pre-merge step for the user (plan-check bottleneck 7, human-approved), not a plan step. Include in the final task report, with these commands:
+
+```bash
+npx create-expo-app "$SCRATCHPAD/dogfood-rn" && cd "$SCRATCHPAD/dogfood-rn"
+npx expo run:ios          # builds + boots the simulator
+claude -p --plugin-dir /Users/liemlhd/Documents/git/Personal/lirbox/plugins/lirbox \
+  --permission-mode auto \
+  "Use the Agent tool to dispatch the lirbox-mobile-verifier agent on the app in the current directory. Criteria: [{id: m1, text: 'the home screen shows the default Expo greeting', tier: judged}]. Relay the agent's full report verbatim."
+```
+
+Expected: `gatePassed=true`, screenshots under `implementation-notes/frontend-evidence/`, manifest citing them. **Merging waits on this check.**
 
 ---
 
@@ -405,8 +425,8 @@ git status --short
 git log --oneline main..HEAD
 ```
 
-Expected: validate passes; dirty files are ONLY `feedback/conductor.jsonl` (+ the pre-existing untracked `plugins/lirbox/skills/conductor/evals/checks/*.check.mjs`); commits on the branch: spec, plan, web agent, mobile agent.
+Expected: validate passes; working tree clean apart from the untracked `plan-check-frontend-mobile-gate.html`; commits on the branch: spec, plan (+amendments), web agent, mobile agent, feedback entry.
 
 - [ ] **Step 2: Report**
 
-Report to the user: the branch name, the two agents, the appended feedback id `frontend-gate-phase` (uncommitted, by design), the dogfood results, and the manual simulator follow-up. Do NOT merge, do NOT push, do NOT open a PR unless asked (note: PR creation requires the `liemle3893` gh account per memory — the default EMU account cannot).
+Report to the user: the branch name, the two agents, the committed feedback id `frontend-gate-phase`, the dogfood results, and the manual simulator follow-up. Do NOT merge, do NOT push, do NOT open a PR unless asked (note: PR creation requires the `liemle3893` gh account per memory — the default EMU account cannot).

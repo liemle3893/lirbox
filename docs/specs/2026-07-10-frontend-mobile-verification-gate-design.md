@@ -69,8 +69,14 @@ Both agents return:
 
 and write an **evidence manifest** to `implementation-notes/frontend-evidence/manifest.json`
 (entries: `{ criterionId, engine, artifacts[], verdict, notes }`) plus the screenshots/logs
-themselves. This directory rides the **existing** Writeup promotion into `docs/changes/<name>/`, and
-DoDGate cites the manifest for judged criteria — no new plumbing.
+themselves. DoDGate cites the manifest for judged criteria.
+
+> **Correction (plan-check, 2026-07-10):** the original claim that this directory "rides the
+> existing Writeup promotion — no new plumbing" is **false**: `prompts/writeup.txt` promotes only
+> `implementation-notes/*.html` (flat, HTML-only). The whetstone item (§6) therefore also extends
+> the promotion to copy `implementation-notes/frontend-evidence/**` into
+> `docs/changes/<name>/evidence/`. Until that lands, the evidence exists in the worktree but does
+> not ride the PR artifacts.
 
 ### 4. Engine freezing protocol
 
