@@ -1,4 +1,5 @@
-// ACCEPTANCE CHECK (RED on baseline) — plan-check's authoring surfaces must carry the DoD.
+// FLOOR (characterization) — PASSES on baseline; pins: plan-check's authoring surfaces must carry the DoD.
+// Promoted from evals/checks/ after whetstone run plan-check-20260710-003245 merged (backlog item of the same name).
 //
 // Concern (feedback/plan-check.jsonl → dod-template-and-audit): the report contract now requires a
 // machine-readable definition-of-done (#dod) block, but the surfaces that AUTHOR a report must teach

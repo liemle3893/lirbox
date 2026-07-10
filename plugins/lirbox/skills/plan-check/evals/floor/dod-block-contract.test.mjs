@@ -1,4 +1,5 @@
-// ACCEPTANCE CHECK (RED on baseline) — plan-check's validate.mjs must enforce the #dod contract.
+// FLOOR (characterization) — PASSES on baseline; pins: plan-check's validate.mjs must enforce the #dod contract.
+// Promoted from evals/checks/ after whetstone run plan-check-20260710-003245 merged (backlog item of the same name).
 //
 // Concern (feedback/plan-check.jsonl → dod-block-contract): a plan-check report must embed
 // EXACTLY ONE <script type="application/json" id="dod"> block whose JSON is

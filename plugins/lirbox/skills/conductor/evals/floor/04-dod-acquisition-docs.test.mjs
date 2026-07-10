@@ -1,4 +1,5 @@
-// ACCEPTANCE CHECK (RED on baseline) — conductor's docs must cover the DoD acquisition flow + new flags.
+// FLOOR (characterization) — PASSES on baseline; pins: conductor's docs must cover the DoD acquisition flow + new flags.
+// Promoted from evals/checks/ after whetstone run conductor-20260710-001629 merged (backlog item of the same name).
 //
 // Concern (feedback/conductor.jsonl → dod-acquisition-docs): after the DoD/panel work lands
 // (plan Task 4), conductor's SKILL.md must document the DoD acquisition flow and generator-flags.md

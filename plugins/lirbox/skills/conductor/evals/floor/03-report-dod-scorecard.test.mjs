@@ -1,4 +1,5 @@
-// ACCEPTANCE CHECK (RED on baseline) — workflow-report.cjs must render the DoD scorecard + panel summary.
+// FLOOR (characterization) — PASSES on baseline; pins: workflow-report.cjs must render the DoD scorecard + panel summary.
+// Promoted from evals/checks/ after whetstone run conductor-20260710-001629 merged (backlog item of the same name).
 //
 // Concern (feedback/conductor.jsonl → report-dod-scorecard): the run report built from a run's state
 // file currently carries only tokens/cost. It must additionally render, from state.dod + state.results:

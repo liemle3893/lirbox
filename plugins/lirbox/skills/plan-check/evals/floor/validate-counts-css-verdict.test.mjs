@@ -1,4 +1,5 @@
-// ACCEPTANCE CHECK (RED on baseline) — plan-check's validator must not count CSS as verdicts.
+// FLOOR (characterization) — PASSES on baseline; pins: plan-check's validator must not count CSS as verdicts.
+// Promoted from evals/checks/ after whetstone run plan-check-20260710-003245 merged (backlog item of the same name).
 //
 // Concern (feedback/plan-check.jsonl → validate-counts-css-verdict): assets/validate.mjs matches
 // /data-verdict="..."/g across the WHOLE file, so the six `.verdict[data-verdict="..."]` attribute
