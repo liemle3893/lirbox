@@ -267,14 +267,16 @@ git commit -m "feat(lirbox): add lirbox-mobile-verifier agent (mobile half of fr
 
 ---
 
-### Task 3: FrontendGate feedback item for whetstone
+### Task 3: Whetstone filings — FrontendGate item, agent backlogs, agent-surface item
 
 **Files:**
-- Modify: `feedback/conductor.jsonl` (append ONE line; do NOT touch existing lines; do NOT commit — see Global Constraints)
+- Modify: `feedback/conductor.jsonl` (append ONE line; do NOT touch existing lines)
+- Create: `feedback/lirbox-web-verifier.jsonl`, `feedback/lirbox-mobile-verifier.jsonl` (empty — seeds the improvement lifecycle: all future agent fixes are filed here, never hand-edited)
+- Create: `feedback/whetstone.jsonl` (one line — the agent-surface item)
 
 **Interfaces:**
 - Consumes: agent names `lirbox:lirbox-web-verifier` / `lirbox:lirbox-mobile-verifier` from Tasks 1–2 (must match those frontmatter `name:` fields exactly, with the `lirbox:` namespace prefix).
-- Produces: backlog entry id `frontend-gate-phase` for a future whetstone run.
+- Produces: backlog entry ids `frontend-gate-phase` (conductor) and `agent-file-surface` (whetstone) for future whetstone runs; empty per-agent backlogs.
 
 - [ ] **Step 1: Append the entry**
 
@@ -289,13 +291,34 @@ Append exactly this single line (one JSON object, no trailing comma, newline-ter
 Run: `jq -r '.id' feedback/conductor.jsonl`
 Expected: every existing id plus `frontend-gate-phase`, each exactly once; jq exits 0 (valid JSONL).
 
-- [ ] **Step 3: Commit**
-
-The file is clean since whetstone run #23 merged its former pending batch, so the appended line commits safely:
+- [ ] **Step 3: Seed the per-agent improvement backlogs**
 
 ```bash
-git add feedback/conductor.jsonl
-git commit -m "feedback(conductor): file frontend-gate-phase (FrontendGate + evidence promotion)"
+touch feedback/lirbox-web-verifier.jsonl feedback/lirbox-mobile-verifier.jsonl
+```
+
+These mark the lifecycle contract: post-merge, agent concerns are FILED here (one `{id, type, text, acceptanceCheck?}` per line), never hand-edited into the agent — same rule as skills. They become workable the moment the `agent-file-surface` item below lands in whetstone.
+
+- [ ] **Step 4: File the whetstone agent-surface item**
+
+Append exactly this single line to `feedback/whetstone.jsonl` (create the file; newline-terminated):
+
+```json
+{"id":"agent-file-surface","type":"concern","text":"whetstone's surface is a skill DIRECTORY (scaffold-readiness.cjs init mode seeds <skillPath>/evals/ + checks/ + README; the surface-lock computes editable = skillPath minus evals/** minus feedback/<skill>.jsonl), so single-file plugin agents (plugins/lirbox/agents/<name>.md) cannot be improved through the whetstone lifecycle even though the repo convention says improvements go through feedback backlogs, not hand-edits. The lirbox-web-verifier / lirbox-mobile-verifier agents (branch design/frontend-mobile-gate) seed empty feedback/<agent>.jsonl backlogs that are unworkable until this lands. Fix: teach the whetstone scripts to accept an agent FILE as the surface — when --skill-path points at a plugins/<plugin>/agents/<name>.md file, treat editable = that one file, locked = its evals dir (suggest plugins/<plugin>/agents/evals/<name>/ or a sibling convention of your choosing) + feedback/<name>.jsonl, floor = claude plugin validate . plus the agent's characterization checks, and have scaffold-readiness.cjs init mode seed that layout (readiness README, checks dir, empty backlog) for an agent file. Keep behavioral acceptance honest per repo convention: agent-prompt concerns are behavioral, so acceptance checks should follow the claude -p A/B pattern (memory: behavioral-skill-proof-via-claude-p) rather than gameable static greps where possible. Discriminating check (RED on current scripts, GREEN after): node plugins/lirbox/skills/whetstone/scripts/scaffold-readiness.cjs --name lirbox-web-verifier --skill-path plugins/lirbox/agents/lirbox-web-verifier.md must exit 0 AND print/emit a readiness layout for the agent file (a checks/evals location + the backlog path feedback/lirbox-web-verifier.jsonl); today it either rejects the non-directory path or emits a skill-directory layout that does not exist, so the check is RED either way. Floor: test-improve.cjs stays green."}
+```
+
+- [ ] **Step 5: Verify all three files parse**
+
+Run: `jq -r '.id' feedback/conductor.jsonl && jq -r '.id' feedback/whetstone.jsonl && wc -l feedback/lirbox-web-verifier.jsonl feedback/lirbox-mobile-verifier.jsonl`
+Expected: conductor ids include `frontend-gate-phase` exactly once; whetstone shows `agent-file-surface`; both agent backlogs are 0 lines; jq exits 0.
+
+- [ ] **Step 6: Commit**
+
+`feedback/conductor.jsonl` is clean since whetstone run #23 merged its former pending batch, so this commits safely:
+
+```bash
+git add feedback/conductor.jsonl feedback/whetstone.jsonl feedback/lirbox-web-verifier.jsonl feedback/lirbox-mobile-verifier.jsonl
+git commit -m "feedback: file frontend-gate-phase (conductor) + agent-file-surface (whetstone); seed agent backlogs"
 ```
 
 ---
@@ -425,7 +448,7 @@ git status --short
 git log --oneline main..HEAD
 ```
 
-Expected: validate passes; working tree clean apart from the untracked `plan-check-frontend-mobile-gate.html`; commits on the branch: spec, plan (+amendments), web agent, mobile agent, feedback entry.
+Expected: validate passes; working tree clean apart from the untracked `plan-check-frontend-mobile-gate.html`; commits on the branch: spec, plan (+amendments), web agent, mobile agent, feedback filings (conductor item + whetstone agent-surface item + seeded agent backlogs).
 
 - [ ] **Step 2: Report**
 
