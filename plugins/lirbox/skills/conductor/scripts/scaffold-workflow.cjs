@@ -22,6 +22,10 @@
  *   --writeup            add a Writeup phase (promote implementation-notes + pr-writeup HTML +
  *                        design diagram, committed under docs/changes/<name>/). Default ON when a
  *                        PR phase exists; --no-writeup opts out.
+ *   --dod-file <json>    { criteria: [{ id, text, tier: checkable|judged, check? }] } — the
+ *                        definition of done, frozen in as DATA; emits DoDBaseline + DoDGate.
+ *                        REQUIRED under --profile lite/delivery (or pass --no-dod).
+ *   --no-dod             suppress the DoD gate (explicit opt-out, even under a profile)
  *   --model-mode <m>     default (inherit session model, no opt emitted) | auto (tier by phase)
  *   --model-think <m>    auto thinking-tier model: sonnet|opus|haiku|fable (default opus)
  *   --model-work <m>     auto work-phase model:    sonnet|opus|haiku|fable (default sonnet)
@@ -66,6 +70,38 @@ const mergeGates = profileLite || arg('merge-gates', false) === true;
 // phase exists ("every PR gets reviewer artifacts"); `--no-writeup` opts out; `--writeup` forces
 // it on even without `--pr`.
 const withWriteup = (arg('no-writeup', false) === true) ? false : (withPR || arg('writeup', false) === true);
+// --- DoD (definition of done) — criteria passed as DATA; verified by a DoDGate phase ---
+// --dod-file <json>: { "criteria": [{ "id", "text", "tier": "checkable"|"judged", "check"? }] }
+//   Frozen at scaffold time (change = regenerate with --force). Providing the file is the
+//   opt-in for bare runs; --profile lite/delivery REQUIRE it (or an explicit --no-dod).
+// --no-dod: suppress the DoD gate entirely (explicit escape hatch, even under a profile).
+const noDod = arg('no-dod', false) === true;
+const dodFileArg = arg('dod-file', '');
+let dodCriteria = null;
+if (dodFileArg && dodFileArg !== true && !noDod) {
+  let raw;
+  try { raw = fs.readFileSync(dodFileArg, 'utf8'); }
+  catch (e) { console.error('ERROR: --dod-file not readable: ' + e.message); process.exit(1); }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { console.error('ERROR: --dod-file is not valid JSON: ' + e.message); process.exit(1); }
+  dodCriteria = (parsed && Array.isArray(parsed.criteria)) ? parsed.criteria : null;
+  if (!dodCriteria || !dodCriteria.length) { console.error('ERROR: --dod-file needs a non-empty "criteria" array'); process.exit(1); }
+  for (const c of dodCriteria) {
+    if (!c.id || !c.text || (c.tier !== 'checkable' && c.tier !== 'judged')) {
+      console.error('ERROR: every DoD criterion needs id, text, and tier "checkable"|"judged" — got ' + JSON.stringify(c)); process.exit(1);
+    }
+    if (c.tier === 'checkable' && (typeof c.check !== 'string' || !c.check.trim())) {
+      console.error(`ERROR: checkable DoD criterion '${c.id}' needs a non-empty "check" command`); process.exit(1);
+    }
+  }
+}
+if (!noDod && !dodCriteria && (profileLite || profileDelivery)) {
+  console.error('ERROR: --profile lite/delivery requires a DoD (--dod-file <json>) — pass --no-dod to opt out explicitly');
+  process.exit(1);
+}
+const withDod = !!dodCriteria;
+const dodCheckable = withDod ? dodCriteria.filter((c) => c.tier === 'checkable') : [];
 const out = arg('out', path.join('.workflows', name + '.js'));
 const force = arg('force', false) === true;
 
@@ -256,6 +292,20 @@ const workPhasesBuild = () => phases.map((p) => {
 });
 
 const PHASES = [
+  // DoD baseline (honesty check): measure each checkable criterion BEFORE any work. A criterion
+  // already met at baseline cannot discriminate this run's work — the run report flags it.
+  { title: 'DoDBaseline', enabledWhen: withDod && dodCheckable.length > 0, build: () => emitPhase('DoDBaseline',
+    agentCall({
+      key: 'dodBaseline',
+      prompt: `\`\${inWorktree('dod-baseline', { notes: false })}
+
+DoD BASELINE (pre-work measurement): for EACH criterion below, run its "check" command inside \${WORKTREE} and record met (exit 0) / unmet (non-zero) / error (could not run). Do NOT fix anything — measure only.
+
+CHECKABLE CRITERIA (JSON): \${JSON.stringify(DOD_CRITERIA.filter((c) => c.tier === 'checkable'))}\``,
+      schema: SCHEMA({ baselines: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'status'], properties: { id: { type: 'string' }, status: { type: 'string', enum: ['met', 'unmet', 'error'] } } } } }, ['baselines']),
+      modelFrag: mdl('mechanical'), label: 'dod-baseline', phase: 'DoDBaseline',
+    })) },
+
   { title: 'Brief', enabledWhen: withTicket, build: () => emitPhase('Brief',
     agentCall({
       key: 'brief',
@@ -394,6 +444,42 @@ Write an implementation summary for the changes on \${BRANCH} vs \${BASE || 'the
       check: `if (!results.docs || !results.docs.written) throw new Error('DocsGate failed: no implementation summary written')`,
     })) },
 
+  // DoDGate: verify the frozen definition of done (checkable = run the command; judged =
+  // evidence-cited verdict). UNMET → fix worker → re-verify, ≤3 rounds, then hard-fail.
+  // Placed BEFORE Writeup/PR so a PR only ever opens with a fully-met DoD.
+  { title: 'DoDGate', enabledWhen: withDod, build: () => emitPhase('DoDGate',
+    `  let dodPassed = false, dodLast = null
+  for (let round = 1; round <= 3 && !dodPassed; round++) {
+    dodLast = await agent(
+      \`\${inWorktree('dodgate-verify', { notes: false })}
+
+DoD VERIFY (round \${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate EVERY criterion below against the work on \${BRANCH} vs \${BASE || 'the base branch'}:
+- tier "checkable": run the "check" command inside \${WORKTREE}; exit 0 = MET, non-zero = UNMET; the command output is the evidence.
+- tier "judged": verdict from real evidence you CITE (file:line, command output, test result). No evidence = not MET.
+Verdicts: MET | UNMET | PARTIAL.
+
+CRITERIA (JSON): \${JSON.stringify(DOD_CRITERIA)}\`,
+      { label: \`dodgate:verify-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
+        schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
+    )
+    const unmet = ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
+    dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
+    if (!dodPassed && round < 3) {
+      await agent(
+        \`\${inWorktree('dodgate-fix')}
+
+DoD FIX (round \${round}/3): the definition-of-done criteria below are NOT met. Make them met — implement what is missing, run the relevant checks yourself, then re-run the project test suite (your fix must not regress it) and commit. Do NOT weaken, game, or delete a check; if a criterion is genuinely impossible, say so in the summary instead of faking it.
+
+UNMET (JSON): \${JSON.stringify(unmet)}
+FULL DoD (JSON): \${JSON.stringify(DOD_CRITERIA)}\`,
+        { label: \`dodgate:fix-r\${round}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
+          schema: ${SCHEMA({ summary: { type: 'string' }, fixed: { type: 'array', items: { type: 'string' } } }, ['summary'])} },
+      )
+    }
+  }
+  results.dodGate = dodLast
+  if (!dodPassed) throw new Error('DoDGate failed: DoD not fully met after 3 rounds — unmet: ' + ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET').map((c) => c.id).join(', '))`) },
+
   // Writeup: promote the per-worker implementation-notes + emit a reviewer write-up and a design
   // diagram, all committed under docs/changes/<name>/ so they ride the PR. Hard-fails (placed
   // BEFORE PR) so "every PR has reviewer artifacts" is actually enforced; --no-writeup opts out.
@@ -421,7 +507,8 @@ Return what was written.\``,
 Push the branch and open a PR with the GitHub CLI:
 git push -u origin \${BRANCH}
 gh pr create --base \${BASE || 'main'} --head \${BRANCH} --title "TODO title" --body "TODO summary${withWriteup ? '. Reviewer artifacts are committed under docs/changes/' + name + '/ — link writeup.html, design.html, and notes/ in the PR body' : ''}\${TICKET ? '; refs ' + TICKET : ''}"
-If a PR for this branch already exists, return its URL instead of erroring.\``,
+${withDod ? `Include a "## Definition of done" section in the PR body — headline "DoD: <met>/<total> MET", then one line per criterion (id, verdict, evidence) from this JSON: \${JSON.stringify((results.dodGate && results.dodGate.criteria) || [])}
+` : ''}If a PR for this branch already exists, return its URL instead of erroring.\``,
       schema: SCHEMA({ prUrl: { type: 'string' } }, ['prUrl']),
       modelFrag: mdl('mechanical'), label: 'pr', phase: 'PR',
     })) },
@@ -481,7 +568,7 @@ const STATE    = \`.workflows/state/\${NAME}.json\`
 const BRANCH   = (args && args.branch) ? args.branch : \`wf/\${NAME}\`
 const BASE     = (args && args.base) ? args.base : '${base === true ? '' : base}'
 const WORKTREE = \`.worktrees/\${NAME}\`
-const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}
+const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}${withDod ? `\nconst DOD_CRITERIA = ${JSON.stringify(dodCriteria)}` : ''}
 
 const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
@@ -531,7 +618,7 @@ function inWorktree(slot, opts) {
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
   const payload = JSON.stringify(
-    { workflow: NAME, status: 'running', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results },
+    { workflow: NAME, status: 'running', branch: BRANCH, worktree: WORKTREE, ticket: TICKET,${withDod ? ' dod: { criteria: DOD_CRITERIA },' : ''} phasesDone: [...done], results },
     null, 2,
   )
   await agent(
