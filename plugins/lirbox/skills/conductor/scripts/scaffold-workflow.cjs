@@ -355,12 +355,12 @@ Return the score and a one-line reason.\`,
         last = await agent(
           \`\${inWorktree('codegate-lead')}
 
-You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. You may skip a finding ONLY with an explicit reason it is wrong.
+You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. You may skip a finding ONLY with an explicit reason it is wrong — record EVERY skipped finding in the skippedFindings output array (its title plus your reason), empty when you skipped none; this is the audit trail a human reviews.
 ${GATE_CONTRACT}
 
 FINDINGS (JSON): \${JSON.stringify(confirmed)}\` + dod + carry,
           { label: \`codegate:lead-r\${round}\`, phase: 'CodeGate', ${at(agentCode)}${mdl('think') ? ' ' + mdl('think') : ''}
-            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed', 'critical', 'high'])} },
+            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, skippedFindings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'reason'], properties: { title: { type: 'string' }, reason: { type: 'string' } } } } }, ['gatePassed', 'critical', 'high', 'skippedFindings'])} },
         )
         passed = last && last.gatePassed
       }
