@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan check — Add rate-limiting to the public API</title>
+<style>
+:root{
+  --bg:#f2efe6; --paper:#fffdf8; --ink:#22201c; --muted:#6d675c; --line:#e4ded0;
+  --go:#3f7d3f; --cond:#b8862b; --nogo:#b23b32;
+  --kk:#3f7d3f; --ku:#b8862b; --uk:#8a6d3b; --uu:#b23b32;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:900px;margin:0 auto;padding:40px 22px 96px;}
+h1{font-family:Georgia,serif;font-size:34px;line-height:1.15;margin:0 0 4px;}
+.sub{color:var(--muted);font-size:14px;margin-bottom:26px;}
+.verdict{display:flex;align-items:center;gap:16px;border-radius:14px;padding:20px 24px;margin:22px 0 8px;background:var(--paper);border:1px solid var(--line);border-left-width:8px;}
+.verdict[data-verdict="GO"]{border-left-color:var(--go);}
+.verdict[data-verdict="GO-WITH-CONDITIONS"]{border-left-color:var(--cond);}
+.verdict[data-verdict="NO-GO"]{border-left-color:var(--nogo);}
+.verdict .badge{font-family:Georgia,serif;font-weight:700;font-size:26px;letter-spacing:-.5px;}
+.verdict[data-verdict="GO"] .badge{color:var(--go);}
+.verdict[data-verdict="GO-WITH-CONDITIONS"] .badge{color:var(--cond);}
+.verdict[data-verdict="NO-GO"] .badge{color:var(--nogo);}
+.verdict .summary{color:#403b33;font-size:15px;}
+h2{font-family:Georgia,serif;font-size:22px;margin:44px 0 10px;padding-top:10px;border-top:1px solid var(--line);}
+.lead{color:var(--muted);font-size:13px;margin:-4px 0 14px;}
+ul.conditions{list-style:none;padding:0;margin:0;}
+ul.conditions li.condition{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:8px 0;display:flex;gap:12px;}
+ul.conditions li.condition::before{content:"☐";color:var(--cond);font-weight:700;flex:none;}
+ul.conditions li.condition .cbody{flex:1;min-width:0;}
+ul.risks{list-style:none;padding:0;margin:0;}
+ul.risks li{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:8px 0;}
+ul.risks li .q{font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--uu);}
+table{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px;}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;}
+th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+tr:last-child td{border-bottom:none;}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;padding:2px 8px;border-radius:999px;white-space:nowrap;}
+.q-known-known{background:#e6f0e6;color:var(--kk);}
+.q-known-unknown{background:#f6ecd4;color:var(--ku);}
+.q-unknown-known{background:#efe6d2;color:var(--uk);}
+.q-unknown-unknown{background:#f4dedb;color:var(--uu);}
+.s-VERIFIED{color:var(--go);font-weight:700;}
+.s-REFUTED{color:var(--nogo);font-weight:700;}
+.s-UNVERIFIED{color:var(--cond);font-weight:700;}
+.s-UNSTATED-ASSUMPTION{color:var(--uk);font-weight:700;}
+.s-BLIND-SPOT-RISK{color:var(--uu);font-weight:700;}
+code{background:#efeadd;padding:1px 5px;border-radius:5px;font-size:13px;}
+code[data-copy]{cursor:copy;position:relative;}
+code[data-copy]:hover{outline:1px solid var(--line);}
+code[data-copy].copied::after{content:"copied";position:absolute;left:50%;bottom:calc(100% + 4px);transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:10px;letter-spacing:.04em;padding:2px 6px;border-radius:4px;white-space:nowrap;pointer-events:none;}
+footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;}
+@media print{code[data-copy]{cursor:auto;}code[data-copy]:hover{outline:none;}code[data-copy].copied::after{display:none;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Add rate-limiting to the public API</h1>
+  <div class="sub">plan-check · feature · 2026-07-10</div>
+
+  <!-- data-verdict MUST be GO | GO-WITH-CONDITIONS | NO-GO and match the claim rows -->
+  <div class="verdict" data-verdict="GO-WITH-CONDITIONS">
+    <span class="badge">GO-WITH-CONDITIONS</span>
+    <span class="summary">The design holds, but throughput under the proposed token-bucket window is unverified — clear it before building.</span>
+  </div>
+
+  <h2>Conditions to clear before GO</h2>
+  <p class="lead">Every open risk below must be resolved first. Delete this whole section only if there are none.</p>
+  <ul class="conditions">
+    <li class="condition"><div class="cbody">Benchmark the token-bucket limiter at the stated 10k req/s ceiling and confirm p99 latency stays under 50ms before committing to the algorithm.</div></li>
+  </ul>
+
+  <h2>Blind spots &amp; unstated assumptions</h2>
+  <p class="lead">Unknown-unknowns found beyond the plan's own claims, and tacit assumptions surfaced by interrogation.</p>
+  <ul class="risks">
+    <li><span class="q">unknown-unknown</span><br>The plan assumes a single-region deployment; it never says how the shared counter behaves once traffic spans two regions with independent Redis instances.</li>
+  </ul>
+
+  <h2>Claim ledger</h2>
+  <p class="lead">Every proposition, tagged to its quadrant and adjudicated. Verified/mechanical rows last.</p>
+  <table>
+    <thead><tr><th>Proposition</th><th>Quadrant</th><th>Status</th><th>Evidence</th><th>Conf.</th></tr></thead>
+    <tbody>
+      <tr class="claim" data-quadrant="known-unknown" data-status="UNVERIFIED">
+        <td>The token-bucket limiter sustains 10k req/s without exceeding the 50ms p99 budget.</td>
+        <td><span class="tag q-known-unknown">known-unknown</span></td>
+        <td><span class="s-UNVERIFIED">UNVERIFIED</span> (needs: load test)</td>
+        <td>No benchmark exists; the number is quoted from a vendor blog.</td>
+        <td>Low</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>Redis is already provisioned in the target cluster and reachable from the API pods.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span></td>
+        <td>Confirmed in <code>infra/redis.tf</code> and a live <code>redis-cli ping</code> from a pod.</td>
+        <td>High</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <footer>Generated by lirbox:plan-check. Read-only verification — no live systems were touched. A plan is a map; this report is what the territory says back.</footer>
+</div>
+<script type="application/json" id="dod">{"criteria":[{"id":"ac1","text":"example check","tier":"checkable","check":"true"},{"id":"ac2","text":"example judged","tier":"judged"}]}</script>
+<script>
+// Click any <code> snippet (command / path / evidence) to copy it. Self-contained,
+// offline: no network, no external deps. A brief "copied" flag confirms the write.
+(function(){
+  function flash(el){
+    el.classList.add('copied');
+    setTimeout(function(){ el.classList.remove('copied'); }, 1100);
+  }
+  function copy(el){
+    var text = el.innerText || el.textContent || '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function(){ flash(el); }).catch(function(){ fallback(text, el); });
+    } else {
+      fallback(text, el);
+    }
+  }
+  function fallback(text, el){
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); flash(el); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  var codes = document.querySelectorAll('code');
+  for (var i = 0; i < codes.length; i++) {
+    var c = codes[i];
+    c.setAttribute('data-copy', '');
+    c.setAttribute('title', 'Click to copy');
+    c.addEventListener('click', (function(el){ return function(){ copy(el); }; })(c));
+  }
+})();
+</script>
+</body>
+</html>
