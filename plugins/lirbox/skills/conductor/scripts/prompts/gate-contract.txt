@@ -1,0 +1,1 @@
+OUTPUT CONTRACT: return gatePassed=true ONLY if every Critical and High finding is fixed or skipped-with-explicit-reason AND the build/lint passes; report critical and high as the counts of findings of each severity left UNRESOLVED after your fixes (both 0 when gatePassed=true).

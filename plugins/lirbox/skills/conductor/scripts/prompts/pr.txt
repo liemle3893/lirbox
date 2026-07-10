@@ -1,0 +1,6 @@
+${inWorktree('pr', { notes: false })}
+
+Push the branch and open a PR with the GitHub CLI:
+git push -u origin ${BRANCH}
+gh pr create --base ${BASE || 'main'} --head ${BRANCH} --title "TODO title" --body "TODO summary{{WRITEUP_NOTE}}${TICKET ? '; refs ' + TICKET : ''}"
+{{DOD_SECTION}}If a PR for this branch already exists, return its URL instead of erroring.

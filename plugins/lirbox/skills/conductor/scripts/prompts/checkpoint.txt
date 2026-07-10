@@ -1,0 +1,10 @@
+Persist durable workflow state to the MAIN repo (do NOT cd into the worktree). Run EXACTLY:
+
+mkdir -p .workflows/state
+cat > .workflows/state/.${NAME}.payload.json <<'DURABLE_JSON'
+${payload}
+DURABLE_JSON
+node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${NAME}.payload.json';let prev={};try{prev=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){};const s=JSON.parse(fs.readFileSync(p,'utf8'));const n=new Date().toISOString();s.startedAt=prev.startedAt||n;s.updatedAt=n;fs.writeFileSync(f,JSON.stringify(s,null,2));fs.unlinkSync(p)"
+node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
+
+Return whether the file was written and parses.

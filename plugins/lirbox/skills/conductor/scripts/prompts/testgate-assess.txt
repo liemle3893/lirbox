@@ -1,0 +1,7 @@
+${inWorktree('testgate')}
+
+Assess the changes on branch ${BRANCH} relative to ${BASE || 'the base branch'} (git diff in ${WORKTREE}) and decide what testing the change actually warrants:
+- "tryve-e2e": new/changed HTTP endpoint, behavior, or integration path → needs a tryve E2E test (tests/e2e/*.yaml).
+- "unit": pure logic / service / util change → Jest unit tests suffice.
+- "none": docs-only, config, comments, or non-behavioral change → no new tests required.
+Return the level and a one-line justification.

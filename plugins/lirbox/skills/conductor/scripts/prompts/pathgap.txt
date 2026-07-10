@@ -1,0 +1,7 @@
+${inWorktree('pathgap')}
+
+PATH-GAP: the ACs do NOT cover every code path. Steps:
+1. Run Jest with BRANCH coverage; intersect with the CHANGED lines (git diff vs ${BASE || 'the base branch'}) to find uncovered branches introduced by this change.
+2. For EACH uncovered changed branch, do ONE: (a) add a unit/integration test that meaningfully exercises AND asserts it, or (b) if it is genuinely unreachable/defensive, record an explicit justification in implementation-notes/pathgap.html.
+3. Re-run coverage. There must be NO silent gaps — every uncovered changed branch is either tested or justified.
+Do NOT delete/alter source branches just to raise coverage. Commit new tests + notes.

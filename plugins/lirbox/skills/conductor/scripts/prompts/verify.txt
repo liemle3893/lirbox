@@ -1,0 +1,3 @@
+${inWorktree('verify')}
+
+VERIFY (GREEN): run the full relevant test suite for the changes on ${BRANCH} vs ${BASE || 'the base branch'} (Jest unit + any tryve E2E from RED). EVERYTHING must pass. If any test fails, the implementation is incomplete — STOP and report which failed; do NOT weaken tests to pass.

@@ -1,0 +1,6 @@
+${inWorktree('codegate-score-' + i, { notes: false })}
+
+Verify ONE code-review finding against the actual code (read the files; do NOT edit).
+FINDING (JSON): ${JSON.stringify(f)}
+{{CONFIDENCE_RUBRIC}}
+Return the score and a one-line reason.

@@ -5,7 +5,9 @@
  * boilerplate (NAME/STATE/BRANCH consts, checkpoint() with startedAt-preserving merge,
  * Setup worktree+node_modules, resume guards, optional Brief/PR/TicketUpdate, finalize)
  * is emitted here. The work-phase prompts are passed in as DATA (--prompt/--prompts-file),
- * so the caller never reads back or hand-edits the generated script.
+ * so the caller never reads back or hand-edits the generated script. The FIXED worker-prompt
+ * prose is data too: plain template files under scripts/prompts/, loaded at generation time
+ * (emitted-runtime text verbatim + {{NAME}} placeholders for generator-computed fragments).
  *
  * Usage:
  *   node scaffold-workflow.cjs --name <slug> [options]
@@ -46,6 +48,26 @@ function arg(name, def) {
   const v = process.argv[i + 1];
   return v && !v.startsWith('--') ? v : true; // bare flag → true
 }
+
+// --- Worker-prompt templates: the static prose lives as DATA under scripts/prompts/ ---
+// Each template holds the EMITTED text verbatim: dollar-brace expressions and backslash
+// sequences in a template belong to the generated script's RUNTIME template literals and pass
+// through untouched — there is no generator-escaping layer to fight when editing prose.
+// Generator-computed fragments use {{NAME}} placeholders, substituted mechanically here; an
+// unfilled placeholder aborts generation loudly instead of emitting a subtly-wrong script.
+const PROMPT_DIR = path.join(__dirname, 'prompts');
+function promptTpl(file, subs) {
+  let text;
+  try { text = fs.readFileSync(path.join(PROMPT_DIR, file), 'utf8'); }
+  catch (e) { console.error(`ERROR: prompt template scripts/prompts/${file} not readable: ${e.message}`); process.exit(1); }
+  if (text.endsWith('\n')) text = text.slice(0, -1); // the file-final newline is not prompt text
+  for (const [k, v] of Object.entries(subs || {})) text = text.split('{{' + k + '}}').join(v);
+  const unfilled = text.match(/\{\{[A-Z_]+\}\}/);
+  if (unfilled) { console.error(`ERROR: prompt template ${file} left placeholder ${unfilled[0]} unfilled`); process.exit(1); }
+  return text;
+}
+// Same, wrapped in the backticks of the emitted runtime template literal (the common case).
+const tpl = (file, subs) => '`' + promptTpl(file, subs) + '`';
 
 const name = arg('name');
 if (!name || name === true) { console.error('ERROR: --name <slug> is required'); process.exit(1); }
@@ -127,13 +149,7 @@ if (profileDelivery) PANEL_DIMENSIONS.push(
   { key: 'history', focus: 'Git history: read git blame/log for the modified code; flag changes that contradict the reason a prior fix was made or reintroduce a previously-fixed bug. Cite the commit.' });
 
 // The /code-review confidence rubric, given to each scorer verbatim.
-const CONFIDENCE_RUBRIC = `Score 0-100 how confident you are the finding is REAL and WORTH FIXING:
-- 0: Not confident at all. False positive that does not stand up to light scrutiny, or a pre-existing issue.
-- 25: Somewhat confident. Might be real, might be a false positive; could not verify.
-- 50: Moderately confident. Verified real, but may be a nitpick or rarely hit in practice.
-- 75: Highly confident. Double-checked and verified: very likely real, will be hit in practice, directly impacts functionality (or is explicitly required by CLAUDE.md).
-- 100: Absolutely certain. Double-checked, definitely real, will happen frequently; evidence directly confirms it.
-Automatic false positives (score 0): pre-existing issues; linter/typechecker/compiler-catchable; pedantic nitpicks; issues on lines the diff did not modify; intentional changes related to the goal.`;
+const CONFIDENCE_RUBRIC = promptTpl('confidence-rubric.txt');
 
 const out = arg('out', path.join('.workflows', name + '.js'));
 const force = arg('force', false) === true;
@@ -266,21 +282,22 @@ ${body}
 //     never dereference a missing brief.
 //   - CARRY_DECL: on round>1, feed the prior round's result forward so retries CONVERGE (build on
 //     what was already found/fixed) instead of re-reviewing the diff from scratch.
-const DOD_DECL = "const dod = results.brief ? `\\n\\nScope this gate to the task's actual goal — judge findings against what the task set out to achieve; do NOT drift into changes unrelated to it.\\nGOAL: ${results.brief.goal || '(none)'}` + ((results.brief.acceptanceCriteria || []).length ? `\\nACCEPTANCE CRITERIA:\\n- ${results.brief.acceptanceCriteria.join('\\n- ')}` : '') : ''";
-const CARRY_DECL = "const carry = round > 1 && last ? `\\n\\nROUND ${round} of up to 3 — a prior round already ran; BUILD ON what it already found/fixed, do NOT re-review from scratch. Prior round summary: ${last.summary || '(no summary)'}` : ''";
+// Both are emitted-runtime STATEMENT source, stored verbatim in their template files.
+const DOD_DECL = promptTpl('dod-decl.txt');
+const CARRY_DECL = promptTpl('carry-decl.txt');
 
 // Explicit output contract for the fix-gates (panel CodeGate lead, single-agent CodeGate, merged
 // Review). The generated loop trusts gatePassed alone and its throw message assumes "unresolved"
 // semantics, so the prompt must pin both down: what gatePassed=true requires, and that
 // critical/high count findings LEFT unresolved (not findings fixed). Plain text only — no
 // backticks/${}/backslashes — so it interpolates safely into the emitted template literals.
-const GATE_CONTRACT = 'OUTPUT CONTRACT: return gatePassed=true ONLY if every Critical and High finding is fixed or skipped-with-explicit-reason AND the build/lint passes; report critical and high as the counts of findings of each severity left UNRESOLVED after your fixes (both 0 when gatePassed=true).';
+const GATE_CONTRACT = promptTpl('gate-contract.txt');
 
 // Build-run evidence demanded by the fix-gates (honesty anchor, not a second verifier): the gate
 // cannot go green on the honor system — the loop's pass condition rejects gatePassed=true unless
 // buildExit is 0, so the agent must actually invoke the build and report the outcome. Plain text
 // only (no backticks/${}/backslashes) — it interpolates into the emitted template literals.
-const BUILD_EVIDENCE = 'EVIDENCE: report the exact build/lint command you ran as buildCmd and its numeric exit code as buildExit; if the project has no build/lint, run the closest verification command (e.g. the test suite) and report that instead. The gate rejects gatePassed=true unless buildExit is 0.';
+const BUILD_EVIDENCE = promptTpl('build-evidence.txt');
 
 // A bounded 3-round gate: run the agent up to 3× until `flag` is truthy, else throw.
 // `prompt`/`schema` are template-literal source fragments; `agentFrag` is the optional
@@ -315,9 +332,7 @@ function panelBody() {
   const findingsSchema = SCHEMA({ findings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['file', 'line', 'severity', 'title'], properties: { file: { type: 'string' }, line: { type: 'number' }, severity: { type: 'string', enum: ['Critical', 'High', 'Medium', 'Low'] }, title: { type: 'string' }, detail: { type: 'string' } } } } }, ['findings']);
   return `  // Panel review: guard → parallel dimensions → dedup → confidence filter → lead fixer.
   const guard = await agent(
-    \`\${inWorktree('codegate-guard', { notes: false })}
-
-Inspect the diff of \${BRANCH} vs \${BASE || 'the base branch'} (git diff in \${WORKTREE}). Is this a CODE change (source/test code — not solely docs, config, comments, or generated artifacts)? Return isCode and a one-line reason. Do NOT edit anything.\`,
+    ${tpl('panel-guard.txt')},
     { label: 'codegate:guard', phase: 'CodeGate',${mdl('mechanical') ? ' ' + mdl('mechanical') : ''}
       schema: ${SCHEMA({ isCode: { type: 'boolean' }, reason: { type: 'string' } }, ['isCode'])} },
   )
@@ -327,11 +342,7 @@ Inspect the diff of \${BRANCH} vs \${BASE || 'the base branch'} (git diff in \${
   } else {
     const DIMENSIONS = ${JSON.stringify(PANEL_DIMENSIONS)}
     const rawResults = await parallel(DIMENSIONS.map((d) => () => agent(
-      \`\${inWorktree('codegate-' + d.key, { notes: false })}
-
-READ-ONLY panel review of the changes on \${BRANCH} vs \${BASE || 'the base branch'} (git diff in \${WORKTREE}) — do NOT edit or fix anything; you only report findings.
-DIMENSION — \${d.focus}
-Return findings with exact repo-relative file + line + severity (Critical|High|Medium|Low) + title + detail. No findings is a valid answer.\`,
+      ${tpl('panel-dimension.txt')},
       { label: 'codegate:' + d.key, phase: 'CodeGate',${mdl('think') ? ' ' + mdl('think') : ''}
         schema: ${findingsSchema} },
     )))
@@ -343,12 +354,7 @@ Return findings with exact repo-relative file + line + severity (Critical|High|M
       if (!seen.has(k)) { seen.add(k); deduped.push(f) }
     }
     const scored = deduped.length ? await parallel(deduped.map((f, i) => () => agent(
-      \`\${inWorktree('codegate-score-' + i, { notes: false })}
-
-Verify ONE code-review finding against the actual code (read the files; do NOT edit).
-FINDING (JSON): \${JSON.stringify(f)}
-${escTpl(CONFIDENCE_RUBRIC)}
-Return the score and a one-line reason.\`,
+      ${tpl('panel-score.txt', { CONFIDENCE_RUBRIC: escTpl(CONFIDENCE_RUBRIC) })},
       { label: 'codegate:score-' + i, phase: 'CodeGate',${mdl('mechanical') ? ' ' + mdl('mechanical') : ''}
         schema: ${SCHEMA({ score: { type: 'number' }, reason: { type: 'string' } }, ['score'])} },
     ).then((v) => ({ ...f, confidence: v ? v.score : 0 })))) : []
@@ -362,13 +368,7 @@ Return the score and a one-line reason.\`,
         ${DOD_DECL}
         ${CARRY_DECL}
         last = await agent(
-          \`\${inWorktree('codegate-lead')}
-
-You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. Fix a Medium or Low finding ONLY when the fix is trivial and zero-risk; otherwise leave it untouched and record it in the knownOpen output array (its exact file, line, severity, title) — a confirmed Medium/Low below the fix bar is NOT wrong, so it must stay known-open for the human, never silently dropped; knownOpen is empty when none remain. You may skip a finding ONLY with an explicit reason it is wrong — record EVERY skipped finding in the skippedFindings output array (its title plus your reason), empty when you skipped none; this is the audit trail a human reviews.
-${GATE_CONTRACT}
-${BUILD_EVIDENCE}
-
-FINDINGS (JSON): \${JSON.stringify(confirmed)}\` + dod + carry,
+          ${tpl('panel-lead.txt', { GATE_CONTRACT, BUILD_EVIDENCE })} + dod + carry,
           { label: \`codegate:lead-r\${round}\`, phase: 'CodeGate', ${at(agentCode)}${mdl('think') ? ' ' + mdl('think') : ''}
             schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, buildCmd: { type: 'string' }, buildExit: { type: 'number' }, skippedFindings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'reason'], properties: { title: { type: 'string' }, reason: { type: 'string' } } } }, knownOpen: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['file', 'line', 'severity', 'title'], properties: { file: { type: 'string' }, line: { type: 'number' }, severity: { type: 'string' }, title: { type: 'string' } } } } }, ['gatePassed', 'critical', 'high', 'buildCmd', 'buildExit', 'skippedFindings', 'knownOpen'])} },
         )
@@ -397,8 +397,8 @@ const workPhasesBuild = () => phases.map((p) => {
   if (!provided) pendingTodos++;
   const body = provided
     ? escTpl(provided)
-    : `TODO: describe the ${p} work here. (Pass --prompt/--prompts-file to fill this from data.)`;
-  const greenLine = withCycle ? '\nGREEN: implement until the RED tests pass; never weaken or delete tests to go green.\n' : '';
+    : promptTpl('work-todo.txt', { PHASE: p });
+  const greenLine = withCycle ? '\n' + promptTpl('green-line.txt') + '\n' : '';
   const sch = (spec.phases && spec.phases[p] && spec.phases[p + '.schema']) || SCHEMA({ summary: { type: 'string' } }, ['summary']);
   const agentFrag = (spec.phases && spec.phases[p + '.agent']) ? at(spec.phases[p + '.agent']) : '';
   const src = emitPhase(p, agentCall({
@@ -419,11 +419,7 @@ const PHASES = [
   { title: 'DoDBaseline', enabledWhen: withDod && dodCheckable.length > 0, build: () => emitPhase('DoDBaseline',
     agentCall({
       key: 'dodBaseline',
-      prompt: `\`\${inWorktree('dod-baseline', { notes: false })}
-
-DoD BASELINE (pre-work measurement): for EACH criterion below, run its "check" command inside \${WORKTREE} and record met (exit 0) / unmet (non-zero) / error (could not run). Do NOT fix anything — measure only.
-
-CHECKABLE CRITERIA (JSON): \${JSON.stringify(DOD_CRITERIA.filter((c) => c.tier === 'checkable'))}\``,
+      prompt: tpl('dod-baseline.txt'),
       schema: SCHEMA({ baselines: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'status'], properties: { id: { type: 'string' }, status: { type: 'string', enum: ['met', 'unmet', 'error'] } } } } }, ['baselines']),
       modelFrag: mdl('mechanical'), label: 'dod-baseline', phase: 'DoDBaseline',
     })) },
@@ -431,10 +427,7 @@ CHECKABLE CRITERIA (JSON): \${JSON.stringify(DOD_CRITERIA.filter((c) => c.tier =
   { title: 'Brief', enabledWhen: withTicket, build: () => emitPhase('Brief',
     agentCall({
       key: 'brief',
-      prompt: `\`Fetch tracker ticket \${TICKET} and write a concise goal + acceptance criteria.
-Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase AC/DoD):
-- Jira:   mcp__atlassian__getJiraIssue (issueIdOrKey: "\${TICKET}")
-- Linear: the Linear MCP get-issue tool, ONLY if a Linear server is connected.\``,
+      prompt: tpl('brief.txt'),
       schema: SCHEMA({ title: { type: 'string' }, goal: { type: 'string' }, acceptanceCriteria: { type: 'array', items: { type: 'string' } } }, ['goal']),
       modelFrag: mdl('think'), label: 'brief', phase: 'Brief',
     }),
@@ -443,9 +436,7 @@ Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase A
   { title: 'RED', enabledWhen: withCycle, build: () => emitPhase('RED',
     agentCall({
       key: 'red',
-      prompt: `\`\${inWorktree('red')}
-
-RED (test-first): from the goal\${TICKET ? ' / ticket ' + TICKET : ''} and its acceptance criteria, write the tests BEFORE any implementation. Decide per behavior whether it needs a tryve E2E (tests/e2e/*.yaml) or a Jest unit test, and write them. Run them and CONFIRM THEY FAIL for the right reason — a test that already passes is not exercising the new behavior; fix it until it fails. Commit the failing tests.\``,
+      prompt: tpl('red.txt'),
       schema: SCHEMA({ red: { type: 'boolean' }, tests: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['red']),
       agentFrag: at(agentRed), modelFrag: mdl('think'), label: 'red', phase: 'RED',
       check: `if (!results.red || !results.red.red) throw new Error('RED failed: tests did not establish a failing baseline — ' + (results.red && results.red.summary || ''))`,
@@ -457,9 +448,7 @@ RED (test-first): from the goal\${TICKET ? ' / ticket ' + TICKET : ''} and its a
   { title: 'Verify', enabledWhen: withCycle, build: () => emitPhase('Verify',
     agentCall({
       key: 'verify',
-      prompt: `\`\${inWorktree('verify')}
-
-VERIFY (GREEN): run the full relevant test suite for the changes on \${BRANCH} vs \${BASE || 'the base branch'} (Jest unit + any tryve E2E from RED). EVERYTHING must pass. If any test fails, the implementation is incomplete — STOP and report which failed; do NOT weaken tests to pass.\``,
+      prompt: tpl('verify.txt'),
       schema: SCHEMA({ green: { type: 'boolean' }, failing: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['green']),
       modelFrag: mdl('mechanical'), label: 'verify', phase: 'Verify',
       check: `if (!results.verify || !results.verify.green) throw new Error('Verify failed: not green — ' + (results.verify && (results.verify.failing || []).join(', ')))`,
@@ -468,13 +457,7 @@ VERIFY (GREEN): run the full relevant test suite for the changes on \${BRANCH} v
   { title: 'PathGap', enabledWhen: withCycle, build: () => emitPhase('PathGap',
     '  // Close test gaps for code paths the ACs never specified (decide-or-justify, hard-fail).\n' + gateLoop({
       flag: 'closed', resultKey: 'pathGap', label: 'pathgap', phase: 'PathGap', modelFrag: mdl('think'), dod: false,
-      prompt: `\`\${inWorktree('pathgap')}
-
-PATH-GAP: the ACs do NOT cover every code path. Steps:
-1. Run Jest with BRANCH coverage; intersect with the CHANGED lines (git diff vs \${BASE || 'the base branch'}) to find uncovered branches introduced by this change.
-2. For EACH uncovered changed branch, do ONE: (a) add a unit/integration test that meaningfully exercises AND asserts it, or (b) if it is genuinely unreachable/defensive, record an explicit justification in implementation-notes/pathgap.html.
-3. Re-run coverage. There must be NO silent gaps — every uncovered changed branch is either tested or justified.
-Do NOT delete/alter source branches just to raise coverage. Commit new tests + notes.\``,
+      prompt: tpl('pathgap.txt'),
       schema: SCHEMA({ closed: { type: 'boolean' }, uncovered: { type: 'number' }, tested: { type: 'number' }, justified: { type: 'number' }, summary: { type: 'string' } }, ['closed']),
       throwMsg: `'PathGap failed: uncovered changed-code branches remain after 3 rounds — ' + (last && last.summary || '')`,
     })) },
@@ -484,11 +467,7 @@ Do NOT delete/alter source branches just to raise coverage. Commit new tests + n
   { title: 'CodeGate', enabledWhen: enforceCode || withCycle, build: () => emitPhase('CodeGate',
     reviewPanel ? panelBody() : gateLoop({
       flag: 'gatePassed', resultKey: 'codeGate', label: 'codegate', phase: 'CodeGate', agentFrag: at(agentCode), modelFrag: mdl('think'), buildEvidence: true,
-      prompt: `\`\${inWorktree('codegate')}
-
-Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}). Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality). Re-run the build after fixes and commit them.
-${GATE_CONTRACT}
-${BUILD_EVIDENCE}\``,
+      prompt: tpl('codegate.txt', { GATE_CONTRACT, BUILD_EVIDENCE }),
       schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, buildCmd: { type: 'string' }, buildExit: { type: 'number' } }, ['gatePassed', 'critical', 'high', 'buildCmd', 'buildExit']),
       throwMsg: `'CodeGate failed: unresolved Critical/High after 3 rounds — ' + (last && last.summary || '')`,
     })) },
@@ -497,9 +476,7 @@ ${BUILD_EVIDENCE}\``,
   { title: 'ReVerify', enabledWhen: withCycle, build: () => emitPhase('ReVerify',
     agentCall({
       key: 'reVerify',
-      prompt: `\`\${inWorktree('reverify')}
-
-RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branch coverage for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. Everything green before must STILL be green and coverage must not have regressed. If a refactor broke anything, STOP and report; do NOT weaken tests.\``,
+      prompt: tpl('reverify.txt'),
       schema: SCHEMA({ green: { type: 'boolean' }, regressions: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['green']),
       modelFrag: mdl('mechanical'), label: 'reverify', phase: 'ReVerify',
       check: `if (!results.reVerify || !results.reVerify.green) throw new Error('ReVerify failed: regression after improve/simplify — ' + (results.reVerify && (results.reVerify.regressions || []).join(', ')))`,
@@ -509,13 +486,7 @@ RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branc
   { title: 'TestGate', enabledWhen: enforceTests && !withCycle, build: () => emitPhase('TestGate',
     `  // Assess what testing the change ACTUALLY needs — do not enforce blindly.
   const assess = await agent(
-    \`\${inWorktree('testgate')}
-
-Assess the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (git diff in \${WORKTREE}) and decide what testing the change actually warrants:
-- "tryve-e2e": new/changed HTTP endpoint, behavior, or integration path → needs a tryve E2E test (tests/e2e/*.yaml).
-- "unit": pure logic / service / util change → Jest unit tests suffice.
-- "none": docs-only, config, comments, or non-behavioral change → no new tests required.
-Return the level and a one-line justification.\`,
+    ${tpl('testgate-assess.txt')},
     { label: 'testgate:assess', phase: 'TestGate',${mdl('think') ? ' ' + mdl('think') : ''}
       schema: ${SCHEMA({ level: { type: 'string', enum: ['tryve-e2e', 'unit', 'none'] }, reason: { type: 'string' } }, ['level'])} },
   )
@@ -528,12 +499,7 @@ Return the level and a one-line justification.\`,
       ${DOD_DECL}
       ${CARRY_DECL}
       last = await agent(
-        \`\${inWorktree('testgate')}
-
-The change needs \${assess.level} coverage (\${assess.reason || ''}). Ensure the right tests for the changes on \${BRANCH} vs \${BASE || 'the base branch'} EXIST and PASS:
-- unit → add/fix Jest tests; run with coverage; >90% on changed files.
-- tryve-e2e → add/fix tryve E2E YAML in tests/e2e/; run \\\`yarn e2e:run\\\` and confirm green (some tryve suites need external integration envs — if unavailable, say so, do NOT fake a pass).
-Do NOT change source to game coverage. Commit new tests.\` + dod + carry,
+        ${tpl('testgate-fix.txt')} + dod + carry,
         { label: \`testgate:r\${round}\`, phase: 'TestGate', ${at(agentTests)}${mdl('think') ? ' ' + mdl('think') : ''}
           schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, summary: { type: 'string' } }, ['gatePassed'])} },
       )
@@ -547,14 +513,7 @@ Do NOT change source to game coverage. Commit new tests.\` + dod + carry,
   { title: 'Review', enabledWhen: mergeGates && !withCycle, build: () => emitPhase('Review',
     gateLoop({
       flag: 'gatePassed', resultKey: 'review', label: 'review', phase: 'Review', agentFrag: at(agentCode), modelFrag: mdl('think'), buildEvidence: true,
-      prompt: `\`\${inWorktree('review')}
-
-Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}) in ONE pass:
-1. Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality).
-2. Decide what testing the change warrants (none for docs/config/non-behavioral; unit for pure logic; e2e for new/changed behavior or endpoints) and ensure those tests EXIST and PASS — do NOT change source to game coverage, do NOT fake a pass if an integration env is unavailable (say so).
-3. Re-run build + tests after fixes and commit them.
-${GATE_CONTRACT} For this merged gate the required tests (step 2) count as part of the build/lint pass condition.
-${BUILD_EVIDENCE}\``,
+      prompt: tpl('review.txt', { GATE_CONTRACT, BUILD_EVIDENCE }),
       schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, buildCmd: { type: 'string' }, buildExit: { type: 'number' } }, ['gatePassed', 'critical', 'high', 'buildCmd', 'buildExit']),
       throwMsg: `'Review failed: unresolved Critical/High or tests not green after 3 rounds — ' + (last && last.summary || '')`,
     })) },
@@ -562,9 +521,7 @@ ${BUILD_EVIDENCE}\``,
   { title: 'DocsGate', enabledWhen: enforceDocs, build: () => emitPhase('DocsGate',
     agentCall({
       key: 'docs',
-      prompt: `\`\${inWorktree('docsgate')}
-
-Write an implementation summary for the changes on \${BRANCH} vs \${BASE || 'the base branch'} into docs/changes/\${NAME}/summary.md with proper frontmatter (mkdir -p the dir). Read the diff, the goal\${TICKET ? ' and ticket ' + TICKET : ''}, and ALL fragments in the implementation-notes/ directory — fold their design decisions / deviations / tradeoffs / open questions into the summary. Commit it.\``,
+      prompt: tpl('docsgate.txt'),
       schema: SCHEMA({ written: { type: 'boolean' }, docPath: { type: 'string' } }, ['written']),
       agentFrag: at(agentDocs), modelFrag: mdl('think'), label: 'docs', phase: 'DocsGate',
       check: `if (!results.docs || !results.docs.written) throw new Error('DocsGate failed: no implementation summary written')`,
@@ -577,14 +534,7 @@ Write an implementation summary for the changes on \${BRANCH} vs \${BASE || 'the
     `  let dodPassed = false, dodLast = null
   for (let round = 1; round <= 3 && !dodPassed; round++) {
     dodLast = await agent(
-      \`\${inWorktree('dodgate-verify', { notes: false })}
-
-DoD VERIFY (round \${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate EVERY criterion below against the work on \${BRANCH} vs \${BASE || 'the base branch'}:
-- tier "checkable": run the "check" command inside \${WORKTREE}; exit 0 = MET, non-zero = UNMET; the command output is the evidence.
-- tier "judged": verdict from real evidence you CITE (file:line, command output, test result). No evidence = not MET.
-Verdicts: MET | UNMET | PARTIAL.
-
-CRITERIA (JSON): \${JSON.stringify(DOD_CRITERIA)}\`,
+      ${tpl('dodgate-verify.txt')},
       { label: \`dodgate:verify-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
         schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
     )
@@ -592,12 +542,7 @@ CRITERIA (JSON): \${JSON.stringify(DOD_CRITERIA)}\`,
     dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
     if (!dodPassed && round < 3) {
       await agent(
-        \`\${inWorktree('dodgate-fix')}
-
-DoD FIX (round \${round}/3): the definition-of-done criteria below are NOT met. Make them met — implement what is missing, run the relevant checks yourself, then re-run the project test suite (your fix must not regress it) and commit. Do NOT weaken, game, or delete a check; if a criterion is genuinely impossible, say so in the summary instead of faking it.
-
-UNMET (JSON): \${JSON.stringify(unmet)}
-FULL DoD (JSON): \${JSON.stringify(DOD_CRITERIA)}\`,
+        ${tpl('dodgate-fix.txt')},
         { label: \`dodgate:fix-r\${round}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
           schema: ${SCHEMA({ summary: { type: 'string' }, fixed: { type: 'array', items: { type: 'string' } } }, ['summary'])} },
       )
@@ -612,14 +557,7 @@ FULL DoD (JSON): \${JSON.stringify(DOD_CRITERIA)}\`,
   { title: 'Writeup', enabledWhen: withWriteup, build: () => emitPhase('Writeup',
     agentCall({
       key: 'writeup',
-      prompt: `\`\${inWorktree('writeup', { notes: false })}
-
-Produce reviewer-facing delivery artifacts for the changes on \${BRANCH} vs \${BASE || 'the base branch'}, all COMMITTED under docs/changes/\${NAME}/ in the worktree so they ride the PR:
-1. PRESERVE design notes — mkdir -p docs/changes/\${NAME}/notes, then copy every implementation-notes/*.html into it (if any exist). These are the per-worker decision notes; keep them, do NOT discard.
-2. WRITE-UP — invoke the lirbox:pr-writeup skill (via the Skill tool, by name) to produce a self-contained reviewer write-up of this branch's diff; save it to docs/changes/\${NAME}/writeup.html. If the Skill tool is unavailable, read plugins/lirbox/skills/pr-writeup/SKILL.md + assets/template.html and follow them.
-3. DESIGN DIAGRAM — invoke the lirbox:flowchart skill (via the Skill tool, by name) to visualize the design of this change; choose the Mermaid diagram type (flowchart OR sequenceDiagram) that best fits; save to docs/changes/\${NAME}/design.html. The flowchart skill validates its own output — ensure that validation passes before continuing. If the Skill tool is unavailable, read plugins/lirbox/skills/flowchart/SKILL.md + assets/template.html, follow them, and run that skill's assets/validate.mjs on the result.
-4. COMMIT all of docs/changes/\${NAME}/ on \${BRANCH}.
-Return what was written.\``,
+      prompt: tpl('writeup.txt'),
       schema: SCHEMA({ written: { type: 'boolean' }, writeupPath: { type: 'string' }, designPath: { type: 'string' }, notesPreserved: { type: 'number' } }, ['written']),
       modelFrag: mdl('think'), label: 'writeup', phase: 'Writeup',
       check: `if (!results.writeup || !results.writeup.written) throw new Error('Writeup failed: reviewer artifacts not written under docs/changes/')`,
@@ -628,13 +566,10 @@ Return what was written.\``,
   { title: 'PR', enabledWhen: withPR, build: () => emitPhase('PR',
     agentCall({
       key: 'pr',
-      prompt: `\`\${inWorktree('pr', { notes: false })}
-
-Push the branch and open a PR with the GitHub CLI:
-git push -u origin \${BRANCH}
-gh pr create --base \${BASE || 'main'} --head \${BRANCH} --title "TODO title" --body "TODO summary${withWriteup ? '. Reviewer artifacts are committed under docs/changes/' + name + '/ — link writeup.html, design.html, and notes/ in the PR body' : ''}\${TICKET ? '; refs ' + TICKET : ''}"
-${withDod ? `Include a "## Definition of done" section in the PR body — headline "DoD: <met>/<total> MET", then one line per criterion (id, verdict, evidence) from this JSON: \${JSON.stringify((results.dodGate && results.dodGate.criteria) || [])}
-` : ''}If a PR for this branch already exists, return its URL instead of erroring.\``,
+      prompt: tpl('pr.txt', {
+        WRITEUP_NOTE: withWriteup ? promptTpl('pr-writeup-note.txt', { NAME: name }) : '',
+        DOD_SECTION: withDod ? promptTpl('pr-dod-section.txt') + '\n' : '',
+      }),
       schema: SCHEMA({ prUrl: { type: 'string' } }, ['prUrl']),
       modelFrag: mdl('mechanical'), label: 'pr', phase: 'PR',
     })) },
@@ -642,9 +577,7 @@ ${withDod ? `Include a "## Definition of done" section in the PR body — headli
   { title: 'TicketUpdate', enabledWhen: withTicket, build: () => emitPhase('TicketUpdate',
     agentCall({
       key: 'ticketUpdate',
-      prompt: `\`Update tracker ticket \${TICKET}. Use ToolSearch to load the tracker tools.
-Jira: getTransitionsForJiraIssue → transitionJiraIssue to the review state (match name case-insensitively; skip if none) → addCommentToJiraIssue with the PR link \${results.pr && results.pr.prUrl}.
-Linear: use the Linear MCP update/comment tools instead, ONLY if connected.\``,
+      prompt: tpl('ticket-update.txt'),
       schema: SCHEMA({ updated: { type: 'boolean' }, transition: { type: 'string' } }, ['updated']),
       modelFrag: mdl('mechanical'), label: 'ticket-update', phase: 'TicketUpdate',
     }),
@@ -725,21 +658,7 @@ const results = { ...prior }
   }
 })()
 
-// Per-worker instruction. \`slot\` makes the notes file UNIQUE so parallel / multiple agents
-// never clobber each other. For a parallel fan-out, pass a slot unique per item (e.g. \`phase-\${i}\`).
-// Pass { notes: false } for mechanical steps (PR push, etc.) that make no design decisions —
-// they should NOT create a notes file at all. Where notes ARE offered they are judgment-gated:
-// write one ONLY if there is something a reviewer genuinely needs.
-function inWorktree(slot, opts) {
-  const base = \`Work ONLY inside the git worktree at \${WORKTREE} (run \\\`cd \${WORKTREE}\\\` first; it is on \` +
-    \`branch \${BRANCH}). Do NOT edit any file outside \${WORKTREE}. Commit your changes there.\`
-  if (opts && opts.notes === false) return base
-  return base + \`\\n\\nIf — and ONLY if — this step involved a non-trivial design decision, an \` +
-    \`intentional deviation from the spec, a tradeoff between real alternatives, or an open question a \` +
-    \`reviewer must confirm, append it to a notes file UNIQUE to you at implementation-notes/\${slot}.html \` +
-    \`in the worktree (mkdir -p the dir; create if missing; APPEND — never clobber). For mechanical or \` +
-    \`no-decision work, SKIP the file — do not create empty or boilerplate notes.\`
-}
+${promptTpl('in-worktree.txt')}
 
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
@@ -748,16 +667,7 @@ async function checkpoint(phaseTitle) {
     null, 2,
   )
   await agent(
-    \`Persist durable workflow state to the MAIN repo (do NOT cd into the worktree). Run EXACTLY:
-
-mkdir -p .workflows/state
-cat > .workflows/state/.\${NAME}.payload.json <<'DURABLE_JSON'
-\${payload}
-DURABLE_JSON
-node -e "const fs=require('fs');const f='\${STATE}';const p='.workflows/state/.\${NAME}.payload.json';let prev={};try{prev=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){};const s=JSON.parse(fs.readFileSync(p,'utf8'));const n=new Date().toISOString();s.startedAt=prev.startedAt||n;s.updatedAt=n;fs.writeFileSync(f,JSON.stringify(s,null,2));fs.unlinkSync(p)"
-node -e "JSON.parse(require('fs').readFileSync('\${STATE}','utf8'))" && echo OK
-
-Return whether the file was written and parses.\`,
+    ${tpl('checkpoint.txt')},
     { label: \`checkpoint:\${phaseTitle}\`, phase: phaseTitle,${mechFrag ? ' ' + mechFrag : ''}
       schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
   )
@@ -769,32 +679,7 @@ if (done.has('Setup')) {
   log('Setup already complete (resumed)')
 } else {
   results.setup = await agent(
-    \`Create an isolated git worktree. Run idempotently:
-
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not a git repo"; exit 1; }
-ROOT="\$(git rev-parse --show-toplevel)"
-if git worktree list --porcelain | grep -q "/\${WORKTREE}\$"; then
-  echo "worktree exists — reusing"
-elif git show-ref --verify --quiet "refs/heads/\${BRANCH}"; then
-  git worktree add "\${WORKTREE}" "\${BRANCH}"
-else
-  # Branch from the FRESH remote tip, not a possibly-stale local ref.
-  git fetch origin --quiet 2>/dev/null || echo "WARN: git fetch origin failed — using local refs (may be stale)"
-  BASEREF="\${BASE}"
-  # Auto-detect the remote's default branch when no --base was given.
-  [ -n "\$BASEREF" ] || BASEREF="\$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
-  if [ -n "\$BASEREF" ] && git show-ref --verify --quiet "refs/remotes/origin/\$BASEREF"; then
-    START="origin/\$BASEREF"
-  elif [ -n "\$BASEREF" ]; then
-    echo "WARN: origin/\$BASEREF not found — branching from local \$BASEREF (may be stale)"; START="\$BASEREF"
-  else
-    echo "WARN: could not detect remote default branch — branching from current HEAD (may be stale)"; START="HEAD"
-  fi
-  echo "Branching \${BRANCH} from \$START"
-  git worktree add "\${WORKTREE}" -b "\${BRANCH}" "\$START"
-fi
-[ -e "\${WORKTREE}/node_modules" ] || [ ! -d "\$ROOT/node_modules" ] || ln -s "\$ROOT/node_modules" "\${WORKTREE}/node_modules"
-test -d "\${WORKTREE}" && echo OK\`,
+    ${tpl('setup-worktree.txt')},
     { label: 'setup:worktree', phase: 'Setup',${mechFrag ? ' ' + mechFrag : ''}
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )

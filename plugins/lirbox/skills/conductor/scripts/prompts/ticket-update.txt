@@ -1,0 +1,3 @@
+Update tracker ticket ${TICKET}. Use ToolSearch to load the tracker tools.
+Jira: getTransitionsForJiraIssue → transitionJiraIssue to the review state (match name case-insensitively; skip if none) → addCommentToJiraIssue with the PR link ${results.pr && results.pr.prUrl}.
+Linear: use the Linear MCP update/comment tools instead, ONLY if connected.
