@@ -39,6 +39,7 @@ agents for `conductor`, also usable standalone:
 | **`lirbox-code-reviewer`** | Reviews changed code (correctness/security/rules/quality) **and fixes** Critical/High, keeping the build green. |
 | **`lirbox-docs-writer`** | Writes a concise implementation summary into `docs/changes/` from the diff + goal + notes. |
 | **`lirbox-web-verifier`** | Web half of the frontend verification gate: writes Playwright E2E specs for assertable criteria and captures per-viewport screenshot/console evidence for judged ones; engine chain playwright → browser-MCP → OS-script, tooling failure never silently passes. |
+| **`lirbox-mobile-verifier`** | Mobile half of the frontend verification gate: detects RN/Flutter/native, writes Maestro/Appium E2E flows, falls back to raw `simctl`/`adb` evidence capture on simulators/emulators; raw tier is honestly flagged evidence-only. |
 
 ## Install
 
