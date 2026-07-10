@@ -1,0 +1,6 @@
+{
+  "criteria": [
+    { "id": "ac1", "text": "unit tests green", "tier": "checkable", "check": "yarn test" },
+    { "id": "ac2", "text": "error message is clear", "tier": "judged" }
+  ]
+}
