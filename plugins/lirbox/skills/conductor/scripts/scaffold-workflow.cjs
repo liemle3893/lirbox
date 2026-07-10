@@ -276,11 +276,20 @@ const CARRY_DECL = "const carry = round > 1 && last ? `\\n\\nROUND ${round} of u
 // backticks/${}/backslashes — so it interpolates safely into the emitted template literals.
 const GATE_CONTRACT = 'OUTPUT CONTRACT: return gatePassed=true ONLY if every Critical and High finding is fixed or skipped-with-explicit-reason AND the build/lint passes; report critical and high as the counts of findings of each severity left UNRESOLVED after your fixes (both 0 when gatePassed=true).';
 
+// Build-run evidence demanded by the fix-gates (honesty anchor, not a second verifier): the gate
+// cannot go green on the honor system — the loop's pass condition rejects gatePassed=true unless
+// buildExit is 0, so the agent must actually invoke the build and report the outcome. Plain text
+// only (no backticks/${}/backslashes) — it interpolates into the emitted template literals.
+const BUILD_EVIDENCE = 'EVIDENCE: report the exact build/lint command you ran as buildCmd and its numeric exit code as buildExit; if the project has no build/lint, run the closest verification command (e.g. the test suite) and report that instead. The gate rejects gatePassed=true unless buildExit is 0.';
+
 // A bounded 3-round gate: run the agent up to 3× until `flag` is truthy, else throw.
 // `prompt`/`schema` are template-literal source fragments; `agentFrag` is the optional
 // `agentType: '...',` (or '' for a generic subagent). Output is indented for the else-block.
 // `dod` (default true) appends the goal/AC scope anchor; set false for non-findings gates.
-function gateLoop({ flag, prompt, schema, agentFrag, modelFrag, label, phase: ph, throwMsg, resultKey, dod = true }) {
+// `buildEvidence` (default false) also rejects a pass without buildExit === 0 — set true ONLY
+// for the fix-gates (CodeGate/Review) whose schemas require buildCmd/buildExit; PathGap shares
+// this helper and must stay evidence-free.
+function gateLoop({ flag, prompt, schema, agentFrag, modelFrag, label, phase: ph, throwMsg, resultKey, dod = true, buildEvidence = false }) {
   const lead = [agentFrag, modelFrag].filter(Boolean).join(' ');
   const decls = [dod ? '    ' + DOD_DECL : null, '    ' + CARRY_DECL].filter(Boolean).join('\n');
   const apply = dod ? ' + dod + carry' : ' + carry';
@@ -292,7 +301,7 @@ ${decls}
       { label: \`${label}:r\${round}\`, phase: '${ph}',${lead ? ' ' + lead : ''}
         schema: ${schema} },
     )
-    passed = last && last.${flag}
+    passed = last && last.${flag}${buildEvidence ? ' && last.buildExit === 0' : ''}
   }
   if (!passed) throw new Error(${throwMsg})
   results.${resultKey} = last`;
@@ -357,12 +366,13 @@ Return the score and a one-line reason.\`,
 
 You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. Fix a Medium or Low finding ONLY when the fix is trivial and zero-risk; otherwise leave it untouched and record it in the knownOpen output array (its exact file, line, severity, title) — a confirmed Medium/Low below the fix bar is NOT wrong, so it must stay known-open for the human, never silently dropped; knownOpen is empty when none remain. You may skip a finding ONLY with an explicit reason it is wrong — record EVERY skipped finding in the skippedFindings output array (its title plus your reason), empty when you skipped none; this is the audit trail a human reviews.
 ${GATE_CONTRACT}
+${BUILD_EVIDENCE}
 
 FINDINGS (JSON): \${JSON.stringify(confirmed)}\` + dod + carry,
           { label: \`codegate:lead-r\${round}\`, phase: 'CodeGate', ${at(agentCode)}${mdl('think') ? ' ' + mdl('think') : ''}
-            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, skippedFindings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'reason'], properties: { title: { type: 'string' }, reason: { type: 'string' } } } }, knownOpen: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['file', 'line', 'severity', 'title'], properties: { file: { type: 'string' }, line: { type: 'number' }, severity: { type: 'string' }, title: { type: 'string' } } } } }, ['gatePassed', 'critical', 'high', 'skippedFindings', 'knownOpen'])} },
+            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, buildCmd: { type: 'string' }, buildExit: { type: 'number' }, skippedFindings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'reason'], properties: { title: { type: 'string' }, reason: { type: 'string' } } } }, knownOpen: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['file', 'line', 'severity', 'title'], properties: { file: { type: 'string' }, line: { type: 'number' }, severity: { type: 'string' }, title: { type: 'string' } } } } }, ['gatePassed', 'critical', 'high', 'buildCmd', 'buildExit', 'skippedFindings', 'knownOpen'])} },
         )
-        passed = last && last.gatePassed
+        passed = last && last.gatePassed && last.buildExit === 0
       }
       if (!passed) throw new Error('CodeGate failed: unresolved Critical/High after 3 rounds — ' + (last && last.summary || ''))
       results.codeGate = { ...last, panel: { raw: all.length, deduped: deduped.length, confirmed: confirmed.length } }
@@ -473,12 +483,13 @@ Do NOT delete/alter source branches just to raise coverage. Commit new tests + n
   // reviewPanel swaps the single review+fix agent for the multi-dimension panel.
   { title: 'CodeGate', enabledWhen: enforceCode || withCycle, build: () => emitPhase('CodeGate',
     reviewPanel ? panelBody() : gateLoop({
-      flag: 'gatePassed', resultKey: 'codeGate', label: 'codegate', phase: 'CodeGate', agentFrag: at(agentCode), modelFrag: mdl('think'),
+      flag: 'gatePassed', resultKey: 'codeGate', label: 'codegate', phase: 'CodeGate', agentFrag: at(agentCode), modelFrag: mdl('think'), buildEvidence: true,
       prompt: `\`\${inWorktree('codegate')}
 
 Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}). Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality). Re-run the build after fixes and commit them.
-${GATE_CONTRACT}\``,
-      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed', 'critical', 'high']),
+${GATE_CONTRACT}
+${BUILD_EVIDENCE}\``,
+      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, buildCmd: { type: 'string' }, buildExit: { type: 'number' } }, ['gatePassed', 'critical', 'high', 'buildCmd', 'buildExit']),
       throwMsg: `'CodeGate failed: unresolved Critical/High after 3 rounds — ' + (last && last.summary || '')`,
     })) },
 
@@ -535,15 +546,16 @@ Do NOT change source to game coverage. Commit new tests.\` + dod + carry,
   // Review = CodeGate + TestGate collapsed (--merge-gates / --profile lite); not under --cycle.
   { title: 'Review', enabledWhen: mergeGates && !withCycle, build: () => emitPhase('Review',
     gateLoop({
-      flag: 'gatePassed', resultKey: 'review', label: 'review', phase: 'Review', agentFrag: at(agentCode), modelFrag: mdl('think'),
+      flag: 'gatePassed', resultKey: 'review', label: 'review', phase: 'Review', agentFrag: at(agentCode), modelFrag: mdl('think'), buildEvidence: true,
       prompt: `\`\${inWorktree('review')}
 
 Review AND fix the changes on branch \${BRANCH} relative to \${BASE || 'the base branch'} (run git diff in \${WORKTREE}) in ONE pass:
 1. Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality).
 2. Decide what testing the change warrants (none for docs/config/non-behavioral; unit for pure logic; e2e for new/changed behavior or endpoints) and ensure those tests EXIST and PASS — do NOT change source to game coverage, do NOT fake a pass if an integration env is unavailable (say so).
 3. Re-run build + tests after fixes and commit them.
-${GATE_CONTRACT} For this merged gate the required tests (step 2) count as part of the build/lint pass condition.\``,
-      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed', 'critical', 'high']),
+${GATE_CONTRACT} For this merged gate the required tests (step 2) count as part of the build/lint pass condition.
+${BUILD_EVIDENCE}\``,
+      schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, buildCmd: { type: 'string' }, buildExit: { type: 'number' } }, ['gatePassed', 'critical', 'high', 'buildCmd', 'buildExit']),
       throwMsg: `'Review failed: unresolved Critical/High or tests not green after 3 rounds — ' + (last && last.summary || '')`,
     })) },
 
