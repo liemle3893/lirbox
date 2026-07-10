@@ -76,6 +76,6 @@ judged: <criterionId>: MET|UNMET|PARTIAL — <evidence path>
 manifest: implementation-notes/frontend-evidence/manifest.json
 ## FINDINGS: <app-failure findings>       (omit if none)
 ```
-On no detectable mobile stack: `## MOBILE VERIFY FAILED: no mobile stack detected (probed: package.json, pubspec.yaml, *.xcodeproj, build.gradle)`.
+On no detectable mobile stack: `## MOBILE VERIFY FAILED: no mobile stack detected (probed: package.json, pubspec.yaml, *.xcodeproj, Package.swift, build.gradle)`.
 On tooling exhaustion: `## MOBILE VERIFY FAILED (tooling): <engine>: <log excerpt>`.
 </output>

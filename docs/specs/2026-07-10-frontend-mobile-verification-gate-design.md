@@ -71,6 +71,13 @@ and write an **evidence manifest** to `implementation-notes/frontend-evidence/ma
 (entries: `{ criterionId, engine, artifacts[], verdict, notes }`) plus the screenshots/logs
 themselves. DoDGate cites the manifest for judged criteria.
 
+> **Correction 2 (final branch review, 2026-07-10):** the JSON block above is the FrontendGate
+> *phase-schema view*, not the agents' literal output. The shipped agents emit a markdown report
+> (`## WEB VERIFY: …` / `## MOBILE VERIFY: …` with `specsWritten: <n>` as a **count** — 0 on the
+> mobile raw tier) plus the manifest file. When whetstone lands FrontendGate, derive the phase
+> schema from the agents' `<output>` contracts and reconcile `specsWritten` (count vs path-array)
+> one way before freezing.
+
 > **Correction (plan-check, 2026-07-10):** the original claim that this directory "rides the
 > existing Writeup promotion — no new plumbing" is **false**: `prompts/writeup.txt` promotes only
 > `implementation-notes/*.html` (flat, HTML-only). The whetstone item (§6) therefore also extends

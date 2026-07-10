@@ -25,7 +25,7 @@
 
 **Files:**
 - Create: `plugins/lirbox/agents/lirbox-web-verifier.md`
-- Modify: `README.md` (Agents table, after the `lirbox-tryve-enhancer` row)
+- Modify: `README.md` (Agents table, after the last existing row)
 
 **Interfaces:**
 - Consumes: nothing from other tasks.
