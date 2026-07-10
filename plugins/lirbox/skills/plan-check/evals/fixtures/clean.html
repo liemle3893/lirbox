@@ -10,4 +10,5 @@
   <tr class="claim" data-quadrant="known-unknown" data-status="UNVERIFIED"><td>cluster is healthy at start</td><td>known-unknown</td><td>UNVERIFIED (needs: ceph -s)</td><td>—</td><td>—</td></tr>
   <tr class="claim" data-quadrant="unknown-unknown" data-status="BLIND-SPOT-RISK"><td>noout not cleared on partial failure</td><td>unknown-unknown</td><td>BLIND-SPOT-RISK</td><td>reasoning</td><td>med</td></tr>
 </tbody></table>
+<script type="application/json" id="dod">{"criteria":[{"id":"ac1","text":"OSD swap complete: replacement OSD is up/in and rebalance finished","tier":"checkable","check":"ceph osd safe-to-destroy osd.N"},{"id":"ac2","text":"no client-visible interruption during the swap","tier":"judged"}]}</script>
 </body></html>
