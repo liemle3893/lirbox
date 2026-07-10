@@ -21,8 +21,28 @@ const path = require('path');
 
 const GEN = path.join(__dirname, 'scaffold-workflow.cjs');
 
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-scaffold-'));
+const promptsFile = path.join(tmp, 'prompts.json');
+fs.writeFileSync(promptsFile, JSON.stringify({
+  Analyze: 'Map the call sites.',
+  Implement: 'Replace them.',
+  A: 'Do A.',
+  B: 'Do B.',
+}));
+// DoD fixtures: a mixed checkable+judged file, and a judged-only file (no baseline phase).
+const dodFile = path.join(tmp, 'dod.json');
+fs.writeFileSync(dodFile, JSON.stringify({ criteria: [
+  { id: 'ac1', text: 'unit tests green', tier: 'checkable', check: 'yarn test' },
+  { id: 'ac2', text: 'error message is clear', tier: 'judged' },
+] }));
+const dodJudgedFile = path.join(tmp, 'dod-judged.json');
+fs.writeFileSync(dodJudgedFile, JSON.stringify({ criteria: [
+  { id: 'ac1', text: 'error message is clear', tier: 'judged' },
+] }));
+
 // Representative matrix: bare, multi-phase, every individual flag, each profile,
 // and a kitchen-sink combo. Each entry is [label, extraArgs].
+// Profiles now REQUIRE a DoD (--dod-file) — the lite/delivery entries carry the fixture.
 const MATRIX = [
   ['bare', ['--phases', 'Work']],
   ['two-phase', ['--phases', 'Analyze,Implement']],
@@ -33,24 +53,18 @@ const MATRIX = [
   ['enforce-tests', ['--phases', 'Work', '--enforce-tests']],
   ['enforce-docs', ['--phases', 'Work', '--enforce-docs']],
   ['cycle', ['--phases', 'Implement', '--cycle']],
-  ['profile-lite', ['--phases', 'Work', '--profile', 'lite']],
-  ['profile-delivery', ['--phases', 'Implement', '--profile', 'delivery']],
+  ['profile-lite', ['--phases', 'Work', '--profile', 'lite', '--dod-file', dodFile]],
+  ['profile-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]],
   ['combo-all', ['--phases', 'A,B', '--ticket', '--pr', '--enforce-code', '--enforce-tests']],
   // model-mode + writeup combos — keep them inside the syntax/phase-order net too.
   ['auto-bare', ['--phases', 'Work', '--model-mode', 'auto']],
-  ['auto-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--model-mode', 'auto']],
+  ['auto-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--model-mode', 'auto', '--dod-file', dodFile]],
   ['no-writeup', ['--phases', 'Work', '--pr', '--no-writeup']],
   ['writeup-only', ['--phases', 'Work', '--writeup']],
+  // DoD combos.
+  ['dod-bare', ['--phases', 'Work', '--dod-file', dodFile]],
+  ['no-dod-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--no-dod']],
 ];
-
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-scaffold-'));
-const promptsFile = path.join(tmp, 'prompts.json');
-fs.writeFileSync(promptsFile, JSON.stringify({
-  Analyze: 'Map the call sites.',
-  Implement: 'Replace them.',
-  A: 'Do A.',
-  B: 'Do B.',
-}));
 
 // Pull phase('…') titles out of the emitted script, in emission order.
 function emittedPhases(srcPath) {
@@ -155,7 +169,7 @@ try {
 
   // 2. auto mode tiers each phase class: haiku (mechanical), opus (think), sonnet (work).
   // Opts are emitted as `phase: 'X', [agentType: '...',] model: 'Y',` on one line.
-  const auto = gen('auto', ['--phases', 'Implement', '--profile', 'delivery', '--model-mode', 'auto']);
+  const auto = gen('auto', ['--phases', 'Implement', '--profile', 'delivery', '--model-mode', 'auto', '--dod-file', dodFile]);
   check(/phase: phaseTitle, model: 'haiku'/.test(auto), "auto: checkpoint → haiku");
   check(/phase: 'Setup', model: 'haiku'/.test(auto), "auto: Setup → haiku");
   check(/phase: 'CodeGate',[^\n]*model: 'opus'/.test(auto), "auto: CodeGate → opus");
@@ -199,6 +213,53 @@ try {
   // 7. invalid flag values are rejected.
   check(genFails(['--phases', 'Work', '--model-mode', 'bogus']), "invalid --model-mode rejected");
   check(genFails(['--phases', 'Work', '--model-mode', 'auto', '--model-think', 'gpt']), "invalid --model-think rejected");
+
+  // 9. DoD gate: --dod-file bakes criteria in, emits DoDBaseline + DoDGate in the right slots,
+  //    persists criteria via checkpoint, and puts the scorecard in the PR body.
+  const dodGen = gen('dod-gate', ['--phases', 'Work', '--pr', '--dod-file', dodFile]);
+  const dodOrder = (dodGen.match(/phase\('([^']*)'\)/g) || []).map((m) => m.slice(7, -2));
+  check(dodOrder.indexOf('DoDBaseline') !== -1 && dodOrder.indexOf('DoDBaseline') < dodOrder.indexOf('Work'),
+    'dod: DoDBaseline emitted before the work phases');
+  check(dodOrder.indexOf('DoDGate') !== -1 && dodOrder.indexOf('DoDGate') < dodOrder.indexOf('Writeup'),
+    'dod: DoDGate emitted before Writeup/PR');
+  check(/const DOD_CRITERIA = \[/.test(dodGen) && /unit tests green/.test(dodGen),
+    'dod: criteria baked into the script verbatim');
+  check(/dod: \{ criteria: DOD_CRITERIA \}/.test(dodGen),
+    'dod: checkpoint payload persists the criteria to state.json');
+  check(/Definition of done/.test(dodGen), 'dod: PR body carries the scorecard');
+  check(!/phase\('DoDBaseline'\)/.test(gen('dod-judged', ['--phases', 'Work', '--dod-file', dodJudgedFile])),
+    'dod: judged-only criteria emit no DoDBaseline phase');
+  check(!/phase\('DoDGate'\)/.test(gen('no-dod', ['--phases', 'Work', '--profile', 'delivery', '--no-dod'])),
+    '--no-dod: DoDGate suppressed');
+  check(genFails(['--phases', 'Work', '--profile', 'lite']),
+    'profile lite without --dod-file (and without --no-dod) rejected');
+  check(genFails(['--phases', 'Work', '--profile', 'delivery']),
+    'profile delivery without --dod-file (and without --no-dod) rejected');
+  const badDod = path.join(tmp, 'dod-bad.json');
+  fs.writeFileSync(badDod, JSON.stringify({ criteria: [{ id: 'x', text: 'y', tier: 'checkable' }] }));
+  check(genFails(['--phases', 'Work', '--dod-file', badDod]),
+    'checkable criterion without a check command rejected');
+  fs.writeFileSync(badDod, JSON.stringify({ criteria: [{ id: 'x', text: 'y', tier: 'maybe' }] }));
+  check(genFails(['--phases', 'Work', '--dod-file', badDod]), 'bad tier rejected');
+  fs.writeFileSync(badDod, JSON.stringify({ criteria: [] }));
+  check(genFails(['--phases', 'Work', '--dod-file', badDod]), 'empty criteria array rejected');
+
+  // 10. Panel CodeGate: delivery default ON (guard → dimensions → ≥80 filter → lead loop);
+  //     lite/merged Review stays single-agent; --review-panel/--no-review-panel override.
+  const panel = gen('panel', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]);
+  check(/codegate:guard/.test(panel) && /const DIMENSIONS = \[/.test(panel),
+    'panel: delivery emits diff guard + dimension fan-out');
+  check(/"key":"history"/.test(panel), 'panel: delivery includes the git-history dimension');
+  check(/confidence >= 80/.test(panel), 'panel: findings below 80 confidence dropped');
+  check(/codegate:lead-r/.test(panel) && /agentType: 'lirbox:lirbox-code-reviewer'/.test(panel),
+    'panel: lead fix-loop runs on the code-reviewer agent');
+  const forced = gen('panel-forced', ['--phases', 'Work', '--enforce-code', '--review-panel']);
+  check(/const DIMENSIONS = \[/.test(forced) && !/"key":"history"/.test(forced),
+    '--review-panel: panel outside delivery has no history dimension');
+  check(!/const DIMENSIONS/.test(gen('panel-off', ['--phases', 'Implement', '--profile', 'delivery', '--no-review-panel', '--dod-file', dodFile])),
+    '--no-review-panel: delivery reverts to the single-agent CodeGate');
+  check(!/const DIMENSIONS/.test(gen('lite-single', ['--phases', 'Work', '--profile', 'lite', '--dod-file', dodFile])),
+    'lite: merged Review phase stays single-agent');
 } catch (e) {
   console.error(`FAIL [eval] generation error: ${e.message.split('\n')[0]}`);
   failures++;

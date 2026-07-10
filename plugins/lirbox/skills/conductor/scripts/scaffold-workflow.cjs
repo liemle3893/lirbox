@@ -22,6 +22,13 @@
  *   --writeup            add a Writeup phase (promote implementation-notes + pr-writeup HTML +
  *                        design diagram, committed under docs/changes/<name>/). Default ON when a
  *                        PR phase exists; --no-writeup opts out.
+ *   --dod-file <json>    { criteria: [{ id, text, tier: checkable|judged, check? }] } — the
+ *                        definition of done, frozen in as DATA; emits DoDBaseline + DoDGate.
+ *                        REQUIRED under --profile lite/delivery (or pass --no-dod).
+ *   --no-dod             suppress the DoD gate (explicit opt-out, even under a profile)
+ *   --review-panel       multi-dimension panel CodeGate (parallel reviewers + confidence filter
+ *                        + lead fixer). Default ON under --profile delivery.
+ *   --no-review-panel    keep the single review+fix CodeGate agent even under delivery
  *   --model-mode <m>     default (inherit session model, no opt emitted) | auto (tier by phase)
  *   --model-think <m>    auto thinking-tier model: sonnet|opus|haiku|fable (default opus)
  *   --model-work <m>     auto work-phase model:    sonnet|opus|haiku|fable (default sonnet)
@@ -66,6 +73,68 @@ const mergeGates = profileLite || arg('merge-gates', false) === true;
 // phase exists ("every PR gets reviewer artifacts"); `--no-writeup` opts out; `--writeup` forces
 // it on even without `--pr`.
 const withWriteup = (arg('no-writeup', false) === true) ? false : (withPR || arg('writeup', false) === true);
+// --- DoD (definition of done) — criteria passed as DATA; verified by a DoDGate phase ---
+// --dod-file <json>: { "criteria": [{ "id", "text", "tier": "checkable"|"judged", "check"? }] }
+//   Frozen at scaffold time (change = regenerate with --force). Providing the file is the
+//   opt-in for bare runs; --profile lite/delivery REQUIRE it (or an explicit --no-dod).
+// --no-dod: suppress the DoD gate entirely (explicit escape hatch, even under a profile).
+const noDod = arg('no-dod', false) === true;
+const dodFileArg = arg('dod-file', '');
+let dodCriteria = null;
+if (dodFileArg && dodFileArg !== true && !noDod) {
+  let raw;
+  try { raw = fs.readFileSync(dodFileArg, 'utf8'); }
+  catch (e) { console.error('ERROR: --dod-file not readable: ' + e.message); process.exit(1); }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { console.error('ERROR: --dod-file is not valid JSON: ' + e.message); process.exit(1); }
+  dodCriteria = (parsed && Array.isArray(parsed.criteria)) ? parsed.criteria : null;
+  if (!dodCriteria || !dodCriteria.length) { console.error('ERROR: --dod-file needs a non-empty "criteria" array'); process.exit(1); }
+  for (const c of dodCriteria) {
+    if (!c.id || !c.text || (c.tier !== 'checkable' && c.tier !== 'judged')) {
+      console.error('ERROR: every DoD criterion needs id, text, and tier "checkable"|"judged" — got ' + JSON.stringify(c)); process.exit(1);
+    }
+    if (c.tier === 'checkable' && (typeof c.check !== 'string' || !c.check.trim())) {
+      console.error(`ERROR: checkable DoD criterion '${c.id}' needs a non-empty "check" command`); process.exit(1);
+    }
+  }
+}
+if (!noDod && !dodCriteria && (profileLite || profileDelivery)) {
+  console.error('ERROR: --profile lite/delivery requires a DoD (--dod-file <json>) — pass --no-dod to opt out explicitly');
+  process.exit(1);
+}
+const withDod = !!dodCriteria;
+const dodCheckable = withDod ? dodCriteria.filter((c) => c.tier === 'checkable') : [];
+
+// --- Panel code review: parallel dimension reviewers + confidence filter + lead fixer ---
+// delivery default ON; --review-panel forces it wherever a CodeGate exists (--enforce-code /
+// --cycle); --no-review-panel keeps the single review+fix agent. The collapsed Review phase
+// (lite / --merge-gates) ALWAYS stays single-agent — lite is the cheap tier by design.
+const reviewPanel = (arg('no-review-panel', false) === true) ? false
+  : (profileDelivery || arg('review-panel', false) === true);
+if (reviewPanel && !(enforceCode || withCycle)) {
+  console.error('WARN: --review-panel has no effect without a CodeGate (--enforce-code or --cycle)');
+}
+
+// Panel dimensions (generator-time data). history rides only under --profile delivery.
+const PANEL_DIMENSIONS = [
+  { key: 'bugs', focus: 'Correctness: shallow-scan the diff itself for real bugs — logic errors, off-by-one, broken contracts, null/undefined misuse. Focus on the changed lines; skip nitpicks a senior engineer would not raise and anything a linter/typechecker would catch.' },
+  { key: 'security', focus: 'Security on the CHANGED paths only: injection, missing authz/authn, secrets committed, unsafe deserialization, path traversal, SSRF.' },
+  { key: 'reuse', focus: 'Reuse & simplification: duplicated logic, existing helpers/utilities the change should have used, dead code introduced, needless complexity.' },
+  { key: 'conventions', focus: 'Conventions: violations of CLAUDE.md guidance (repo root + every directory the diff touches) and of guidance in code comments adjacent to the changes. Cite the exact guidance line for every finding.' },
+];
+if (profileDelivery) PANEL_DIMENSIONS.push(
+  { key: 'history', focus: 'Git history: read git blame/log for the modified code; flag changes that contradict the reason a prior fix was made or reintroduce a previously-fixed bug. Cite the commit.' });
+
+// The /code-review confidence rubric, given to each scorer verbatim.
+const CONFIDENCE_RUBRIC = `Score 0-100 how confident you are the finding is REAL and WORTH FIXING:
+- 0: Not confident at all. False positive that does not stand up to light scrutiny, or a pre-existing issue.
+- 25: Somewhat confident. Might be real, might be a false positive; could not verify.
+- 50: Moderately confident. Verified real, but may be a nitpick or rarely hit in practice.
+- 75: Highly confident. Double-checked and verified: very likely real, will be hit in practice, directly impacts functionality (or is explicitly required by CLAUDE.md).
+- 100: Absolutely certain. Double-checked, definitely real, will happen frequently; evidence directly confirms it.
+Automatic false positives (score 0): pre-existing issues; linter/typechecker/compiler-catchable; pedantic nitpicks; issues on lines the diff did not modify; intentional changes related to the goal.`;
+
 const out = arg('out', path.join('.workflows', name + '.js'));
 const force = arg('force', false) === true;
 
@@ -222,6 +291,77 @@ ${decls}
   results.${resultKey} = last`;
 }
 
+// Panel CodeGate body: guard → parallel dimension reviewers (read-only, findings schema) →
+// deterministic dedup → per-finding confidence scorers (drop <80) → lead adjudicator+fixer
+// loop (≤3, hard-fail). Fan-out lives HERE in the conductor JS — the lead is a worker, never
+// a spawner. Output is indented for the emitPhase else-block.
+function panelBody() {
+  const findingsSchema = SCHEMA({ findings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['file', 'line', 'severity', 'title'], properties: { file: { type: 'string' }, line: { type: 'number' }, severity: { type: 'string', enum: ['Critical', 'High', 'Medium', 'Low'] }, title: { type: 'string' }, detail: { type: 'string' } } } } }, ['findings']);
+  return `  // Panel review: guard → parallel dimensions → dedup → confidence filter → lead fixer.
+  const guard = await agent(
+    \`\${inWorktree('codegate-guard', { notes: false })}
+
+Inspect the diff of \${BRANCH} vs \${BASE || 'the base branch'} (git diff in \${WORKTREE}). Is this a CODE change (source/test code — not solely docs, config, comments, or generated artifacts)? Return isCode and a one-line reason. Do NOT edit anything.\`,
+    { label: 'codegate:guard', phase: 'CodeGate',${mdl('mechanical') ? ' ' + mdl('mechanical') : ''}
+      schema: ${SCHEMA({ isCode: { type: 'boolean' }, reason: { type: 'string' } }, ['isCode'])} },
+  )
+  if (!guard || !guard.isCode) {
+    log('CodeGate: not a code change (' + ((guard && guard.reason) || 'no reason') + ') — panel skipped')
+    results.codeGate = { gatePassed: true, skipped: true, critical: 0, high: 0, summary: 'skipped: not a code change' }
+  } else {
+    const DIMENSIONS = ${JSON.stringify(PANEL_DIMENSIONS)}
+    const rawResults = await parallel(DIMENSIONS.map((d) => () => agent(
+      \`\${inWorktree('codegate-' + d.key, { notes: false })}
+
+READ-ONLY panel review of the changes on \${BRANCH} vs \${BASE || 'the base branch'} (git diff in \${WORKTREE}) — do NOT edit or fix anything; you only report findings.
+DIMENSION — \${d.focus}
+Return findings with exact repo-relative file + line + severity (Critical|High|Medium|Low) + title + detail. No findings is a valid answer.\`,
+      { label: 'codegate:' + d.key, phase: 'CodeGate',${mdl('think') ? ' ' + mdl('think') : ''}
+        schema: ${findingsSchema} },
+    )))
+    const all = rawResults.filter(Boolean).flatMap((r) => r.findings || [])
+    const seen = new Set()
+    const deduped = []
+    for (const f of all) {
+      const k = (f.file || '') + ':' + (f.line || 0)
+      if (!seen.has(k)) { seen.add(k); deduped.push(f) }
+    }
+    const scored = deduped.length ? await parallel(deduped.map((f, i) => () => agent(
+      \`\${inWorktree('codegate-score-' + i, { notes: false })}
+
+Verify ONE code-review finding against the actual code (read the files; do NOT edit).
+FINDING (JSON): \${JSON.stringify(f)}
+${escTpl(CONFIDENCE_RUBRIC)}
+Return the score and a one-line reason.\`,
+      { label: 'codegate:score-' + i, phase: 'CodeGate',${mdl('mechanical') ? ' ' + mdl('mechanical') : ''}
+        schema: ${SCHEMA({ score: { type: 'number' }, reason: { type: 'string' } }, ['score'])} },
+    ).then((v) => ({ ...f, confidence: v ? v.score : 0 })))) : []
+    const confirmed = scored.filter(Boolean).filter((f) => f.confidence >= 80)
+    if (!confirmed.length) {
+      log('CodeGate panel: 0 of ' + all.length + ' raw findings survived verification — passing')
+      results.codeGate = { gatePassed: true, critical: 0, high: 0, summary: 'panel: ' + all.length + ' raw, 0 confirmed', panel: { raw: all.length, deduped: deduped.length, confirmed: 0 } }
+    } else {
+      let passed = false, last = null
+      for (let round = 1; round <= 3 && !passed; round++) {
+        ${DOD_DECL}
+        ${CARRY_DECL}
+        last = await agent(
+          \`\${inWorktree('codegate-lead')}
+
+You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. You may skip a finding ONLY with an explicit reason it is wrong.
+
+FINDINGS (JSON): \${JSON.stringify(confirmed)}\` + dod + carry,
+          { label: \`codegate:lead-r\${round}\`, phase: 'CodeGate', ${at(agentCode)}${mdl('think') ? ' ' + mdl('think') : ''}
+            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' } }, ['gatePassed'])} },
+        )
+        passed = last && last.gatePassed
+      }
+      if (!passed) throw new Error('CodeGate failed: unresolved Critical/High after 3 rounds — ' + (last && last.summary || ''))
+      results.codeGate = { ...last, panel: { raw: all.length, deduped: deduped.length, confirmed: confirmed.length } }
+    }
+  }`;
+}
+
 // A single agent call whose result is stored at results[key], with an optional hard-fail check.
 // Output is indented for the else-block; interior prompt lines stay column-0.
 function agentCall({ key, prompt, schema, agentFrag, modelFrag, label, phase: ph, check }) {
@@ -256,6 +396,20 @@ const workPhasesBuild = () => phases.map((p) => {
 });
 
 const PHASES = [
+  // DoD baseline (honesty check): measure each checkable criterion BEFORE any work. A criterion
+  // already met at baseline cannot discriminate this run's work — the run report flags it.
+  { title: 'DoDBaseline', enabledWhen: withDod && dodCheckable.length > 0, build: () => emitPhase('DoDBaseline',
+    agentCall({
+      key: 'dodBaseline',
+      prompt: `\`\${inWorktree('dod-baseline', { notes: false })}
+
+DoD BASELINE (pre-work measurement): for EACH criterion below, run its "check" command inside \${WORKTREE} and record met (exit 0) / unmet (non-zero) / error (could not run). Do NOT fix anything — measure only.
+
+CHECKABLE CRITERIA (JSON): \${JSON.stringify(DOD_CRITERIA.filter((c) => c.tier === 'checkable'))}\``,
+      schema: SCHEMA({ baselines: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'status'], properties: { id: { type: 'string' }, status: { type: 'string', enum: ['met', 'unmet', 'error'] } } } } }, ['baselines']),
+      modelFrag: mdl('mechanical'), label: 'dod-baseline', phase: 'DoDBaseline',
+    })) },
+
   { title: 'Brief', enabledWhen: withTicket, build: () => emitPhase('Brief',
     agentCall({
       key: 'brief',
@@ -308,8 +462,9 @@ Do NOT delete/alter source branches just to raise coverage. Commit new tests + n
     })) },
 
   // CodeGate = IMPROVE+SIMPLIFY; emitted when --enforce-code OR --cycle (cycle always reviews).
+  // reviewPanel swaps the single review+fix agent for the multi-dimension panel.
   { title: 'CodeGate', enabledWhen: enforceCode || withCycle, build: () => emitPhase('CodeGate',
-    gateLoop({
+    reviewPanel ? panelBody() : gateLoop({
       flag: 'gatePassed', resultKey: 'codeGate', label: 'codegate', phase: 'CodeGate', agentFrag: at(agentCode), modelFrag: mdl('think'),
       prompt: `\`\${inWorktree('codegate')}
 
@@ -394,6 +549,42 @@ Write an implementation summary for the changes on \${BRANCH} vs \${BASE || 'the
       check: `if (!results.docs || !results.docs.written) throw new Error('DocsGate failed: no implementation summary written')`,
     })) },
 
+  // DoDGate: verify the frozen definition of done (checkable = run the command; judged =
+  // evidence-cited verdict). UNMET → fix worker → re-verify, ≤3 rounds, then hard-fail.
+  // Placed BEFORE Writeup/PR so a PR only ever opens with a fully-met DoD.
+  { title: 'DoDGate', enabledWhen: withDod, build: () => emitPhase('DoDGate',
+    `  let dodPassed = false, dodLast = null
+  for (let round = 1; round <= 3 && !dodPassed; round++) {
+    dodLast = await agent(
+      \`\${inWorktree('dodgate-verify', { notes: false })}
+
+DoD VERIFY (round \${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate EVERY criterion below against the work on \${BRANCH} vs \${BASE || 'the base branch'}:
+- tier "checkable": run the "check" command inside \${WORKTREE}; exit 0 = MET, non-zero = UNMET; the command output is the evidence.
+- tier "judged": verdict from real evidence you CITE (file:line, command output, test result). No evidence = not MET.
+Verdicts: MET | UNMET | PARTIAL.
+
+CRITERIA (JSON): \${JSON.stringify(DOD_CRITERIA)}\`,
+      { label: \`dodgate:verify-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
+        schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
+    )
+    const unmet = ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
+    dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
+    if (!dodPassed && round < 3) {
+      await agent(
+        \`\${inWorktree('dodgate-fix')}
+
+DoD FIX (round \${round}/3): the definition-of-done criteria below are NOT met. Make them met — implement what is missing, run the relevant checks yourself, then re-run the project test suite (your fix must not regress it) and commit. Do NOT weaken, game, or delete a check; if a criterion is genuinely impossible, say so in the summary instead of faking it.
+
+UNMET (JSON): \${JSON.stringify(unmet)}
+FULL DoD (JSON): \${JSON.stringify(DOD_CRITERIA)}\`,
+        { label: \`dodgate:fix-r\${round}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
+          schema: ${SCHEMA({ summary: { type: 'string' }, fixed: { type: 'array', items: { type: 'string' } } }, ['summary'])} },
+      )
+    }
+  }
+  results.dodGate = dodLast
+  if (!dodPassed) throw new Error('DoDGate failed: DoD not fully met after 3 rounds — unmet: ' + ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET').map((c) => c.id).join(', '))`) },
+
   // Writeup: promote the per-worker implementation-notes + emit a reviewer write-up and a design
   // diagram, all committed under docs/changes/<name>/ so they ride the PR. Hard-fails (placed
   // BEFORE PR) so "every PR has reviewer artifacts" is actually enforced; --no-writeup opts out.
@@ -421,7 +612,8 @@ Return what was written.\``,
 Push the branch and open a PR with the GitHub CLI:
 git push -u origin \${BRANCH}
 gh pr create --base \${BASE || 'main'} --head \${BRANCH} --title "TODO title" --body "TODO summary${withWriteup ? '. Reviewer artifacts are committed under docs/changes/' + name + '/ — link writeup.html, design.html, and notes/ in the PR body' : ''}\${TICKET ? '; refs ' + TICKET : ''}"
-If a PR for this branch already exists, return its URL instead of erroring.\``,
+${withDod ? `Include a "## Definition of done" section in the PR body — headline "DoD: <met>/<total> MET", then one line per criterion (id, verdict, evidence) from this JSON: \${JSON.stringify((results.dodGate && results.dodGate.criteria) || [])}
+` : ''}If a PR for this branch already exists, return its URL instead of erroring.\``,
       schema: SCHEMA({ prUrl: { type: 'string' } }, ['prUrl']),
       modelFrag: mdl('mechanical'), label: 'pr', phase: 'PR',
     })) },
@@ -481,7 +673,7 @@ const STATE    = \`.workflows/state/\${NAME}.json\`
 const BRANCH   = (args && args.branch) ? args.branch : \`wf/\${NAME}\`
 const BASE     = (args && args.base) ? args.base : '${base === true ? '' : base}'
 const WORKTREE = \`.worktrees/\${NAME}\`
-const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}
+const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}${withDod ? `\nconst DOD_CRITERIA = ${JSON.stringify(dodCriteria)}` : ''}
 
 const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
@@ -531,7 +723,7 @@ function inWorktree(slot, opts) {
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
   const payload = JSON.stringify(
-    { workflow: NAME, status: 'running', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results },
+    { workflow: NAME, status: 'running', branch: BRANCH, worktree: WORKTREE, ticket: TICKET,${withDod ? ' dod: { criteria: DOD_CRITERIA },' : ''} phasesDone: [...done], results },
     null, 2,
   )
   await agent(
