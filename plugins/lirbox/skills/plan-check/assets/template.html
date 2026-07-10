@@ -85,6 +85,13 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
     <!-- repeat per blind-spot / unstated assumption -->
   </ul>
 
+  <h2>Definition of done</h2>
+  <p class="lead">The plan's success criteria, refined to checkable form — extracted from the plan's own ACs, or derived (and flagged) when the plan never stated any. Machine-readable copy in the <code>#dod</code> block for lirbox:conductor.</p>
+  <ul class="risks">
+    <li><span class="q">{{DOD_TIER}}</span><br>{{DOD_ID}} — {{DOD_TEXT}}{{DOD_CHECK_NOTE}}</li>
+    <!-- repeat per criterion; for checkable add e.g. <code>the check command</code> in DOD_CHECK_NOTE -->
+  </ul>
+
   <h2>Claim ledger</h2>
   <p class="lead">Every proposition, tagged to its quadrant and adjudicated. Verified/mechanical rows last.</p>
   <table>
@@ -136,5 +143,9 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
   }
 })();
 </script>
+<!-- Machine-readable DoD consumed by lirbox:conductor (--dod-file seed). REQUIRED, exactly one.
+     Shape: {"criteria":[{"id","text","tier":"checkable"|"judged","check"?}]} — check required
+     for checkable. Must mirror the visible Definition-of-done section above. -->
+<script type="application/json" id="dod">{"criteria":[{"id":"{{DOD_ID}}","text":"{{DOD_TEXT}}","tier":"{{DOD_TIER}}","check":"{{DOD_CHECK}}"}]}</script>
 </body>
 </html>

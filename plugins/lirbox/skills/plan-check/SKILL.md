@@ -81,6 +81,11 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
    to `./plan-check-<slug>.html` and fill it. **Lead with the verdict-changing risks**
    (refutations, blind-spots, conditions); mechanically-verified rows last. Keep the
    `<style>` block unchanged.
+   Fill the **Definition of done** section AND its machine-readable twin
+   (`<script type="application/json" id="dod">`): extract the plan's success criteria, refine
+   each to `checkable` (a concrete command, exit 0 = met) or `judged` (needs cited evidence),
+   never dropping plan-stated ACs. If the plan stated none, derive them — and the missing DoD
+   is a `BLIND-SPOT-RISK` (so the verdict can be at best GO-WITH-CONDITIONS).
 9. **Verify the output** — must exit 0; fix and re-run until green:
    ```bash
    node ${CLAUDE_PLUGIN_ROOT}/skills/plan-check/assets/validate.mjs ./plan-check-<slug>.html
@@ -95,4 +100,7 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
 - **Evidence, not vibes.** Every `VERIFIED` cites a source (doc URL, `file:line`,
   command output). No source → not verified; `UNVERIFIED` is a valid answer.
 - **Honest verdict.** One `REFUTED` critical path is `NO-GO` — don't soften it.
+- **A DoD or no clean GO.** Every report carries the `#dod` block (validate.mjs enforces it).
+  A plan that never stated verifiable success criteria gets a `BLIND-SPOT-RISK` — "done" without
+  a meter is vibes.
 - **Self-contained report.** No external CSS/JS/fonts/images; opens offline.
