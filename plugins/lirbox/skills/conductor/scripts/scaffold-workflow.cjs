@@ -355,12 +355,12 @@ Return the score and a one-line reason.\`,
         last = await agent(
           \`\${inWorktree('codegate-lead')}
 
-You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. You may skip a finding ONLY with an explicit reason it is wrong — record EVERY skipped finding in the skippedFindings output array (its title plus your reason), empty when you skipped none; this is the audit trail a human reviews.
+You are the review-panel LEAD for the changes on \${BRANCH} vs \${BASE || 'the base branch'}. The confirmed findings (confidence >= 80) from the parallel panel are below. Rank them; FIX every Critical and High in the worktree; run the project build/lint (it MUST pass); re-run it after fixes and commit. Fix a Medium or Low finding ONLY when the fix is trivial and zero-risk; otherwise leave it untouched and record it in the knownOpen output array (its exact file, line, severity, title) — a confirmed Medium/Low below the fix bar is NOT wrong, so it must stay known-open for the human, never silently dropped; knownOpen is empty when none remain. You may skip a finding ONLY with an explicit reason it is wrong — record EVERY skipped finding in the skippedFindings output array (its title plus your reason), empty when you skipped none; this is the audit trail a human reviews.
 ${GATE_CONTRACT}
 
 FINDINGS (JSON): \${JSON.stringify(confirmed)}\` + dod + carry,
           { label: \`codegate:lead-r\${round}\`, phase: 'CodeGate', ${at(agentCode)}${mdl('think') ? ' ' + mdl('think') : ''}
-            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, skippedFindings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'reason'], properties: { title: { type: 'string' }, reason: { type: 'string' } } } } }, ['gatePassed', 'critical', 'high', 'skippedFindings'])} },
+            schema: ${SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, skippedFindings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'reason'], properties: { title: { type: 'string' }, reason: { type: 'string' } } } }, knownOpen: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['file', 'line', 'severity', 'title'], properties: { file: { type: 'string' }, line: { type: 'number' }, severity: { type: 'string' }, title: { type: 'string' } } } } }, ['gatePassed', 'critical', 'high', 'skippedFindings', 'knownOpen'])} },
         )
         passed = last && last.gatePassed
       }

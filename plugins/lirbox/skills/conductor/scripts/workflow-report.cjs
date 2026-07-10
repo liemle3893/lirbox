@@ -130,6 +130,13 @@ if (Array.isArray(skips) && skips.length) {
   for (const s of skips) md += `- **${(s && s.title) || '(untitled)'}** — ${(s && s.reason) || '(no reason recorded)'}\n`;
   md += `\n`;
 }
+// Audit trail: confirmed Medium/Low findings the lead left unfixed (real, but below the fix bar).
+const knownOpen = state.results && state.results.codeGate && state.results.codeGate.knownOpen;
+if (Array.isArray(knownOpen) && knownOpen.length) {
+  md += `Known-open findings (confirmed Medium/Low the lead left unfixed — triage these):\n\n`;
+  for (const f of knownOpen) md += `- **${(f && f.title) || '(untitled)'}** (${(f && f.severity) || '?'}) — ${(f && f.file) || '?'}:${(f && f.line) || '?'}\n`;
+  md += `\n`;
+}
 md += `## Tokens & estimated cost\n\n`;
 md += `| Model | Input | Cache write | Cache read | Output | Est. cost (USD) |\n|---|--:|--:|--:|--:|--:|\n`;
 for (const r of rows) md += `| ${r.model} | ${k(r.input)} | ${k(r.cacheWrite)} | ${k(r.cacheRead)} | ${k(r.output)} | ${r.cost != null ? '$' + r.cost.toFixed(2) : 'n/a (no rate)'} |\n`;
