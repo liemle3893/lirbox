@@ -77,6 +77,17 @@ More phases = more subagent round-trips; reserve them for work that warrants the
   (default `lirbox:lirbox-code-reviewer`, ≤3 rounds, hard-fail). Default ON under
   `--profile delivery`; the collapsed Review phase (lite / `--merge-gates`) always stays
   single-agent.
+- `--frontend <web|mobile|both>` — adds a **FrontendGate** phase, positioned **after** the
+  code-quality gate (CodeGate/ReVerify under `--cycle`; the merged Review phase under lite) and
+  **before** DoDGate/Writeup so DoDGate can cite the evidence. A diff guard (same pattern as the
+  review-panel guard) skips the gate when the diff touches no UI files; otherwise each target runs
+  a verifier fix-loop (≤3 rounds, then hard-fail) that writes runnable E2E specs where assertion
+  is possible and an evidence manifest at `implementation-notes/frontend-evidence/manifest.json`
+  (plus screenshots/logs) where it is not — the Writeup phase promotes that directory into
+  `docs/changes/<name>/evidence/`. The frozen engine chain + viewport matrix come from the DoD
+  file's `frontend` block as **DATA** (see SKILL.md step 1c) — the generator never probes the
+  machine. If the verifier agentType is unavailable at dispatch, the gate degrades gracefully:
+  the same prompt reruns on a generic subagent with a logged warning.
 - `--cycle` — enforces the full TDD cycle, reordering the core to
   **RED → GREEN(work) → Verify → PathGap → IMPROVE/SIMPLIFY(CodeGate) → ReVerify**:
   - **RED** (`lirbox:lirbox-test-writer`) writes AC tests first and confirms they fail.
@@ -108,7 +119,9 @@ Orthogonal to the phase flags; does not change phase structure.
 Each gate defaults to an agent bundled with this plugin (in `agents/`), referenced by its
 **plugin-namespaced** type, and is overridable: `--agent-red` (default `lirbox:lirbox-test-writer`),
 `--agent-code` (default `lirbox:lirbox-code-reviewer`), `--agent-tests` (default
-`lirbox:lirbox-tryve-enhancer`), `--agent-docs` (default `lirbox:lirbox-docs-writer`). Pass your own
+`lirbox:lirbox-tryve-enhancer`), `--agent-docs` (default `lirbox:lirbox-docs-writer`), `--agent-web`
+(default `lirbox:lirbox-web-verifier`), `--agent-mobile` (default `lirbox:lirbox-mobile-verifier`).
+Pass your own
 `agentType`, or `none` to drop the `agentType` so that gate uses a **generic built-in subagent** (the
 prompt still runs — no agent dependency at all). Example: `--agent-code my-team-reviewer --agent-docs none`.
 

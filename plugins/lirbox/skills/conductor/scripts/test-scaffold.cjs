@@ -74,6 +74,10 @@ const MATRIX = [
   // DoD combos.
   ['dod-bare', ['--phases', 'Work', '--dod-file', dodFile]],
   ['no-dod-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--no-dod']],
+  // FrontendGate combos (--frontend web|mobile|both).
+  ['frontend-web', ['--phases', 'Work', '--frontend', 'web']],
+  ['frontend-mobile-lite', ['--phases', 'Work', '--profile', 'lite', '--frontend', 'mobile', '--dod-file', dodFile]],
+  ['frontend-both-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--frontend', 'both', '--dod-file', dodFile]],
 ];
 
 // Pull phase('…') titles out of the emitted script, in emission order.
@@ -223,6 +227,27 @@ try {
   // 7. invalid flag values are rejected.
   check(genFails(['--phases', 'Work', '--model-mode', 'bogus']), "invalid --model-mode rejected");
   check(genFails(['--phases', 'Work', '--model-mode', 'auto', '--model-think', 'gpt']), "invalid --model-think rejected");
+  check(genFails(['--phases', 'Work', '--frontend', 'desktop']), "invalid --frontend rejected");
+
+  // 11. FrontendGate: ordered after the code-quality gate, before DoDGate/Writeup; both targets
+  //     emitted under both; the verifier agents are swappable via --agent-web/--agent-mobile.
+  const fg = gen('frontend', ['--phases', 'Implement', '--profile', 'delivery', '--frontend', 'both', '--dod-file', dodFile]);
+  const fgOrder = (fg.match(/phase\('([^']*)'\)/g) || []).map((m) => m.slice(7, -2));
+  check(fgOrder.indexOf('ReVerify') < fgOrder.indexOf('FrontendGate')
+    && fgOrder.indexOf('FrontendGate') < fgOrder.indexOf('DoDGate'),
+    'frontend: FrontendGate between ReVerify and DoDGate under delivery');
+  check(/agentType: 'lirbox:lirbox-web-verifier'/.test(fg) && /agentType: 'lirbox:lirbox-mobile-verifier'/.test(fg),
+    'frontend: both verifier agents dispatched under --frontend both');
+  check(/frontend-evidence\/manifest\.json/.test(fg), 'frontend: prompt targets the evidence manifest');
+  check(/retrying on a generic subagent/.test(fg), 'frontend: typed dispatch degrades to a generic subagent');
+  const fgLite = gen('frontend-lite', ['--phases', 'Work', '--profile', 'lite', '--frontend', 'web', '--dod-file', dodFile]);
+  const fgLiteOrder = (fgLite.match(/phase\('([^']*)'\)/g) || []).map((m) => m.slice(7, -2));
+  check(fgLiteOrder.indexOf('Review') < fgLiteOrder.indexOf('FrontendGate')
+    && fgLiteOrder.indexOf('FrontendGate') < fgLiteOrder.indexOf('DoDGate'),
+    'frontend: FrontendGate between Review and DoDGate under lite');
+  check(!/agentType: 'lirbox:lirbox-web-verifier'/.test(gen('frontend-none', ['--phases', 'Work', '--frontend', 'web', '--agent-web', 'none']))
+    , '--agent-web none drops the agentType (generic subagent)');
+  check(!/phase\('FrontendGate'\)/.test(gen('frontend-off', ['--phases', 'Work'])), 'no --frontend: no FrontendGate phase');
 
   // 9. DoD gate: --dod-file bakes criteria in, emits DoDBaseline + DoDGate in the right slots,
   //    persists criteria via checkpoint, and puts the scorecard in the PR body.
