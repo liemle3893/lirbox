@@ -19,13 +19,18 @@
  * add >=1 behavior characterization test under evals/floor/ before relying on whetstone.
  *
  * Usage:
- *   node scaffold-readiness.cjs --name <slug> [--skill-path <dir>] [--force] [--scored]
+ *   node scaffold-readiness.cjs --name <slug> [--skill-path <dir|agent.md>] [--force] [--scored]
  *     --name <slug>        required; kebab slug; the skill name (and feedback/<slug>.jsonl key).
- *     --skill-path <dir>   skill dir (default: plugins/lirbox/skills/<slug>).
+ *     --skill-path <p>     skill dir (default: plugins/lirbox/skills/<slug>) — OR a single-file
+ *                          plugin agent (plugins/<plugin>/agents/<slug>.md). Agent mode: editable
+ *                          = that one file; evals seed into the SIBLING dir agents/evals/<slug>/
+ *                          (a .md file can't contain a directory); the floor is
+ *                          `claude plugin validate .` + the seeded characterization tests.
  *     --force              overwrite existing scaffold files (default: skip + report).
  *     --scored             ALSO scaffold the prospector skill-train metric: evals/run-scored.mjs
  *                          + tasks/{train,val}/ (SkillOpt-style scored task set with a held-out
  *                          val split). Recipe: prospector/references/skill-train.md.
+ *                          Skill dirs only — rejected for an agent-file surface.
  */
 const fs = require('fs');
 const path = require('path');
@@ -44,16 +49,35 @@ const skillPath = arg('skill-path', path.join('plugins', 'lirbox', 'skills', nam
 const force = arg('force', false) === true;
 const scored = arg('scored', false) === true;
 
-const skillMd = path.join(skillPath, 'SKILL.md');
-if (!fs.existsSync(skillMd)) {
-  console.error(`ERROR: no SKILL.md at ${skillMd}. Pass --skill-path <dir> to the skill, or create the skill first.`);
+// Agent FILE surface: --skill-path may point at a single-file plugin agent
+// (plugins/<plugin>/agents/<name>.md). Editable = that ONE file; the evals layout seeds into a
+// SIBLING dir, agents/evals/<name>/ — a .md file cannot contain a directory.
+const agentMode = skillPath.endsWith('.md') && fs.existsSync(skillPath) && fs.statSync(skillPath).isFile();
+if (agentMode && path.basename(skillPath, '.md') !== name) {
+  console.error(`ERROR: --name (${name}) must match the agent file basename (${path.basename(skillPath, '.md')}).`);
+  process.exit(1);
+}
+if (agentMode && scored) {
+  console.error('ERROR: --scored (prospector skill-train) applies to skill dirs only, not an agent-file surface.');
   process.exit(1);
 }
 
+const skillMd = agentMode ? skillPath : path.join(skillPath, 'SKILL.md');
+if (!fs.existsSync(skillMd)) {
+  console.error(`ERROR: no SKILL.md at ${skillMd}. Pass --skill-path <dir> to the skill (or <agent>.md for a plugin agent), or create the skill first.`);
+  process.exit(1);
+}
+
+// Where the evals layout lives: inside the skill dir, or beside the agent file.
+const evalsBase = agentMode
+  ? path.join(path.dirname(skillPath), 'evals', name)
+  : path.join(skillPath, 'evals');
+
 // Detect frontmatter keys quick_validate would reject → recommend a custom floor (no quick_validate).
+// (Agent mode never uses quick_validate — its structural floor is `claude plugin validate .`.)
 const fmBlock = (fs.readFileSync(skillMd, 'utf8').match(/^---\n([\s\S]*?)\n---/) || [, ''])[1];
 const REJECTED = ['argument-hint', 'disable-model-invocation'];
-const offending = REJECTED.filter((k) => new RegExp('^' + k + ':', 'm').test(fmBlock));
+const offending = agentMode ? [] : REJECTED.filter((k) => new RegExp('^' + k + ':', 'm').test(fmBlock));
 const customFloor = offending.length > 0;
 
 // ---- file templates -------------------------------------------------------
@@ -114,6 +138,40 @@ if (bad) { console.error(\`\\n00-structure: \${bad} assertion(s) failed\`); proc
 console.log('00-structure: ok');
 `;
 
+// Agent-file variant of the structural floor test: pins the agent's frontmatter (name/description)
+// and that the body is non-empty. Resolves the agent .md RELATIVE to the seeded evals dir
+// (agents/evals/<name>/floor → ../../../<name>.md) so the layout is relocatable.
+const AGENT_STRUCTURE_TEST = `// FLOOR (characterization) — the agent .md is structurally a valid plugin subagent. A real,
+// green-on-baseline floor test. It asserts the load-bearing structure only; a fix that corrupts the
+// frontmatter goes RED here and is reverted. Pair it with \`claude plugin validate .\` (the full
+// agent-mode floor command — see README.md).
+//
+// NOTE: this is a THIN floor. Agent-prompt behavior is proven with claude -p A/B acceptance-checks,
+// not static greps — but add any further deterministic characterization you can alongside this.
+//
+// Locked (evals/**): the whetstone fixer may NEVER edit this file.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));            // .../agents/evals/${name}/floor
+const AGENT_MD = resolve(HERE, '..', '..', '..', '${name}.md');  // .../agents/${name}.md
+const src = readFileSync(AGENT_MD, 'utf8');
+const fm = (src.match(/^---\\n([\\s\\S]*?)\\n---/) || [, ''])[1];
+const body = src.replace(/^---\\n[\\s\\S]*?\\n---/, '').trim();
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(\`PASS floor: \${m}\`); } else { console.error(\`FAIL floor: \${m}\`); bad++; } };
+ok(!!fm, 'agent .md opens with a frontmatter block');
+const nameMatch = fm.match(/^name:\\s*"?([A-Za-z0-9_-]+)"?/m);
+ok(!!nameMatch && nameMatch[1] === '${name}', 'frontmatter name matches the agent file (${name})');
+ok(/^description:\\s*\\S/m.test(fm), 'frontmatter declares a non-empty description');
+ok(body.length > 0, 'agent has a non-empty prompt body');
+
+if (bad) { console.error(\`\\n00-structure: \${bad} assertion(s) failed\`); process.exit(1); }
+console.log('00-structure: ok');
+`;
+
 // SCORED RUNNER (--scored): the prospector "skill-train" metric — runs every tasks/<split>/*.test.mjs
 // and prints one machine-parseable `score=<pct>` line. It exits 0 whenever it RAN (a score below 100
 // is a valid measurement, not an error); non-zero only on structural problems (bad split, no tasks).
@@ -152,9 +210,48 @@ for (const t of tests) {
 console.log(\`score=\${(100 * passed / tests.length).toFixed(2)} (passed=\${passed}/\${tests.length}, split=\${split})\`);
 `;
 
-const floorCmd = customFloor
-  ? `node ${skillPath}/evals/run.mjs`
-  : `python3 <skill-creator>/scripts/quick_validate.py ${skillPath} && node ${skillPath}/evals/run.mjs`;
+const floorCmd = agentMode
+  ? `claude plugin validate . && node ${evalsBase}/run.mjs`
+  : customFloor
+    ? `node ${skillPath}/evals/run.mjs`
+    : `python3 <skill-creator>/scripts/quick_validate.py ${skillPath} && node ${skillPath}/evals/run.mjs`;
+
+const AGENT_README_MD = `# ${name} evals — the whetstone floor + acceptance-checks (agent-file surface)
+
+The contract \`lirbox:whetstone\` judges the plugin agent \`${name}\` against. **Committed source,
+not runtime state** — it is in whetstone's locked set (the fixer may never edit \`evals/**\` or
+\`feedback/${name}.jsonl\`). Do NOT gitignore it.
+
+## Surface
+
+- **Editable:** the ONE agent file, \`${path.join(path.dirname(skillPath), name + '.md')}\`.
+- **Locked:** this evals dir (\`${evalsBase}/\`) + \`feedback/${name}.jsonl\`.
+
+(The evals live in this SIBLING dir — \`agents/evals/${name}/\` — because a .md file cannot
+contain a directory.)
+
+## Floor (characterization — GREEN on baseline)
+
+\`run.mjs\` runs every \`floor/*.test.mjs\` and exits 0 iff all pass. **The whetstone floor command:**
+
+\`\`\`
+${floorCmd}
+\`\`\`
+
+Current floor:
+- \`floor/00-structure.test.mjs\` — agent .md frontmatter is valid (name/description; name === file).
+- \`claude plugin validate .\` — the marketplace/plugin manifest still validates.
+
+## Acceptance-checks (RED on baseline — one per backlog item)
+
+\`checks/*.check.mjs\` are the per-concern checks whetstone drafts during setup, one per
+\`feedback/${name}.jsonl\` item. Each MUST fail on the unmodified agent (the discrimination gate)
+and pass once the fix lands. Run one-at-a-time by the loop, never by \`run.mjs\`.
+
+> ⚠️ Agent-prompt concerns are BEHAVIORAL: prefer a \`claude -p\` A/B check (run the task with the
+> baseline vs fixed agent prompt and assert the observable outcome) over a static grep of the .md —
+> greps of prompt text are gameable and prove nothing about behavior.
+`;
 
 const README_MD = `# ${name} evals — the whetstone floor + acceptance-checks
 
@@ -190,17 +287,17 @@ pass once the fix lands. Run one-at-a-time by the loop, never by \`run.mjs\`. No
 
 // ---- write (idempotent) ---------------------------------------------------
 const targets = [
-  [path.join(skillPath, 'evals', 'run.mjs'), RUN_MJS],
-  [path.join(skillPath, 'evals', 'floor', '00-structure.test.mjs'), STRUCTURE_TEST],
-  [path.join(skillPath, 'evals', 'checks', '.gitkeep'), '# whetstone drafts acceptance-checks (*.check.mjs) here, one per feedback/' + name + '.jsonl item.\n'],
-  [path.join(skillPath, 'evals', 'README.md'), README_MD],
+  [path.join(evalsBase, 'run.mjs'), RUN_MJS],
+  [path.join(evalsBase, 'floor', '00-structure.test.mjs'), agentMode ? AGENT_STRUCTURE_TEST : STRUCTURE_TEST],
+  [path.join(evalsBase, 'checks', '.gitkeep'), '# whetstone drafts acceptance-checks (*.check.mjs) here, one per feedback/' + name + '.jsonl item.\n'],
+  [path.join(evalsBase, 'README.md'), agentMode ? AGENT_README_MD : README_MD],
   [path.join('feedback', name + '.jsonl'), ''],
 ];
 if (scored) {
   targets.push(
-    [path.join(skillPath, 'evals', 'run-scored.mjs'), RUN_SCORED_MJS],
-    [path.join(skillPath, 'evals', 'tasks', 'train', '.gitkeep'), '# skill-train TRAIN tasks (*.test.mjs) — failures here may be shown to the propose/fix worker.\n'],
-    [path.join(skillPath, 'evals', 'tasks', 'val', '.gitkeep'), '# skill-train VAL tasks (*.test.mjs) — HELD OUT: the keep decision runs here; never show these to the worker.\n'],
+    [path.join(evalsBase, 'run-scored.mjs'), RUN_SCORED_MJS],
+    [path.join(evalsBase, 'tasks', 'train', '.gitkeep'), '# skill-train TRAIN tasks (*.test.mjs) — failures here may be shown to the propose/fix worker.\n'],
+    [path.join(evalsBase, 'tasks', 'val', '.gitkeep'), '# skill-train VAL tasks (*.test.mjs) — HELD OUT: the keep decision runs here; never show these to the worker.\n'],
   );
 }
 
@@ -214,11 +311,21 @@ for (const [file, content] of targets) {
 }
 
 console.log(`\n${created} written, ${skipped} skipped.${customFloor ? ' (custom floor — quick_validate skipped: ' + offending.join(', ') + ')' : ''}`);
+if (agentMode) {
+  console.log(`\nAgent-file surface: editable = ${skillPath} (the ONE file); locked = ${evalsBase} + feedback/${name}.jsonl`);
+}
 console.log('\nNext:');
-console.log(`  1. Add >=1 behavior characterization test under ${skillPath}/evals/floor/ (run the skill's surface, assert output). It MUST pass today.`);
-console.log(`  2. Verify the floor is green:  ${floorCmd}`);
-console.log(`  3. File concerns in feedback/${name}.jsonl (narrow, decided, each a deterministic check that's broken NOW).`);
-console.log(`  4. Run:  /lirbox:whetstone ${name}`);
+if (agentMode) {
+  console.log(`  1. Add >=1 behavior characterization test under ${path.join(evalsBase, 'floor')}/ (drive the agent, assert output). It MUST pass today.`);
+  console.log(`  2. Verify the floor is green:  ${floorCmd}`);
+  console.log(`  3. File concerns in feedback/${name}.jsonl. Agent-prompt concerns are BEHAVIORAL — acceptance-checks should be claude -p A/B runs, not static greps of the .md.`);
+  console.log(`  4. Run:  /lirbox:whetstone ${name}`);
+} else {
+  console.log(`  1. Add >=1 behavior characterization test under ${skillPath}/evals/floor/ (run the skill's surface, assert output). It MUST pass today.`);
+  console.log(`  2. Verify the floor is green:  ${floorCmd}`);
+  console.log(`  3. File concerns in feedback/${name}.jsonl (narrow, decided, each a deterministic check that's broken NOW).`);
+  console.log(`  4. Run:  /lirbox:whetstone ${name}`);
+}
 if (scored) {
   console.log(`\nSkill-train (--scored) extras:`);
   console.log(`  5. Add task checks under ${skillPath}/evals/tasks/train/ and tasks/val/ (*.test.mjs; val is HELD OUT).`);
