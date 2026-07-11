@@ -120,6 +120,17 @@ goal + ACs in run 1's state so they survive scrollback). Source precedence:
    `<script type="application/json" id="dod">` block as the seed.
 3. **Bare goal** — derive the criteria yourself.
 
+**Frontend/mobile goals** — when the goal touches UI (web or native mobile), additionally probe
+the machine NOW (main session): a Playwright config (or clean installability), `maestro`/`appium`
+binaries, Xcode simulators (`xcrun simctl`) / `adb`, and browser-MCP reachability. From the probe,
+propose a `frontend` block — per-target engine chain + viewport matrix, e.g.
+`{ "web": ["playwright", "browser-mcp", "os-script"], "mobile": ["maestro"], "viewports":
+["desktop-1440", "iphone-15", "pixel-8"] }` — and fold it into the SAME one-shot DoD
+`AskUserQuestion` below (one question total, not two). On confirm it is frozen into
+`.workflows/<name>.dod.json` alongside the criteria; pass `--frontend web|mobile|both` in step 2
+so the run gets a **FrontendGate**. The chain travels as DATA in the DoD file — the generator
+splices it and never probes the machine.
+
 Whatever the source, confirm ONCE with the human (one `AskUserQuestion`: accept / edit), then
 freeze: write the JSON to `.workflows/<name>.dod.json` and pass `--dod-file` in step 2. bare-tier
 runs may skip the DoD entirely; lite/delivery require it (`--no-dod` is the explicit opt-out).

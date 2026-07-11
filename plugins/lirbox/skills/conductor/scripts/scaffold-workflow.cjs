@@ -31,6 +31,12 @@
  *   --review-panel       multi-dimension panel CodeGate (parallel reviewers + confidence filter
  *                        + lead fixer). Default ON under --profile delivery.
  *   --no-review-panel    keep the single review+fix CodeGate agent even under delivery
+ *   --frontend <t>       web|mobile|both — add a FrontendGate phase (after the code-quality gate,
+ *                        before DoDGate/Writeup): a diff guard skips it when the diff touches no
+ *                        UI files; otherwise per-target verifier fix-loop (≤3, hard-fail) writes
+ *                        E2E specs + an evidence manifest at implementation-notes/frontend-evidence/
+ *                        manifest.json. The engine chain/viewports come from the DoD file's
+ *                        "frontend" block as DATA — the generator never probes the machine.
  *   --model-mode <m>     default (inherit session model, no opt emitted) | auto (tier by phase)
  *   --model-think <m>    auto thinking-tier model: sonnet|opus|haiku|fable (default opus)
  *   --model-work <m>     auto work-phase model:    sonnet|opus|haiku|fable (default sonnet)
@@ -103,6 +109,7 @@ const withWriteup = (arg('no-writeup', false) === true) ? false : (withPR || arg
 const noDod = arg('no-dod', false) === true;
 const dodFileArg = arg('dod-file', '');
 let dodCriteria = null;
+let dodFrontend = null; // optional "frontend" block (engine chain + viewports) — spliced as DATA
 if (dodFileArg && dodFileArg !== true && !noDod) {
   let raw;
   try { raw = fs.readFileSync(dodFileArg, 'utf8'); }
@@ -111,6 +118,7 @@ if (dodFileArg && dodFileArg !== true && !noDod) {
   try { parsed = JSON.parse(raw); }
   catch (e) { console.error('ERROR: --dod-file is not valid JSON: ' + e.message); process.exit(1); }
   dodCriteria = (parsed && Array.isArray(parsed.criteria)) ? parsed.criteria : null;
+  dodFrontend = (parsed && parsed.frontend && typeof parsed.frontend === 'object') ? parsed.frontend : null;
   if (!dodCriteria || !dodCriteria.length) { console.error('ERROR: --dod-file needs a non-empty "criteria" array'); process.exit(1); }
   for (const c of dodCriteria) {
     if (!c.id || !c.text || (c.tier !== 'checkable' && c.tier !== 'judged')) {
@@ -127,6 +135,18 @@ if (!noDod && !dodCriteria && (profileLite || profileDelivery)) {
 }
 const withDod = !!dodCriteria;
 const dodCheckable = withDod ? dodCriteria.filter((c) => c.tier === 'checkable') : [];
+
+// --- Frontend/mobile verification gate (--frontend web|mobile|both) ---
+// Emits a FrontendGate phase AFTER the code-quality gate (CodeGate/ReVerify under --cycle; the
+// merged Review phase under lite) and BEFORE DoDGate/Writeup, so DoDGate can cite the evidence
+// manifest. The frozen engine chain/viewports travel in the DoD file's "frontend" block as DATA.
+const frontendArg = arg('frontend', '');
+if (frontendArg === true || (frontendArg && !['web', 'mobile', 'both'].includes(frontendArg))) {
+  console.error(`ERROR: --frontend must be 'web', 'mobile' or 'both' (got '${frontendArg === true ? '' : frontendArg}')`);
+  process.exit(1);
+}
+const frontendTargets = frontendArg === 'both' ? ['web', 'mobile'] : (frontendArg ? [frontendArg] : []);
+const withFrontend = frontendTargets.length > 0;
 
 // --- Panel code review: parallel dimension reviewers + confidence filter + lead fixer ---
 // delivery default ON; --review-panel forces it wherever a CodeGate exists (--enforce-code /
@@ -160,6 +180,8 @@ const agentRed = arg('agent-red', 'lirbox:lirbox-test-writer');
 const agentCode = arg('agent-code', 'lirbox:lirbox-code-reviewer');
 const agentTests = arg('agent-tests', 'lirbox:lirbox-tryve-enhancer');
 const agentDocs = arg('agent-docs', 'lirbox:lirbox-docs-writer');
+const agentWeb = arg('agent-web', 'lirbox:lirbox-web-verifier');
+const agentMobile = arg('agent-mobile', 'lirbox:lirbox-mobile-verifier');
 // Emits the `agentType: '...',` fragment, or '' when set to none/empty (→ generic subagent).
 const at = (a) => (a && a !== 'none' && a !== true) ? `agentType: '${a}',` : '';
 
@@ -380,6 +402,68 @@ function panelBody() {
   }`;
 }
 
+// FrontendGate body: diff guard → per-target verifier fix-loop (≤3 rounds, hard-fail). The
+// verifier agents ship with the plugin; when a typed dispatch fails (agentType unavailable) the
+// loop degrades gracefully — same prompt on a generic subagent plus a logged warning — instead
+// of hard-failing on the missing agent. The frozen engine chain/viewports are spliced from the
+// DoD file's "frontend" block as DATA; the generator never probes the machine. Output is
+// indented for the emitPhase else-block.
+function frontendBody() {
+  const fSchema = SCHEMA({ gatePassed: { type: 'boolean' }, specsWritten: { type: 'number' }, manifest: { type: 'string' }, summary: { type: 'string' } }, ['gatePassed']);
+  const chain = escTpl(dodFrontend
+    ? JSON.stringify(dodFrontend)
+    : 'none frozen in the DoD — detect the engines available in the worktree yourself, prefer repo-native tooling, and record the chain actually used in the manifest');
+  const think = mdl('think') ? ' ' + mdl('think') : '';
+  const targetBlocks = frontendTargets.map((t) => {
+    const agentId = t === 'web' ? agentWeb : agentMobile;
+    const typed = agentId && agentId !== 'none' && agentId !== true;
+    const resultKey = t === 'web' ? 'frontendGateWeb' : 'frontendGateMobile';
+    const dispatch = typed
+      ? `try {
+          last = await agent(fPrompt + dod + carry,
+            { label: \`frontendgate:${t}-r\${round}\`, phase: 'FrontendGate', agentType: '${agentId}',${think}
+              schema: ${fSchema} },
+          )
+        } catch (e) {
+          log('FrontendGate: agent ${agentId} unavailable (' + ((e && e.message) || e) + ') — retrying on a generic subagent')
+          last = await agent(fPrompt + dod + carry,
+            { label: \`frontendgate:${t}-generic-r\${round}\`, phase: 'FrontendGate',${think}
+              schema: ${fSchema} },
+          )
+        }`
+      : `last = await agent(fPrompt + dod + carry,
+          { label: \`frontendgate:${t}-r\${round}\`, phase: 'FrontendGate',${think}
+            schema: ${fSchema} },
+        )`;
+    return `    // ${t} verifier: fix-loop ≤3 rounds, then hard-fail (standard gate semantics).
+    {
+      const fPrompt = ${tpl('frontend-verify.txt', { TARGET: t, FRONTEND_CHAIN: chain })}
+      let passed = false, last = null
+      for (let round = 1; round <= 3 && !passed; round++) {
+        ${DOD_DECL}
+        ${CARRY_DECL}
+        ${dispatch}
+        passed = last && last.gatePassed
+      }
+      if (!passed) throw new Error('FrontendGate (${t}) failed: UI verification not green after 3 rounds — ' + ((last && last.summary) || ''))
+      results.${resultKey} = last
+    }`;
+  });
+  return `  // Diff guard: skip the gate when the diff touches no UI files (same pattern as the panel guard).
+  const fguard = await agent(
+    ${tpl('frontend-guard.txt')},
+    { label: 'frontendgate:guard', phase: 'FrontendGate',${mdl('mechanical') ? ' ' + mdl('mechanical') : ''}
+      schema: ${SCHEMA({ isUI: { type: 'boolean' }, reason: { type: 'string' } }, ['isUI'])} },
+  )
+  if (!fguard || !fguard.isUI) {
+    log('FrontendGate: diff touches no UI files (' + ((fguard && fguard.reason) || 'no reason') + ') — skipped')
+    results.frontendGate = { gatePassed: true, skipped: true, summary: 'skipped: no UI files in diff' }
+  } else {
+${targetBlocks.join('\n')}
+    results.frontendGate = { gatePassed: true, targets: ${JSON.stringify(frontendTargets)} }
+  }`;
+}
+
 // A single agent call whose result is stored at results[key], with an optional hard-fail check.
 // Output is indented for the else-block; interior prompt lines stay column-0.
 function agentCall({ key, prompt, schema, agentFrag, modelFrag, label, phase: ph, check }) {
@@ -517,6 +601,12 @@ const PHASES = [
       schema: SCHEMA({ gatePassed: { type: 'boolean' }, critical: { type: 'number' }, high: { type: 'number' }, summary: { type: 'string' }, buildCmd: { type: 'string' }, buildExit: { type: 'number' } }, ['gatePassed', 'critical', 'high', 'buildCmd', 'buildExit']),
       throwMsg: `'Review failed: unresolved Critical/High or tests not green after 3 rounds — ' + (last && last.summary || '')`,
     })) },
+
+  // FrontendGate: UI/mobile verification (--frontend web|mobile|both). Positioned AFTER the
+  // code-quality gate (CodeGate/ReVerify under --cycle; merged Review under lite) so evidence
+  // reflects final code, and BEFORE DoDGate/Writeup so DoDGate can cite the evidence manifest
+  // at implementation-notes/frontend-evidence/manifest.json.
+  { title: 'FrontendGate', enabledWhen: withFrontend, build: () => emitPhase('FrontendGate', frontendBody()) },
 
   { title: 'DocsGate', enabledWhen: enforceDocs, build: () => emitPhase('DocsGate',
     agentCall({

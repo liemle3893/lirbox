@@ -1,0 +1,3 @@
+${inWorktree('frontend-guard', { notes: false })}
+
+Inspect the diff of ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WORKTREE}). Does it touch UI files — web components/pages/templates, styles (css/scss/tailwind), markup, frontend routes/assets, or mobile screens/views/layouts/storyboards? Return isUI and a one-line reason. Do NOT edit anything.
