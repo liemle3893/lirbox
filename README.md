@@ -103,6 +103,9 @@ pushing new commits is enough for installed users to pick up updates on
   pass → review the auto-PR. Worked example with real before/after numbers.
 - [`skill-train` recipe](./plugins/lirbox/skills/prospector/references/skill-train.md) — point
   `prospector` at a skill to hill-climb its held-out task-pass-rate.
+- [Running the arena](./docs/arena-guide.md) — how to run `arena` (skill + manual orchestration),
+  add fixture tasks, compare conductor **versions** via `--plugin-dir`, and read the leaderboard.
+  Includes a worked run (current vs baseline conductor) and the live-run gotchas.
 - [SkillOpt exploration](./docs/skillopt-exploration.md) — why these controls exist (the Microsoft
   SkillOpt mapping onto `prospector`/`whetstone`) and the empirical run that validated them.
 

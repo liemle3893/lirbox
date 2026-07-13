@@ -1,0 +1,47 @@
+diff --git a/src/cli.js b/src/cli.js
+index afb0045..20b6c2d 100644
+--- a/src/cli.js
++++ b/src/cli.js
+@@ -4,6 +4,9 @@ function run(argv, svc) {
+   const [cmd, ...rest] = argv;
+   if (cmd === "add") return svc.create(rest.join(" "));
+   if (cmd === "list") return svc.pending();
++  if (cmd === "tag") return svc.tag(Number(rest[0]), rest[1]);
++  if (cmd === "bytag") return svc.byTag(rest[0]);
++  if (cmd === "stats") return svc.stats();
+   throw new Error("unknown command: " + cmd);
+ }
+ module.exports = { run };
+diff --git a/src/service.js b/src/service.js
+index c9c426d..b1baa7b 100644
+--- a/src/service.js
++++ b/src/service.js
+@@ -5,5 +5,9 @@ class NoteService {
+   create(text) { if (!text) throw new Error("text required"); return this.store.add(text); }
+   complete(id) { const n = this.store.get(id); if (!n) throw new Error("not found"); n.done = true; return n; }
+   pending() { return this.store.all().filter(n => !n.done); }
++  tag(id, tag) { const n = this.store.addTag(id, tag); if (!n) throw new Error("not found"); return n; }
++  untag(id, tag) { const n = this.store.removeTag(id, tag); if (!n) throw new Error("not found"); return n; }
++  byTag(tag) { return this.store.all().filter(n => n.tags.includes(tag)); }
++  stats() { const s = {}; for (const n of this.store.all()) for (const t of n.tags) s[t] = (s[t] || 0) + 1; return s; }
+ }
+ module.exports = { NoteService };
+diff --git a/src/store.js b/src/store.js
+index f0c794e..651a6b4 100644
+--- a/src/store.js
++++ b/src/store.js
+@@ -2,10 +2,12 @@
+ const fs = require("fs");
+ class Store {
+   constructor() { this.notes = []; this.seq = 0; }
+-  add(text) { const n = { id: ++this.seq, text, done: false }; this.notes.push(n); return n; }
++  add(text) { const n = { id: ++this.seq, text, done: false, tags: [] }; this.notes.push(n); return n; }
+   get(id) { return this.notes.find(n => n.id === id) || null; }
+   all() { return this.notes.slice(); }
++  addTag(id, tag) { const n = this.get(id); if (!n) return null; if (!n.tags.includes(tag)) n.tags.push(tag); return n; }
++  removeTag(id, tag) { const n = this.get(id); if (!n) return null; const i = n.tags.indexOf(tag); if (i !== -1) n.tags.splice(i, 1); return n; }
+   save(path) { fs.writeFileSync(path, JSON.stringify({ notes: this.notes, seq: this.seq })); }
+-  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes; s.seq = d.seq; return s; }
++  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes.map(n => ({ ...n, tags: n.tags || [] })); s.seq = d.seq; return s; }
+ }
+ module.exports = { Store };

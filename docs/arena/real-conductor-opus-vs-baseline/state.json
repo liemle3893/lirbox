@@ -1,0 +1,89 @@
+{
+  "name": "real-conductor-opus-vs-baseline",
+  "ratings": {
+    "7cdd3fe6": 2.9919997527865836,
+    "f750a2aa": 0,
+    "8f6732dd": 0.008000247213416259
+  },
+  "matrix": {
+    "7cdd3fe6": {
+      "7cdd3fe6": null,
+      "f750a2aa": 1,
+      "8f6732dd": 1
+    },
+    "f750a2aa": {
+      "7cdd3fe6": 0,
+      "f750a2aa": null,
+      "8f6732dd": 0
+    },
+    "8f6732dd": {
+      "7cdd3fe6": 0,
+      "f750a2aa": 1,
+      "8f6732dd": null
+    }
+  },
+  "tallies": [
+    {
+      "a": "7cdd3fe6",
+      "b": "f750a2aa",
+      "aWins": 1,
+      "bWins": 0,
+      "ties": 0
+    },
+    {
+      "a": "7cdd3fe6",
+      "b": "8f6732dd",
+      "aWins": 3,
+      "bWins": 0,
+      "ties": 0
+    },
+    {
+      "a": "f750a2aa",
+      "b": "8f6732dd",
+      "aWins": 0,
+      "bWins": 1,
+      "ties": 0
+    }
+  ],
+  "runs": [
+    {
+      "taskId": "notes-add-tags",
+      "configHash": "7cdd3fe6",
+      "runIndex": 0,
+      "forfeit": false
+    },
+    {
+      "taskId": "notes-add-tags",
+      "configHash": "7cdd3fe6",
+      "runIndex": 1,
+      "forfeit": false
+    },
+    {
+      "taskId": "notes-add-tags",
+      "configHash": "f750a2aa",
+      "runIndex": 0,
+      "forfeit": true,
+      "forfeitReason": "no-wf-or-timeout"
+    },
+    {
+      "taskId": "notes-add-tags",
+      "configHash": "f750a2aa",
+      "runIndex": 1,
+      "forfeit": true,
+      "forfeitReason": "no-wf-or-timeout"
+    },
+    {
+      "taskId": "notes-add-tags",
+      "configHash": "8f6732dd",
+      "runIndex": 0,
+      "forfeit": false
+    },
+    {
+      "taskId": "notes-add-tags",
+      "configHash": "8f6732dd",
+      "runIndex": 1,
+      "forfeit": true,
+      "forfeitReason": "no-wf-or-timeout"
+    }
+  ]
+}
