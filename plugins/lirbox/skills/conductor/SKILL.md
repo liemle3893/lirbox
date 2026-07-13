@@ -131,6 +131,26 @@ propose a `frontend` block — per-target engine chain + viewport matrix, e.g.
 so the run gets a **FrontendGate**. The chain travels as DATA in the DoD file — the generator
 splices it and never probes the machine.
 
+**Content goals** — when the goal is content-shaped (touches `docs/`, `*.md`, or marketing
+copy), additionally probe the repo NOW (main session) for existing prose tooling — `.vale.ini`,
+`cspell.json`, `.markdownlint*`, or a docs-lint npm script — and propose a **checkable
+criterion** in the SAME one-shot DoD `AskUserQuestion`. This is a plain entry appended to
+`criteria[]`, **not** a `dod.json` block: DoDGate reads `criteria[]` and runs each `check` inside
+the worktree, and there is no content phase to consume a block. Repo has its own tooling → propose
+that command (e.g. `check: "npx vale docs/"`). Repo has none → propose the built-in floor
+`prose-lint.mjs` (a zero-dep structural linter: heading skips, dead local links, unbalanced
+fences, placeholder markers, malformed frontmatter). Because DoDGate runs the `check` inside the
+target **worktree** but `prose-lint.mjs` ships in the plugin dir, **copy it into the worktree at
+DoD-acquisition** (e.g. `.workflows/prose-lint.mjs`) and reference that worktree-local path — this
+is resume-proof (survives a mid-run plugin update; no absolute plugin-cache path that can move).
+The frozen criterion:
+
+```json
+{ "id": "prose-lint", "tier": "checkable",
+  "text": "docs prose passes the structural lint (headings, local links, fences, no placeholders)",
+  "check": "node .workflows/prose-lint.mjs docs/" }
+```
+
 Whatever the source, confirm ONCE with the human (one `AskUserQuestion`: accept / edit), then
 freeze: write the JSON to `.workflows/<name>.dod.json` and pass `--dod-file` in step 2. bare-tier
 runs may skip the DoD entirely; lite/delivery require it (`--no-dod` is the explicit opt-out).
