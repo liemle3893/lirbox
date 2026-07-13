@@ -214,9 +214,11 @@ function generate(name) {
   L.push("    ` --output-format stream-json --verbose  (model=${cfg.model}, effort=${cfg.effort}). Redirect the` +");
   L.push("    ` trace to a log OUTSIDE the clone (else it pollutes the diff). Time out → kill → forfeit.\\n` +");
   L.push("    `3. VERIFY conductor genuinely engaged (headless claude implements small tasks directly): require a` +");
-  L.push("    ` .workflows/ dir OR a wf/ branch in the clone, OR a Workflow tool_use in the trace. If none →` +");
-  L.push("    ` plain-claude fallback → forfeit=true (do NOT count it as a conductor result).\\n` +");
-  L.push("    `4. Capture the delivered diff (git diff against ${cell.sha}, EXCLUDING log/scratch) to \"${out}.diff\".\\n` +");
+  L.push("    ` wf/ branch in the clone (conductor's output branch) — or a .workflows/ dir / Workflow tool_use in` +");
+  L.push("    ` the trace. If none → plain-claude fallback → forfeit=true (do NOT count it as a conductor result).\\n` +");
+  L.push("    `4. Capture the delivered diff FROM conductor's wf/ OUTPUT branch — it delivers there and leaves the` +");
+  L.push("    ` main checkout CLEAN, so diffing the working tree yields NOTHING. Run: git diff ${cell.sha} <wf/branch>` +");
+  L.push("    ` > \"${out}.diff\" (exclude any log/scratch).\\n` +");
   L.push("    `5. forfeit=true if conductor didn't engage / gates failed / errored / timed out / no diff; else false.` +");
   L.push("    ` Write \"${out}.meta\" with {forfeit, forfeitReason, gateOutcome, tokens}.` +");
   L.push("    slotNote(cell.taskId + '-' + cell.configHash + '-' + cell.runIndex),");
