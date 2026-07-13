@@ -25,6 +25,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`conductor`** | Drive the Workflow tool with durable on-disk state, crash/restart resume, worktree isolation, opt-in enforcement gates, and a cost report. For long or interruptible multi-subagent runs (migrations, audits, staged delivery). |
 | **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE surface — keeping a change only when it strictly beats the metric **and** passes the gate, within an optional edit-size budget — then opens a PR for review (never auto-merges). For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost — or a skill's held-out task-pass-rate (see the [`skill-train`](./plugins/lirbox/skills/prospector/references/skill-train.md) recipe). |
 | **`whetstone`** | Overnight, eval-gated skill improver on the same backbone: grinds a backlog through a deterministic floor + per-item acceptance-check (fail-before/pass-after), keeping only changes a check confirms, plus an optional compaction pass that shrinks the skill — then opens a PR for review (never auto-merges). Backlog items are filed by hand **or harvested from failing eval tasks**; SkillOpt-derived controls (train/val scoring, edit-size budget) keep fixes general. For sharpening skills (or other deterministic-output targets). See the [cookbook](./docs/skill-improvement-cookbook.md). |
+| **`arena`** | Reproducible pairwise **leaderboard** on the same backbone: runs `conductor` against frozen fixture tasks under multiple configs (model/mode/effort), judges the **delivered diffs** pairwise (3 runs × 5 position-swapped passes), and emits a Bradley-Terry/win-rate ranking — then opens a PR for review (never auto-merges). For answering "did this change actually improve conductor's output across a task suite?" when there's no single scalar to hill-climb. |
 | **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over the word budget or dense with long prose), unbalanced/missing XML structural tags, weak frontmatter triggers, and oversized inline flowcharts or reference files. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
 
 ### Agents
@@ -64,10 +65,11 @@ help me deeply understand PR 1059   # deep-understanding (interactive, quizzes y
 implement <plan/spec> with resume   # conductor (durable, crash-safe multi-subagent run)
 make the /search endpoint faster    # prospector (proposes a metric + gate, confirms once)
 improve the flowchart skill         # whetstone (overnight, eval-gated, from a backlog)
+which conductor config wins         # arena (pairwise leaderboard over frozen fixtures)
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:skill-lint`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:arena`, `lirbox:skill-lint`).
 
 ## Test locally (no install)
 
@@ -101,6 +103,9 @@ pushing new commits is enough for installed users to pick up updates on
   pass → review the auto-PR. Worked example with real before/after numbers.
 - [`skill-train` recipe](./plugins/lirbox/skills/prospector/references/skill-train.md) — point
   `prospector` at a skill to hill-climb its held-out task-pass-rate.
+- [Running the arena](./docs/arena-guide.md) — how to run `arena` (skill + manual orchestration),
+  add fixture tasks, compare conductor **versions** via `--plugin-dir`, and read the leaderboard.
+  Includes a worked run (current vs baseline conductor) and the live-run gotchas.
 - [SkillOpt exploration](./docs/skillopt-exploration.md) — why these controls exist (the Microsoft
   SkillOpt mapping onto `prospector`/`whetstone`) and the empirical run that validated them.
 

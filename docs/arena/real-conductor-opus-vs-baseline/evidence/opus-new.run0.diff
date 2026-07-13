@@ -1,0 +1,114 @@
+diff --git a/src/cli.js b/src/cli.js
+index afb0045..e33d8f0 100644
+--- a/src/cli.js
++++ b/src/cli.js
+@@ -4,6 +4,9 @@ function run(argv, svc) {
+   const [cmd, ...rest] = argv;
+   if (cmd === "add") return svc.create(rest.join(" "));
+   if (cmd === "list") return svc.pending();
++  if (cmd === "tag") return svc.tag(parseInt(rest[0], 10), rest[1]);
++  if (cmd === "bytag") return svc.byTag(rest[0]);
++  if (cmd === "stats") return svc.stats();
+   throw new Error("unknown command: " + cmd);
+ }
+ module.exports = { run };
+diff --git a/src/service.js b/src/service.js
+index c9c426d..61c6d88 100644
+--- a/src/service.js
++++ b/src/service.js
+@@ -5,5 +5,9 @@ class NoteService {
+   create(text) { if (!text) throw new Error("text required"); return this.store.add(text); }
+   complete(id) { const n = this.store.get(id); if (!n) throw new Error("not found"); n.done = true; return n; }
+   pending() { return this.store.all().filter(n => !n.done); }
++  tag(id, tag) { const n = this.store.addTag(id, tag); if (!n) throw new Error("not found"); return n; }
++  untag(id, tag) { const n = this.store.removeTag(id, tag); if (!n) throw new Error("not found"); return n; }
++  byTag(tag) { return this.store.all().filter(n => n.tags.includes(tag)); }
++  stats() { const c = {}; for (const n of this.store.all()) for (const t of n.tags) c[t] = (c[t] || 0) + 1; return c; }
+ }
+ module.exports = { NoteService };
+diff --git a/src/store.js b/src/store.js
+index f0c794e..39e058b 100644
+--- a/src/store.js
++++ b/src/store.js
+@@ -2,10 +2,12 @@
+ const fs = require("fs");
+ class Store {
+   constructor() { this.notes = []; this.seq = 0; }
+-  add(text) { const n = { id: ++this.seq, text, done: false }; this.notes.push(n); return n; }
++  add(text) { const n = { id: ++this.seq, text, done: false, tags: [] }; this.notes.push(n); return n; }
+   get(id) { return this.notes.find(n => n.id === id) || null; }
+   all() { return this.notes.slice(); }
++  addTag(id, tag) { const n = this.get(id); if (!n) return null; if (!n.tags.includes(tag)) n.tags.push(tag); return n; }
++  removeTag(id, tag) { const n = this.get(id); if (!n) return null; n.tags = n.tags.filter(t => t !== tag); return n; }
+   save(path) { fs.writeFileSync(path, JSON.stringify({ notes: this.notes, seq: this.seq })); }
+-  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes; s.seq = d.seq; return s; }
++  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes.map(n => ({ ...n, tags: n.tags || [] })); s.seq = d.seq; return s; }
+ }
+ module.exports = { Store };
+diff --git a/test/run.js b/test/run.js
+index 949ca50..40a6d75 100644
+--- a/test/run.js
++++ b/test/run.js
+@@ -9,4 +9,62 @@ assert.strictEqual(svc.pending().length, 1);
+ svc.complete(1);
+ assert.strictEqual(svc.pending().length, 0);
+ assert.strictEqual(run(["add", "via", "cli"], svc).text, "via cli");
++
++const fs = require("fs");
++const os = require("os");
++const path = require("path");
++
++// addTag attaches a tag; adding it twice does not duplicate.
++const t = new NoteService();
++const n1 = t.create("tagged note");
++t.tag(n1.id, "work");
++assert.deepStrictEqual(t.store.get(n1.id).tags, ["work"]);
++t.tag(n1.id, "work");
++assert.deepStrictEqual(t.store.get(n1.id).tags, ["work"]);
++
++// removeTag removes a present tag; removing an absent tag is a no-op.
++t.tag(n1.id, "urgent");
++assert.deepStrictEqual(t.store.get(n1.id).tags, ["work", "urgent"]);
++t.untag(n1.id, "work");
++assert.deepStrictEqual(t.store.get(n1.id).tags, ["urgent"]);
++assert.doesNotThrow(() => t.untag(n1.id, "nonexistent"));
++assert.deepStrictEqual(t.store.get(n1.id).tags, ["urgent"]);
++
++// byTag returns exactly the notes carrying a given tag.
++const n2 = t.create("second note");
++const n3 = t.create("third note");
++t.tag(n2.id, "urgent");
++t.tag(n3.id, "later");
++const urgent = t.byTag("urgent");
++assert.deepStrictEqual(urgent.map(n => n.id).sort((x, y) => x - y), [n1.id, n2.id]);
++assert.deepStrictEqual(t.byTag("later").map(n => n.id), [n3.id]);
++assert.deepStrictEqual(t.byTag("missing"), []);
++
++// stats returns correct { tag: count } across notes.
++assert.deepStrictEqual(t.stats(), { urgent: 2, later: 1 });
++
++// tag / untag throw on an unknown id.
++assert.throws(() => t.tag(9999, "x"), /not found/);
++assert.throws(() => t.untag(9999, "x"), /not found/);
++
++// Store.save then Store.load round-trips tags.
++const tmp = path.join(os.tmpdir(), "notes-test-" + process.pid + ".json");
++try {
++  t.store.save(tmp);
++  const loaded = Store.load(tmp);
++  assert.deepStrictEqual(loaded.get(n1.id).tags, ["urgent"]);
++  assert.deepStrictEqual(loaded.get(n3.id).tags, ["later"]);
++  assert.strictEqual(loaded.seq, t.store.seq);
++} finally {
++  fs.unlinkSync(tmp);
++}
++
++// CLI tag / bytag / stats end-to-end.
++const c = new NoteService();
++const cn = c.create("cli note");
++run(["tag", String(cn.id), "home"], c);
++assert.deepStrictEqual(c.store.get(cn.id).tags, ["home"]);
++assert.deepStrictEqual(run(["bytag", "home"], c).map(n => n.id), [cn.id]);
++assert.deepStrictEqual(run(["stats"], c), { home: 1 });
++
+ console.log("all tests passed");

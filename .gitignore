@@ -9,10 +9,11 @@ docs/superpowers/
 .pr-writeup/
 *-writeup.html
 
-# Conductor / prospector / whetstone runtime state (local; the resume key lives here, not tracked)
+# Conductor / prospector / whetstone / arena runtime state (local; the resume key lives here, not tracked)
 .workflows/
 .optimize/
 .improve/
+.arena/
 
 # Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
 implementation-notes/
@@ -32,3 +33,8 @@ implementation-notes/
 # Must come AFTER the filename-globs above so it re-includes anything they would catch.
 !docs/changes/
 !docs/changes/**
+
+# EXCEPTION: arena's Finalize phase PROMOTES the leaderboard into docs/arena/<name>/
+# (leaderboard.html, report.md) — tracked so the finalize PR carries a diff.
+!docs/arena/
+!docs/arena/**

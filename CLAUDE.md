@@ -15,7 +15,7 @@ file. `flowchart` ships a headless `assets/validate.mjs` — run it on output
 (`node .../validate.mjs <file>.html`); it catches Mermaid label-escaping bugs. `deep-understanding` is an
 interactive tutor (no artifact).
 
-**Orchestration / loop skills** (`conductor`, `prospector`, `whetstone`) share one backbone: a deterministic
+**Orchestration / loop skills** (`conductor`, `prospector`, `whetstone`, `arena`) share one backbone: a deterministic
 JS *conductor* (the generated `.js`) driving full-tool *worker* subagents. Hard rules when editing them:
 
 - **The conductor layer is restricted — pure JS only: NO `fs`/`git`/`require`/`Date.now()`/`Math.random()`.**
@@ -24,7 +24,8 @@ JS *conductor* (the generated `.js`) driving full-tool *worker* subagents. Hard 
   and regenerate with `--force`. Hand-edits reintroduce drift.
 - **Run the regression net after touching a generator:**
   `node plugins/lirbox/skills/<skill>/scripts/test-*.cjs` (asserts loop/phase structure + the no-fs scan +
-  unit helpers). `conductor` → `test-scaffold.cjs`, `prospector` → `test-optimize.cjs`, `whetstone` → `test-improve.cjs`.
+  unit helpers). `conductor` → `test-scaffold.cjs`, `prospector` → `test-optimize.cjs`, `whetstone` → `test-improve.cjs`,
+  `arena` → `test-arena.cjs`.
 - **Non-destructive default:** these never auto-**merge**. `prospector`/`whetstone` finalize by
   auto-opening a **PR** (never a merge) with the run report as the body — the human reviews and
   merges; fall back to leaving the branch when there's no remote. Run branches are per-run and
@@ -34,8 +35,12 @@ JS *conductor* (the generated `.js`) driving full-tool *worker* subagents. Hard 
 
 ## Runtime artifacts are gitignored — never commit them
 
-`.workflows/` (conductor), `.optimize/` (prospector), `.improve/` (whetstone), `.worktrees/`, generated
+`.workflows/` (conductor), `.optimize/` (prospector), `.improve/` (whetstone), `.arena/` (arena), `.worktrees/`, generated
 `*-flowchart/codewalk/plan-deck.html`, and `implementation-notes/` (worker build-scratch).
+
+**Exception — arena delivery artifacts ARE committed.** arena's `Finalize` phase promotes the leaderboard
+(`leaderboard.html` + `report.md`) into `docs/arena/<name>/`, which `.gitignore` un-ignores (`!docs/arena/**`)
+so it rides the PR — the same pattern as conductor's `docs/changes/**`.
 
 **Exception — conductor delivery artifacts ARE committed.** conductor's `Writeup` phase *promotes* the
 worktree's kept `implementation-notes/*.html` plus a generated `writeup.html` + `design.html` + DocsGate

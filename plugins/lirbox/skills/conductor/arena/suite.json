@@ -1,0 +1,15 @@
+{
+  "budget": { "runs": 3, "judges": 5, "cellCapSec": 3600 },
+  "configs": [
+    { "model": "opus", "mode": "auto", "effort": "high" },
+    { "model": "opus", "mode": "auto", "effort": "medium" }
+  ],
+  "tasks": [
+    {
+      "id": "notes-add-tags",
+      "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/notes-add-tags/task.md",
+      "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-add-tags/repo.bundle",
+      "sha": "fbd6c0be49d8d40baee2f3ca812a9f6877809c4e"
+    }
+  ]
+}
