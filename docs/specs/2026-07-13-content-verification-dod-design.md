@@ -43,13 +43,21 @@ violation report otherwise.
 |---|---|
 | Heading levels don't skip (h1→h3 without h2) | Broken document structure — breaks TOC/accessibility in every content type. |
 | Local link targets resolve (`./foo.md`) | Dead internal link. Highest-value check; the most common real docs defect. |
-| In-doc & cross-doc anchors resolve (`#sec`, `other.md#h`) | The link that points at a heading someone later renamed (slugified match). |
 | Fenced code blocks balanced (` ``` ` pairs) | An unclosed fence silently swallows the rest of the doc at render time. |
 | No placeholder markers (`TODO`, `TBD`, `FIXME`, `lorem ipsum`, empty links `[t]()`) | For a *definition-of-done* meter, "did you ship a TODO" is exactly the question. |
 | Frontmatter parses as valid YAML **if present** | A malformed frontmatter block is a real defect; absence is not (a README needs none). |
 
+> **Amendment (plan-check, 2026-07-13):** heading-**anchor** resolution (`#sec`, `other.md#h`) is
+> moved OUT of the default set to opt-in (`--anchors`), because it is deterministic only against a
+> *chosen* slug algorithm — a repo whose renderer slugs headings differently would see the check go
+> RED on good content, violating this design's own filtering principle. When enabled it pins a
+> documented GitHub-style slugger (state the assumption). The **local file-link existence** half
+> (`./foo.md` exists) is renderer-independent and stays in the default set above.
+
 **Opt-in checks (checkable but the threshold is a judgment call — OFF by default):**
 
+- `--anchors`: heading-anchor resolution (`#sec`, `other.md#h`) via a pinned GitHub-style slugger.
+  Off by default (renderer-dependent — see the amendment above); on when the repo's renderer matches.
 - `--flesch <min>`: reading-ease bound. Deterministic, but the right threshold for marketing ≠ API
   reference, so only when the human sets it.
 - `--dupe-words`: duplicate consecutive words ("the the"). Catches typos but false-positives on
@@ -63,23 +71,42 @@ and **external HTTP links** (needs network → non-deterministic — disqualifyi
 
 ### 2. SKILL.md step 1c — content-tooling probe
 
-Symmetric to the frontend block. When the goal is content-shaped (touches `docs/`, `*.md`, marketing
-copy), DoD acquisition probes the repo for existing prose tooling (`.vale.ini`, `cspell.json`,
-`.markdownlint*`, a docs-lint npm script) and proposes checkable criteria in the **same one-shot DoD
-confirmation**:
+When the goal is content-shaped (touches `docs/`, `*.md`, marketing copy), DoD acquisition probes the
+repo for existing prose tooling (`.vale.ini`, `cspell.json`, `.markdownlint*`, a docs-lint npm script)
+and proposes a checkable criterion in the **same one-shot DoD confirmation**:
 
 - repo has tooling → propose the repo's own command (e.g. `npx vale docs/`).
-- repo has none → propose `node <conductor>/scripts/prose-lint.mjs <path>` (the built-in floor).
+- repo has none → propose the built-in floor `prose-lint.mjs`.
 
-Frozen into `dod.json` under a `content` block, mirroring the `frontend` block:
+> **Amendment (plan-check, 2026-07-13) — this is NOT a `dod.json` block.** The original spec proposed
+> a `content` block "mirroring the `frontend` block." That is refuted: a `dod.json` block does
+> something only because a **phase** reads it — the generator parses `parsed.frontend` and splices it
+> into the FrontendGate phase prompt (`scaffold-workflow.cjs:121,417`). DoDGate itself reads
+> `criteria[]` and nothing else (`dodgate-verify.txt:4`). With **no content phase**, a `content`
+> block would be inert — read by nobody, the linter never runs, the run ships green. So the probe
+> instead **appends a normal checkable criterion to `criteria[]`** — the array DoDGate already runs
+> and fix-loops. No block, no new field, no reader to build (simpler than the original).
+
+The frozen criterion:
 
 ```json
-{ "criteria": [...],
-  "content": { "lint": "node .../scripts/prose-lint.mjs docs/",
-               "paths": ["docs/"] } }
+{ "criteria": [
+    { "id": "prose-lint", "tier": "checkable",
+      "text": "docs prose passes the structural lint (headings, local links, fences, no placeholders)",
+      "check": "node /ABS/PATH/TO/plugins/lirbox/skills/conductor/scripts/prose-lint.mjs docs/" }
+  ] }
 ```
 
-The **existing DoDGate** runs these as checkable criteria (exit 0 = met) and fix-loops them — no new
+> **Condition (plan-check, 2026-07-13) — absolute path.** The `check` command runs **inside the
+> target project's worktree** (`dodgate-verify.txt:4`), but `prose-lint.mjs` ships in the lirbox
+> plugin dir. A bare `node .../prose-lint.mjs` won't resolve from an arbitrary worktree, and
+> `${CLAUDE_PLUGIN_ROOT}` is a skill-context var, not guaranteed in a bare shell. So the step-1c
+> probe must resolve the **absolute** plugin path at DoD-acquisition and freeze THAT into the
+> criterion's `check` (shown as `/ABS/PATH/...` above). Resume caveat: an absolute plugin-cache path
+> can move if the plugin updates between sessions — the plan should note re-resolving on resume, or
+> copying `prose-lint.mjs` into the worktree at probe time as an alternative.
+
+The **existing DoDGate** runs this as a checkable criterion (exit 0 = met) and fix-loops it — no new
 machinery.
 
 ## Process split (matches the frontend-gate delivery)
