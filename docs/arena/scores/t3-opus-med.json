@@ -1,0 +1,57 @@
+{
+  "name": "t3-opus-med",
+  "date": "2026-07-14",
+  "suiteHash": "d6f7224a5da7",
+  "suiteTasks": [
+    "notes-add-tags",
+    "notes-archive"
+  ],
+  "config": {
+    "model": "claude-opus-4-8",
+    "effort": "medium",
+    "pluginDir": null,
+    "runs": 1
+  },
+  "cells": [
+    {
+      "task": "notes-add-tags",
+      "file": "notes-add-tags--opusmed.grade",
+      "engaged": true,
+      "resolved": true,
+      "f2p": {
+        "passed": 3,
+        "total": 3,
+        "failures": []
+      },
+      "p2p": {
+        "pass": true
+      }
+    },
+    {
+      "task": "notes-archive",
+      "file": "notes-archive--opusmed.grade",
+      "engaged": true,
+      "resolved": true,
+      "f2p": {
+        "passed": 3,
+        "total": 3,
+        "failures": []
+      },
+      "p2p": {
+        "pass": true
+      }
+    }
+  ],
+  "score": {
+    "resolved": 2,
+    "total": 2,
+    "rate": 1,
+    "wilson95": [
+      0.342,
+      1
+    ],
+    "f2pPassed": 6,
+    "f2pTotal": 6,
+    "engagementRate": 1
+  }
+}

@@ -130,6 +130,31 @@ implementation must pass); resolve modules via `process.cwd()`; one concern per 
 discrimination with `--validate` (all F2P RED on base). `test-arena.cjs` re-proves this for every
 graded task on every run.
 
+## 3c. Absolute scoring — independent runs, compare scores (SWE-bench mode)
+
+The pairwise arena answers "which of these two is better" but needs both configs run together. For
+**"benchmark the new version alone, compare against recorded scores"** use the absolute scorecard:
+
+```bash
+# one command: run the whole frozen suite for ONE config → scorecard + scoreboard row
+node plugins/lirbox/skills/arena/scripts/swe-run.mjs --name conductor-v2 --model claude-opus-4-8 \
+     --effort high [--plugin-dir /tmp/lirbox-at-some-commit] [--runs 3]
+
+cat docs/arena/scores/README.md      # the scoreboard — every recorded run, one row each
+```
+
+- **Score = resolution rate** (`resolved cells / total cells`) over the frozen suite — deterministic
+  (rung 1), so it's absolute and comparable across time. F2P partial credit + engagement rate are
+  reported alongside; a cell that times out or bypasses conductor **counts in the denominator**.
+- **Suite fingerprint = the comparability contract.** Every scorecard embeds a hash of `suite.json` +
+  each graded task's `task.md`/`repo.ref`/graders. **Only same-hash rows are comparable**; the
+  scoreboard flags ⚠️stale-suite rows automatically. Changing any task/grader starts a new era.
+- **Wilson 95% CI is always shown** — 2/2 is "100%" with an honest 34%–100% interval. Overlapping
+  intervals = "not distinguished yet"; raise `--runs` to tighten.
+- **What the score does NOT capture:** quality beyond correctness (coverage, clarity, thoroughness).
+  That is inherently relative — use the pairwise judge layer among resolved runs when you need it.
+  Absolute score for "did it get better at delivering correct work"; pairwise for taste.
+
 ## 4. How a cell is scored (and forfeited)
 
 Only the **delivered diff** is judged. A run is a **forfeit** (cannot win, flagged in the report,

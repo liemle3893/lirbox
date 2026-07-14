@@ -153,5 +153,33 @@ if (okPure) console.log('PASS conductor purity (no fs/git/clock/random)');
   }
 }
 
+// ---------------------------------------------------------------- 6. ABSOLUTE SCORECARD (swe-score)
+// Fingerprint must be deterministic; score math must be honest (rate + Wilson CI + partial credit).
+{
+  const { execFileSync } = require('child_process');
+  const fs = require('fs');
+  const os = require('os');
+  const SCORE = path.join(__dirname, 'swe-score.mjs');
+  const fp1 = JSON.parse(execFileSync('node', [SCORE, '--fingerprint'], { encoding: 'utf8' }));
+  const fp2 = JSON.parse(execFileSync('node', [SCORE, '--fingerprint'], { encoding: 'utf8' }));
+  assert(fp1.hash === fp2.hash && /^[0-9a-f]{12}$/.test(fp1.hash), 'swe-score: fingerprint deterministic 12-hex');
+  assert(fp1.tasks.length >= 2, 'swe-score: fingerprint covers the graded tasks');
+
+  // synthetic cells: 1 resolved + 1 unresolved(partial) → rate 0.5, f2p 4/6, CI straddles 0.5
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swe-score-test-'));
+  fs.writeFileSync(path.join(tmp, 'a--x.grade'), JSON.stringify({ task: 'a', resolved: true, p2p: { pass: true }, f2p: { passed: 3, total: 3 } }));
+  fs.writeFileSync(path.join(tmp, 'b--x.grade'), JSON.stringify({ task: 'b', resolved: false, p2p: { pass: true }, f2p: { passed: 1, total: 3 } }));
+  const out = JSON.parse(execFileSync('node', [SCORE, '--cells', tmp, '--name', 'net-selftest', '--config', '{}'], { encoding: 'utf8' }));
+  eq(out.score.resolved, 1, 'swe-score: resolved count');
+  eq(out.score.rate, 0.5, 'swe-score: rate = 1/2');
+  eq(out.score.f2pPassed, 4, 'swe-score: F2P partial credit summed');
+  assert(out.score.wilson95[0] < 0.5 && out.score.wilson95[1] > 0.5, 'swe-score: Wilson CI straddles the point estimate');
+  // clean up the self-test scorecard so it never pollutes the real scoreboard
+  fs.rmSync(path.join(__dirname, '..', '..', '..', '..', '..', 'docs', 'arena', 'scores', 'net-selftest.json'), { force: true });
+  execFileSync('node', [SCORE, '--index'], { encoding: 'utf8' });
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log('PASS swe-score fingerprint + scorecard math');
+}
+
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
 console.log('\nALL PASS');
