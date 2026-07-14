@@ -5,6 +5,8 @@ conductor against frozen fixture tasks under multiple configs, judging the **del
 pairwise, and emitting a Bradley-Terry / win-rate **leaderboard**. It's the "no single scalar to
 hill-climb" sibling of `prospector` (scalar) and `whetstone` (RED→GREEN).
 
+**New here? Read [arena-handoff.md](./arena-handoff.md) first** — system state, proven claims, gaps.
+
 This guide covers both ways to run it: the **skill** (the durable Workflow loop) and a **manual
 orchestration** for a controlled, observable run — plus the real-world gotchas a live run surfaces.
 
