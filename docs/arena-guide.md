@@ -5,6 +5,8 @@ conductor against frozen fixture tasks under multiple configs, judging the **del
 pairwise, and emitting a Bradley-Terry / win-rate **leaderboard**. It's the "no single scalar to
 hill-climb" sibling of `prospector` (scalar) and `whetstone` (RED→GREEN).
 
+**New here? Read [arena-handoff.md](./arena-handoff.md) first** — system state, proven claims, gaps.
+
 This guide covers both ways to run it: the **skill** (the durable Workflow loop) and a **manual
 orchestration** for a controlled, observable run — plus the real-world gotchas a live run surfaces.
 
@@ -53,7 +55,7 @@ node plugins/lirbox/skills/arena/scripts/make-fixture.cjs --task <id> --dir /tmp
 
 ```jsonc
 {
-  "budget": { "runs": 3, "judges": 5, "cellCapSec": 3600 },
+  "budget": { "runs": 3, "judges": 4, "cellCapSec": 3600 },
   "configs": [ { "model": "opus", "mode": "auto", "effort": "high" },
                { "model": "opus", "mode": "auto", "effort": "medium" } ],
   "tasks": [ { "id": "<id>", "taskFile": "…/task.md", "bundle": "…/repo.bundle", "sha": "<SHA>" } ]
@@ -98,6 +100,63 @@ Hold the model constant and vary the version to isolate the conductor delta.
 
 ---
 
+## 3b. SWE-bench-style grading (rung 1 — "know for sure")
+
+Every `graded: true` task in `suite.json` also ships a **hidden `grader/` dir** (never shown to the
+agent — the cell passes the task *content*, not the file path, into the sub-claude prompt):
+
+```
+tasks/<id>/grader/fail_to_pass/*.test.cjs   # RED on the base commit, GREEN iff the feature is correct
+# PASS_TO_PASS = the fixture's own `npm test` — must STAY green after the diff
+```
+
+The harness mirrors SWE-bench's FAIL_TO_PASS / PASS_TO_PASS verdict:
+
+```bash
+# grade a delivered diff → { p2p, f2p, resolved } ; exit 0 iff resolved
+node plugins/lirbox/skills/arena/scripts/swe-grade.mjs --task <id> --diff <path.diff>
+# or grade a wf/ branch in an existing clone
+node plugins/lirbox/skills/arena/scripts/swe-grade.mjs --task <id> --repo <clone> --ref wf/<branch>
+# discrimination gate: F2P must be RED on the unmodified base (run by test-arena.cjs for every graded task)
+node plugins/lirbox/skills/arena/scripts/swe-grade.mjs --task <id> --validate
+```
+
+**How it layers with judging:** `resolved` is the hard, deterministic gate — an unresolved delivery
+**forfeits** (cannot win, no matter how good it looks). Pairwise judging then ranks quality *among the
+resolved*. First real-data validation: all 3 committed evidence diffs (opus-new ×2, opus-old ×1)
+**resolve** — so the judge's 3–0 preference for the new conductor measured quality *beyond*
+correctness (coverage, thoroughness), exactly the intended layering.
+
+**Authoring a grader:** write F2P tests ONLY against interfaces `task.md` explicitly names (any correct
+implementation must pass); resolve modules via `process.cwd()`; one concern per file; then prove
+discrimination with `--validate` (all F2P RED on base). `test-arena.cjs` re-proves this for every
+graded task on every run.
+
+## 3c. Absolute scoring — independent runs, compare scores (SWE-bench mode)
+
+The pairwise arena answers "which of these two is better" but needs both configs run together. For
+**"benchmark the new version alone, compare against recorded scores"** use the absolute scorecard:
+
+```bash
+# one command: run the whole frozen suite for ONE config → scorecard + scoreboard row
+node plugins/lirbox/skills/arena/scripts/swe-run.mjs --name conductor-v2 --model claude-opus-4-8 \
+     --effort high [--plugin-dir /tmp/lirbox-at-some-commit] [--runs 3]
+
+cat docs/arena/scores/README.md      # the scoreboard — every recorded run, one row each
+```
+
+- **Score = resolution rate** (`resolved cells / total cells`) over the frozen suite — deterministic
+  (rung 1), so it's absolute and comparable across time. F2P partial credit + engagement rate are
+  reported alongside; a cell that times out or bypasses conductor **counts in the denominator**.
+- **Suite fingerprint = the comparability contract.** Every scorecard embeds a hash of `suite.json` +
+  each graded task's `task.md`/`repo.ref`/graders. **Only same-hash rows are comparable**; the
+  scoreboard flags ⚠️stale-suite rows automatically. Changing any task/grader starts a new era.
+- **Wilson 95% CI is always shown** — 2/2 is "100%" with an honest 34%–100% interval. Overlapping
+  intervals = "not distinguished yet"; raise `--runs` to tighten.
+- **What the score does NOT capture:** quality beyond correctness (coverage, clarity, thoroughness).
+  That is inherently relative — use the pairwise judge layer among resolved runs when you need it.
+  Absolute score for "did it get better at delivering correct work"; pairwise for taste.
+
 ## 4. How a cell is scored (and forfeited)
 
 Only the **delivered diff** is judged. A run is a **forfeit** (cannot win, flagged in the report,
@@ -105,10 +164,12 @@ never silently dropped) when:
 
 - conductor did **not** engage — no `wf/` branch / `.workflows/` dir / `Workflow` tool_use in the
   trace (the plain-claude fallback);
-- its gates failed, it errored, timed out against `cellCapSec`, or produced no diff.
+- its gates failed, it errored, timed out against `cellCapSec`, or produced no diff;
+- the delivery is **unresolved** under the task's hidden SWE grader (§3b) — functionally incorrect
+  deliveries can't win on style.
 
 Whole-pair resolution: one config with zero valid runs loses the pair; both zero → tie; both valid →
-judged. Per pair: `judges` blinded, position-swapped passes; ties count 0.5. Aggregate → Bradley-Terry
+judged. Per pair: `judges` blinded, position-swapped passes (**keep it EVEN** — an odd count turns a position-biased judge into a fake winner; proven live, see the swe-graded-effort run); ties count 0.5. Aggregate → Bradley-Terry
 rating (headline) + win-rate matrix (the legible number the report leads with).
 
 **Capture the diff from conductor's `wf/` branch, not the working tree** — conductor delivers on

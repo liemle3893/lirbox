@@ -1,0 +1,156 @@
+diff --git a/src/cli.js b/src/cli.js
+index afb0045..bb2dbef 100644
+--- a/src/cli.js
++++ b/src/cli.js
+@@ -4,6 +4,9 @@ function run(argv, svc) {
+   const [cmd, ...rest] = argv;
+   if (cmd === "add") return svc.create(rest.join(" "));
+   if (cmd === "list") return svc.pending();
++  if (cmd === "archive") return svc.archive(Number(rest[0]));
++  if (cmd === "unarchive") return svc.unarchive(Number(rest[0]));
++  if (cmd === "archived") return svc.archived();
+   throw new Error("unknown command: " + cmd);
+ }
+ module.exports = { run };
+diff --git a/src/service.js b/src/service.js
+index c9c426d..f27cc41 100644
+--- a/src/service.js
++++ b/src/service.js
+@@ -4,6 +4,9 @@ class NoteService {
+   constructor(store) { this.store = store || new Store(); }
+   create(text) { if (!text) throw new Error("text required"); return this.store.add(text); }
+   complete(id) { const n = this.store.get(id); if (!n) throw new Error("not found"); n.done = true; return n; }
+-  pending() { return this.store.all().filter(n => !n.done); }
++  archive(id) { const n = this.store.archive(id); if (!n) throw new Error("not found"); return n; }
++  unarchive(id) { const n = this.store.unarchive(id); if (!n) throw new Error("not found"); return n; }
++  pending() { return this.store.all().filter(n => !n.done && !n.archived); }
++  archived() { return this.store.all().filter(n => n.archived); }
+ }
+ module.exports = { NoteService };
+diff --git a/src/store.js b/src/store.js
+index f0c794e..96e0f09 100644
+--- a/src/store.js
++++ b/src/store.js
+@@ -2,10 +2,12 @@
+ const fs = require("fs");
+ class Store {
+   constructor() { this.notes = []; this.seq = 0; }
+-  add(text) { const n = { id: ++this.seq, text, done: false }; this.notes.push(n); return n; }
++  add(text) { const n = { id: ++this.seq, text, done: false, archived: false }; this.notes.push(n); return n; }
+   get(id) { return this.notes.find(n => n.id === id) || null; }
++  archive(id) { const n = this.get(id); if (!n) return null; n.archived = true; return n; }
++  unarchive(id) { const n = this.get(id); if (!n) return null; n.archived = false; return n; }
+   all() { return this.notes.slice(); }
+   save(path) { fs.writeFileSync(path, JSON.stringify({ notes: this.notes, seq: this.seq })); }
+-  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes; s.seq = d.seq; return s; }
++  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes.map(n => ({ ...n, archived: n.archived || false })); s.seq = d.seq; return s; }
+ }
+ module.exports = { Store };
+diff --git a/test/run.js b/test/run.js
+index 949ca50..d6d0f21 100644
+--- a/test/run.js
++++ b/test/run.js
+@@ -1,4 +1,7 @@
+ const assert = require("assert");
++const fs = require("fs");
++const os = require("os");
++const path = require("path");
+ const { Store } = require("../src/store");
+ const { NoteService } = require("../src/service");
+ const { run } = require("../src/cli");
+@@ -9,4 +12,95 @@ assert.strictEqual(svc.pending().length, 1);
+ svc.complete(1);
+ assert.strictEqual(svc.pending().length, 0);
+ assert.strictEqual(run(["add", "via", "cli"], svc).text, "via cli");
++
++// 1. Store defaults: freshly added note has archived === false.
++{
++  const store = new Store();
++  const n = store.add("fresh");
++  assert.strictEqual(n.archived, false);
++}
++
++// 2. Store archive/unarchive: toggles flag, returns the note, null for unknown id.
++{
++  const store = new Store();
++  const n = store.add("todo");
++  const archived = store.archive(n.id);
++  assert.strictEqual(archived, n);
++  assert.strictEqual(n.archived, true);
++  const unarchived = store.unarchive(n.id);
++  assert.strictEqual(unarchived, n);
++  assert.strictEqual(n.archived, false);
++  assert.strictEqual(store.archive(999), null);
++  assert.strictEqual(store.unarchive(999), null);
++}
++
++// 3. Service archive/unarchive: toggles flag, throws for unknown id.
++{
++  const s = new NoteService();
++  const n = s.create("task");
++  assert.strictEqual(s.archive(n.id).archived, true);
++  assert.strictEqual(s.unarchive(n.id).archived, false);
++  assert.throws(() => s.archive(999));
++  assert.throws(() => s.unarchive(999));
++}
++
++// 4. pending() excludes archived notes AND completed notes (two distinct reasons).
++{
++  const s = new NoteService();
++  const keep = s.create("keep");
++  const toArchive = s.create("archive me");
++  const toComplete = s.create("complete me");
++  s.archive(toArchive.id);
++  s.complete(toComplete.id);
++  const pending = s.pending();
++  const ids = pending.map(n => n.id);
++  assert.deepStrictEqual(ids, [keep.id]);
++  assert.ok(!ids.includes(toArchive.id)); // excluded because archived
++  assert.ok(!ids.includes(toComplete.id)); // excluded because done
++}
++
++// 5. archived() returns exactly the archived notes and excludes non-archived ones.
++{
++  const s = new NoteService();
++  const plain = s.create("plain");
++  const arch1 = s.create("arch1");
++  const arch2 = s.create("arch2");
++  s.archive(arch1.id);
++  s.archive(arch2.id);
++  const archivedIds = s.archived().map(n => n.id).sort((x, y) => x - y);
++  assert.deepStrictEqual(archivedIds, [arch1.id, arch2.id]);
++  assert.ok(!archivedIds.includes(plain.id));
++}
++
++// 6. save/load round-trip preserves the archived flag on the right note.
++{
++  const store = new Store();
++  const n1 = store.add("one");
++  const n2 = store.add("two");
++  store.archive(n2.id);
++  const tmpPath = path.join(os.tmpdir(), `notes-test-${process.pid}-${Date.now()}.json`);
++  try {
++    store.save(tmpPath);
++    const loaded = Store.load(tmpPath);
++    const l1 = loaded.get(n1.id);
++    const l2 = loaded.get(n2.id);
++    assert.strictEqual(l1.archived, false);
++    assert.strictEqual(l2.archived, true);
++  } finally {
++    fs.unlinkSync(tmpPath);
++  }
++}
++
++// 7. CLI archive/unarchive/archived operate over the service.
++{
++  const s = new NoteService();
++  const n = s.create("cli note");
++  const archived = run(["archive", String(n.id)], s);
++  assert.strictEqual(archived.archived, true);
++  assert.deepStrictEqual(run(["archived"], s).map(x => x.id), [n.id]);
++  const unarchived = run(["unarchive", String(n.id)], s);
++  assert.strictEqual(unarchived.archived, false);
++  assert.deepStrictEqual(run(["archived"], s), []);
++}
++
+ console.log("all tests passed");
