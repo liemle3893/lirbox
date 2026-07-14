@@ -14,6 +14,9 @@
  *                 on the buggy base (PASS_TO_PASS) while the hidden graders are red.
  *
  * Usage: node make-fixture.cjs --task <id> --dir <workroot> [--bundle <path>] [--fixture <name>]
+ *        [--src <dir>]   # build from an on-disk fixture source tree instead of the inline map
+ *                        # (bigger fixtures live in conductor/arena/fixtures/<name>/; --fixture
+ *                        #  must still name a COMMIT_MSG entry so the bundle sha stays pinned)
  * Prints: SHA=<commit>  BUNDLE=<path>
  */
 const fs = require('fs');
@@ -145,16 +148,23 @@ const FIXTURES = {
 const COMMIT_MSG = {
   'notes-app': 'initial: notes-app (store + service + cli + tests)',
   'notes-app-v2': 'initial: notes-app-v2 (store + service + cli + app + tests)',
+  'notes-app-v3': 'initial: notes-app-v3 (sync-ready: clock + store + replica + codec + snapshot + app)',
 };
 
-const FILES = FIXTURES[fixture];
-if (!FILES) { console.error(`unknown fixture "${fixture}" (have: ${Object.keys(FIXTURES).join(', ')})`); process.exit(1); }
+const srcDir = arg('src', null);
+if (!COMMIT_MSG[fixture]) { console.error(`unknown fixture "${fixture}" (have: ${Object.keys(COMMIT_MSG).join(', ')})`); process.exit(1); }
 
 fs.mkdirSync(dir, { recursive: true });
-for (const [rel, content] of Object.entries(FILES)) {
-  const p = path.join(dir, rel);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, content);
+if (srcDir) {
+  fs.cpSync(path.resolve(srcDir), dir, { recursive: true });
+} else {
+  const FILES = FIXTURES[fixture];
+  if (!FILES) { console.error(`fixture "${fixture}" has no inline file map — pass --src <dir>`); process.exit(1); }
+  for (const [rel, content] of Object.entries(FILES)) {
+    const p = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content);
+  }
 }
 
 const DATE = '2026-01-01T00:00:00Z';
