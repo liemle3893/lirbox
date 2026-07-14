@@ -191,6 +191,12 @@ Then launch:
 Workflow({ scriptPath: ".workflows/<name>.js" })
 ```
 
+**Headless / non-interactive sessions (`claude -p`): launch the Workflow in the FOREGROUND —
+`run_in_background: false` — and do NOT end your turn while the workflow is still running.**
+Ending the turn exits the `-p` process and orphans the run (the background task is killed;
+the `wf/` branch is left with zero commits). Wait for the `Workflow(...)` call to return, then
+finalize (step 5). This applies equally to resume launches (step 4).
+
 Each phase merges `state.json` via its checkpoint worker (preserving `startedAt`).
 
 ### 4. Launch (resume)
