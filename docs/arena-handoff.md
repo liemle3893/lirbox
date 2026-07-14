@@ -68,14 +68,22 @@ docs/arena-guide.md             # full how-to        docs/eval-rungs-2-5-guide.m
 - **Suite fingerprint gates comparability**: any change to `suite.json`/task.md/graders/pins starts a
   new era; old scoreboard rows auto-flag ⚠️stale-suite. Never hand-compare across fingerprints.
 - **Judges budget stays EVEN.** **Failures count in the denominator.** **Never auto-merge** (PR only).
+- **Model IDs are pinned, never aliases**: configs and `swe-run --model` use exact IDs
+  (`claude-opus-4-8[1m]`) — `swe-run` rejects `opus`/`sonnet`/`haiku`, which drift over time and
+  silently corrupt scorecard comparability.
+- **Every graded task proves discrimination both ways**: F2P RED on base (`--validate`, re-run by
+  the net) and `resolved: true` on a gold solution diff (fairness — no impossible graders).
 - Loop-skill rules (CLAUDE.md): conductor layer pure-JS; never hand-edit generated loops; run
   `test-arena.cjs` after touching the generator.
 - Fixture tasks must be **multi-module** or headless claude bypasses conductor entirely.
 
 ## Known gaps / next steps (in value order)
 
-1. **Suite is too easy** — every real run resolves 2/2, so the absolute score can't yet separate
-   configs. Add harder tasks (multi-step, edge-case-laden); each addition = new fingerprint era.
+1. ~~**Suite is too easy**~~ — ADDRESSED: the suite now has a 5-task difficulty ladder (2 easy /
+   2 medium / 1 hard) built from SWE-bench's empirical difficulty factors (multi-file scope,
+   edge-case-laden graders, fault localization — see arena-guide §3b). Every new task is proven
+   RED-on-base (`--validate`) AND GREEN-on-gold (a reference solution resolves). Remaining:
+   run a real benchmark on the new era to confirm the ladder actually spreads configs.
 2. **The `lirbox:arena` skill loop end-to-end** — the generated Workflow loop is structure-tested and
    its cell contract is live-proven, but a full skill-invoked run (Setup→…→Finalize with PR) hasn't
    been executed as one piece.

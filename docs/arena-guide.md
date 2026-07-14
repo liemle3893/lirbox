@@ -56,8 +56,8 @@ node plugins/lirbox/skills/arena/scripts/make-fixture.cjs --task <id> --dir /tmp
 ```jsonc
 {
   "budget": { "runs": 3, "judges": 4, "cellCapSec": 3600 },
-  "configs": [ { "model": "opus", "mode": "auto", "effort": "high" },
-               { "model": "opus", "mode": "auto", "effort": "medium" } ],
+  "configs": [ { "model": "claude-opus-4-8[1m]", "mode": "auto", "effort": "high" },
+               { "model": "claude-opus-4-8[1m]", "mode": "auto", "effort": "medium" } ],
   "tasks": [ { "id": "<id>", "taskFile": "…/task.md", "bundle": "…/repo.bundle", "sha": "<SHA>" } ]
 }
 ```
@@ -87,7 +87,7 @@ versions** ("did my conductor edit help?"), point headless claude at a specific 
 
 ```bash
 git worktree add --detach /tmp/lirbox-old <old-commit>
-claude -p "<task>" --plugin-dir /tmp/lirbox-old --model claude-opus-4-8 --effort high \
+claude -p "<task>" --plugin-dir /tmp/lirbox-old --model "claude-opus-4-8[1m]" --effort high \
         --permission-mode auto --output-format stream-json --verbose
 ```
 
@@ -129,8 +129,20 @@ correctness (coverage, thoroughness), exactly the intended layering.
 
 **Authoring a grader:** write F2P tests ONLY against interfaces `task.md` explicitly names (any correct
 implementation must pass); resolve modules via `process.cwd()`; one concern per file; then prove
-discrimination with `--validate` (all F2P RED on base). `test-arena.cjs` re-proves this for every
-graded task on every run.
+discrimination **both ways**: `--validate` (all F2P RED on the unmodified base) AND grade a hand-written
+gold solution diff (`--diff gold.diff` must report `resolved: true` — a grader no correct implementation
+can satisfy is unfairly hard, not hard). `test-arena.cjs` re-proves the RED half for every graded task on
+every run. This mirrors SWE-bench Verified's lesson: most bad benchmark tasks fail on *fairness*
+(graders asserting things the task never stated), not difficulty — difficulty should come from scope
+(multi-file, cross-layer) and fault localization (symptom far from root cause), never from grader
+surprises.
+
+**The difficulty ladder** (`difficulty` field in `suite.json`, informational): `easy` tasks
+(add-tags, archive) are the regression floor — any config scoring below 2/2 there is a loud
+regression; `medium`/`medium-hard` (search, import-export) add pagination/id-remapping edge cases
+where partial implementations fail; `hard` (fix-data-loss) is a SWE-bench-style bug fix on a
+fixture variant with a planted defect — the symptom is reported at the app layer, the root cause
+lives in the store.
 
 ## 3c. Absolute scoring — independent runs, compare scores (SWE-bench mode)
 
@@ -139,7 +151,8 @@ The pairwise arena answers "which of these two is better" but needs both configs
 
 ```bash
 # one command: run the whole frozen suite for ONE config → scorecard + scoreboard row
-node plugins/lirbox/skills/arena/scripts/swe-run.mjs --name conductor-v2 --model claude-opus-4-8 \
+# --model must be an EXACT model ID — bare aliases (opus/sonnet/haiku) are rejected, they drift
+node plugins/lirbox/skills/arena/scripts/swe-run.mjs --name conductor-v2 --model "claude-opus-4-8[1m]" \
      --effort high [--plugin-dir /tmp/lirbox-at-some-commit] [--runs 3]
 
 cat docs/arena/scores/README.md      # the scoreboard — every recorded run, one row each

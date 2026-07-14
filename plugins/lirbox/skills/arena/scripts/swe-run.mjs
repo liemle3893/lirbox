@@ -33,6 +33,9 @@ function die(msg) { console.error('swe-run: ' + msg); process.exit(2); }
 
 const name = arg('name'); if (!name || name === true) die('--name <label> required');
 const model = arg('model'); if (!model || model === true) die('--model <model> required');
+// Floating aliases drift (tomorrow "opus" means a different model) and silently corrupt scorecard
+// comparability — the scorecard must record the EXACT model that ran.
+if (/^(opus|sonnet|haiku|fable|default)$/i.test(String(model))) die(`--model "${model}" is a floating alias — pin an exact model ID (e.g. claude-opus-4-8[1m])`);
 const effort = String(arg('effort', 'high'));
 const pluginDir = arg('plugin-dir', null);
 const runs = Math.max(1, parseInt(arg('runs', '1'), 10) || 1);
