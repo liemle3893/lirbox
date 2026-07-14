@@ -20,7 +20,7 @@
  * setup/usage errors only.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +39,15 @@ const model = arg('model'); if (!model || model === true) die('--model <model> r
 // comparability — the scorecard must record the EXACT model that ran.
 if (/^(opus|sonnet|haiku|fable|default)$/i.test(String(model))) die(`--model "${model}" is a floating alias — pin an exact model ID (e.g. claude-opus-4-8[1m])`);
 const effort = String(arg('effort', 'high'));
-const pluginDir = arg('plugin-dir', null);
+// --plugin-dir must reach `claude` at the PLUGIN level (<checkout>/plugins/lirbox) — the checkout
+// ROOT silently fails to load, and the installed plugin cache shadows the candidate (proven by
+// A/B skill-content probe 2026-07-15). Accept either and resolve to the plugin level.
+let pluginDir = arg('plugin-dir', null);
+if (pluginDir && pluginDir !== true) {
+  pluginDir = resolve(String(pluginDir));
+  const nested = join(pluginDir, 'plugins', 'lirbox');
+  if (existsSync(join(nested, '.claude-plugin')) || existsSync(join(nested, 'skills'))) pluginDir = nested;
+}
 const runs = Math.max(1, parseInt(arg('runs', '1'), 10) || 1);
 const cap = Math.max(60, parseInt(arg('cap', '900'), 10) || 900);
 const keep = arg('keep', null);

@@ -99,6 +99,21 @@ docs/arena-guide.md             # full how-to        docs/eval-rungs-2-5-guide.m
     "one-shot fails, conductor succeeds" true (conductor is the slower arm); the xxhard rung
     currently measures conductor's process overhead honestly — that's the arena doing its job.
     Experiment scorecard: `docs/arena/scores/x-uglify-conductor-opus48-high.json` (0/1, timeout).
+11. **The v2 re-match (post-whetstone conductor) still lost — and characterized exactly why
+    (2026-07-15)** — whetstone run conductor-20260714-182449 KEPT both fixes (PR #31: SKILL.md
+    headless foreground pin + `--independent` parallel fan-out). Re-running the head-to-head
+    surfaced, in order: (a) **`--plugin-dir` at the checkout ROOT silently loads nothing and the
+    installed plugin cache shadows the candidate** — proven by A/B forced-skill-invocation probe;
+    swe-run now resolves `<checkout>/plugins/lirbox` (this invalidates one earlier cell run under
+    the old flag semantics; scorecard overwritten); (b) with the improved skill verifiably loaded,
+    the driver READ the `--independent` guidance and **correctly declined it** — all six fixes
+    touch `lib/compress.js`, and parallel workers share ONE worktree, so 'no shared state'
+    excludes precisely the tasks where parallelism matters (filed:
+    `independent-work-needs-per-worker-worktrees` — per-worker worktrees + a merge step);
+    (c) the driver STILL ended its turn while narrating 'holding my turn open' (filed:
+    `headless-driver-still-ends-turn` — the foreground Workflow call must block; don't narrate
+    waiting). Final cells: 0/6 in ~22-25 min (harness-only wf/ deliveries). The conductor backlog
+    in `feedback/conductor.jsonl` is now the measured path to flipping the head-to-head.
 
 ## Invariants — do not break
 
