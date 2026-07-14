@@ -29,7 +29,13 @@ More phases = more subagent round-trips; reserve them for work that warrants the
 ## Phase / prompt flags
 
 - `--phases` — comma-list of work phase titles.
-- `--prompt <text>` — the prompt for the sole work phase (errors if there are several).
+- `--independent` — declare the work items **independent** (no shared files/state): they fan out
+  **concurrently** in ONE `Work` phase via `parallel()` — one worker per item, per-item prompts/spec
+  overrides preserved, downstream gates verify the combined diff **once**. Use for wide decomposable
+  tasks (N unrelated bugs/items) so the run doesn't pay N× worker spin-up + per-item verification;
+  keep sequential `--phases` for genuinely dependent steps. Each worker's prompt carries the shared-
+  worktree concurrency rules (touch only your item's files, retry on `index.lock`, no repo-wide git
+  ops). Resume granularity is the whole `Work` phase (a crash mid-fan-out re-runs all items).
 - `--prompts-file <json>` — `{ "<PhaseTitle>": "<prompt text>", … }`; fills each work phase's prompt
   from **data** so you never read back or hand-edit the generated script. A phase with no entry keeps
   a `TODO:` stub (fill it by regenerating, not by editing).

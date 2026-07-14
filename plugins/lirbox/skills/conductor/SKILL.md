@@ -164,7 +164,10 @@ Generate the conductor deterministically from `scripts/scaffold-workflow.cjs` �
 hand-edit it (that reintroduces drift). Pass the work-phase prompts as **DATA** (`--prompt` /
 `--prompts-file`); to change structure or fill an empty prompt, re-run the generator with `--force`.
 Size the workflow to the task's triage tier (bare / `--profile lite` / `--profile delivery`) — do
-NOT default to the full profile.
+NOT default to the full profile. When the work items are **independent** (N unrelated bugs/files,
+no shared state — e.g. "fix these 6 unrelated bugs"), add `--independent`: the items fan out
+**concurrently** in one `Work` phase via `parallel()` instead of N sequential phases, and the gates
+verify the combined diff once. Keep sequential `--phases` for genuinely dependent steps.
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \

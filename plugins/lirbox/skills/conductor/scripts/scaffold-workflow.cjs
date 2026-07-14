@@ -14,6 +14,11 @@
  * Options:
  *   --name <slug>        required; drives state/branch/worktree paths
  *   --phases <a,b,c>     work phase titles (default: "Work")
+ *   --independent        declare the work items INDEPENDENT: fan them out concurrently in ONE
+ *                        Work phase via parallel() (one worker per item) instead of N sequential
+ *                        phases, so wide decomposable tasks don't pay N× worker spin-up +
+ *                        per-item verification. Downstream gates still verify the combined diff
+ *                        once. Reserve sequential --phases for genuinely dependent steps.
  *   --prompt <text>      prompt for the sole work phase (data-in; errors if >1 work phase)
  *   --prompts-file <j>   JSON { "<PhaseTitle>": "<prompt>" } filling work-phase prompts from data
  *   --desc <text>        meta.description (default derived from name)
@@ -80,6 +85,10 @@ if (!name || name === true) { console.error('ERROR: --name <slug> is required');
 if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a kebab slug (a-z0-9-)'); process.exit(1); }
 
 const phases = String(arg('phases', 'Work')).split(',').map((s) => s.trim()).filter(Boolean);
+// --independent: the work items share no files/state — fan them out CONCURRENTLY in one Work
+// phase (parallel(), one worker per item) instead of N sequential phases. Sequential emission
+// stays the default and is reserved for genuinely dependent steps.
+const independent = arg('independent', false) === true;
 const desc = arg('desc', `Durable workflow: ${name}`);
 const base = arg('base', '');
 const profile = arg('profile', false);
@@ -475,7 +484,9 @@ function agentCall({ key, prompt, schema, agentFrag, modelFrag, label, phase: ph
 }
 
 // ---- work-phase descriptor: expands to one phase per --phases title (prompts are data-in) ----
-const workPhasesBuild = () => phases.map((p) => {
+// Under --independent it instead expands to ONE 'Work' phase that fans every item out via
+// parallel() — one worker per item, per-item spec overrides preserved, gates verify once.
+const workItem = (p) => {
   const key = camel(p);
   const provided = (spec.phases && spec.phases[p]) || (promptMap[p] != null ? String(promptMap[p]) : '');
   if (!provided) pendingTodos++;
@@ -485,17 +496,45 @@ const workPhasesBuild = () => phases.map((p) => {
   const greenLine = withCycle ? '\n' + promptTpl('green-line.txt') + '\n' : '';
   const sch = (spec.phases && spec.phases[p] && spec.phases[p + '.schema']) || SCHEMA({ summary: { type: 'string' } }, ['summary']);
   const agentFrag = (spec.phases && spec.phases[p + '.agent']) ? at(spec.phases[p + '.agent']) : '';
-  const src = emitPhase(p, agentCall({
-    key,
-    prompt: `\`\${inWorktree('${p}')}\n${greenLine}\n${body}\``,
-    schema: sch,
-    agentFrag,
-    modelFrag: mdl('work'),
-    label: key,
-    phase: p,
-  }));
-  return { title: p, src };
-});
+  return { p, key, greenLine, body, sch, agentFrag };
+};
+const workPhasesBuild = () => {
+  if (independent) {
+    // Sibling workers share ONE worktree — each item's prompt carries the concurrency rules
+    // (touch only your files, retry on index.lock, no repo-wide git ops, no full-suite runs).
+    const conc = promptTpl('independent-concurrency.txt');
+    const items = phases.map(workItem);
+    const calls = items.map(({ p, key, greenLine, body, sch, agentFrag }) => {
+      const lead = [agentFrag, mdl('work')].filter(Boolean).join(' ');
+      return `    () => agent(
+      \`\${inWorktree('${p}')}\n\n${conc}\n${greenLine}\n${body}\`,
+      { label: '${key}', phase: 'Work',${lead ? ' ' + lead : ''}
+        schema: ${sch} },
+    ),`;
+    });
+    const body = `  // Declared-independent work items: fan out CONCURRENTLY — one worker per item,
+  // no shared files/state, and the downstream gates verify the combined diff ONCE.
+  const workOut = await parallel([
+${calls.join('\n')}
+  ])
+  const workKeys = ${JSON.stringify(items.map((i) => i.key))}
+  workOut.forEach((r, i) => { results[workKeys[i]] = r })`;
+    return [{ title: 'Work', src: emitPhase('Work', body) }];
+  }
+  return phases.map((p) => {
+    const { key, greenLine, body, sch, agentFrag } = workItem(p);
+    const src = emitPhase(p, agentCall({
+      key,
+      prompt: `\`\${inWorktree('${p}')}\n${greenLine}\n${body}\``,
+      schema: sch,
+      agentFrag,
+      modelFrag: mdl('work'),
+      label: key,
+      phase: p,
+    }));
+    return { title: p, src };
+  });
+};
 
 const PHASES = [
   // DoD baseline (honesty check): measure each checkable criterion BEFORE any work. A criterion
