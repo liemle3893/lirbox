@@ -114,6 +114,15 @@ docs/arena-guide.md             # full how-to        docs/eval-rungs-2-5-guide.m
     `headless-driver-still-ends-turn` — the foreground Workflow call must block; don't narrate
     waiting). Final cells: 0/6 in ~22-25 min (harness-only wf/ deliveries). The conductor backlog
     in `feedback/conductor.jsonl` is now the measured path to flipping the head-to-head.
+12. **The wide rung + first clean parallel cell (2026-07-15)** — `notes-wide-features`
+    (UNREGISTERED): 8 independent plugins on `notes-app-v5` (v4 + plugin dispatcher; each feature
+    = one new file, so `--independent` is legal by construction). Proven fair both ways. Probes
+    (cap 3600s): raw sonnet-5 resolved 8/8 in **4.4 min** ($0.99) — width x CHEAP items can never
+    defeat raw; the only viable "raw fails, conductor wins" construction remains width x
+    EXPENSIVE items (8-10 uglify bugs), blocked on `independent-work-needs-per-worker-worktrees`.
+    Conductor smoke cell (merged plugin): **RESOLVED 8/8 in 33 min — the first clean end-to-end
+    parallel cell** (`--independent` used, foreground pin held, wf/ delivery graded). Both PR #31
+    fixes are live-proven. Conductor overhead on trivial work: ~28 min of process tax.
 
 ## Invariants — do not break
 
