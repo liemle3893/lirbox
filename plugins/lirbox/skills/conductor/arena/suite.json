@@ -52,6 +52,14 @@
       "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-sync-merge/repo.bundle",
       "sha": "b6aaf65c7a7f5bbea4f038af8ac6b935f76c220c",
       "graded": true
+    },
+    {
+      "id": "uglify-corner-cases",
+      "difficulty": "xxhard",
+      "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/uglify-corner-cases/task.md",
+      "bundle": "plugins/lirbox/skills/conductor/arena/tasks/uglify-corner-cases/repo.bundle",
+      "sha": "e7caa58a08915cafea060ef955d90a663e570a20",
+      "graded": true
     }
   ]
 }

@@ -73,6 +73,17 @@ docs/arena-guide.md             # full how-to        docs/eval-rungs-2-5-guide.m
    ceiling, (b) engagement discrimination, (c) pairwise quality-beyond-correctness — NOT raw
    frontier capability. Capability discrimination needs real-repo scale (SWE-bench Pro's path);
    deferred deliberately.
+9. **"Probe must fail" is structurally unreachable; effort is the real hard-task dimension
+   (2026-07-14)** — three escalations (notes-selective-sync interaction traps, then real-repo
+   uglify-corner-cases: UglifyJS v3.17.4 + six real upstream miscompilations, gold = the upstream
+   fixes) were ALL eventually resolved by an unbounded sonnet-5 session: a fair task (complete
+   spec) + hermetic tests = self-verifiable, and frontier models converge given iteration. What
+   DOES separate rungs is effort: uglify-corner-cases cost sonnet ~2 h wall-clock / ~$13 /
+   ~194 tool calls with repeated 5-min full-suite verifications (vs ~25 min / $1.63 for
+   notes-selective-sync; zero web lookups — solved honestly, 122-line patch vs gold's 27).
+   With the suite's `cellCapSec: 3600`, that effort profile IS the discriminator: weak configs
+   time out, forfeit, or regress the 126-file P2P minefield. notes-selective-sync stays an
+   UNREGISTERED reserve task (proven fair both ways; sonnet one-shots it in ~25 min).
 
 ## Invariants — do not break
 

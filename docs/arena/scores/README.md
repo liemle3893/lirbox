@@ -2,7 +2,7 @@
 
 **Score = resolution rate over the frozen suite** (hidden F2P turn green + fixture P2P stays green,
 per cell). Runs are INDEPENDENT: benchmark a new config/version alone, compare against the rows below.
-**Only rows with the same suite hash are comparable** (current: `8999c314026d`, tasks: notes-add-tags, notes-archive, notes-fix-data-loss, notes-import-export, notes-search, notes-sync-merge);
+**Only rows with the same suite hash are comparable** (current: `68fc7b29894a`, tasks: notes-add-tags, notes-archive, notes-fix-data-loss, notes-import-export, notes-search, notes-sync-merge, uglify-corner-cases);
 ⚠️stale-suite rows predate a suite change. Wilson 95% CI shown — with few cells the interval is wide;
 treat overlapping intervals as "not distinguished yet," and raise runs to tighten.
 

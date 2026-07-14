@@ -142,7 +142,21 @@ surprises.
 regression; `medium`/`medium-hard` (search, import-export) add pagination/id-remapping edge cases
 where partial implementations fail; `hard` (fix-data-loss) is a SWE-bench-style bug fix on a
 fixture variant with a planted defect — the symptom is reported at the app layer, the root cause
-lives in the store.
+lives in the store; `xhard` (sync-merge) is a multi-module feature on the sync-ready fixture;
+`xxhard` (uglify-corner-cases) is the **real-repo tier** — see below.
+
+**The real-repo tier (SWE-bench Pro recipe, proven with uglify-corner-cases):** vendor a real
+zero-dep CJS repo at a released tag (fixture = `git archive <tag>` + vendored dev deps so
+`npm test` is hermetic; the 5 MB tree is NOT committed — a `BUILD.md` re-derivation recipe in
+`fixtures/<name>/` is), then pick REAL historical bug-fix commits after that tag whose regression
+repros are **behaviorally divergent** at the tag (compressed/processed output behaves differently —
+form-only divergences are unfair to grade), use their parent-tag as base and the upstream fixes as
+the free gold solution. Graders assert only behavior equality that task.md states verbatim; omit
+upstream issue numbers from task.md so the fix can't be looked up. Difficulty here is
+**effort-based, not resolvability-based**: a fair task + hermetic tests = a self-verifiable spec,
+which an unbounded frontier session always eventually solves (sonnet-5 needed ~2 h / ~$13 /
+~194 tool calls for uglify-corner-cases vs minutes for fixture tasks) — under `cellCapSec` that
+effort gap is what separates configs.
 
 ## 3c. Absolute scoring — independent runs, compare scores (SWE-bench mode)
 
