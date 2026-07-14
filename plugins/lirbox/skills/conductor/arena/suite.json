@@ -44,6 +44,14 @@
       "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-fix-data-loss/repo.bundle",
       "sha": "c29fa83b9f68fab6421bf81e4290f1387be89346",
       "graded": true
+    },
+    {
+      "id": "notes-sync-merge",
+      "difficulty": "xhard",
+      "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/notes-sync-merge/task.md",
+      "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-sync-merge/repo.bundle",
+      "sha": "b6aaf65c7a7f5bbea4f038af8ac6b935f76c220c",
+      "graded": true
     }
   ]
 }

@@ -2,12 +2,15 @@
 
 **Score = resolution rate over the frozen suite** (hidden F2P turn green + fixture P2P stays green,
 per cell). Runs are INDEPENDENT: benchmark a new config/version alone, compare against the rows below.
-**Only rows with the same suite hash are comparable** (current: `484dce71c275`, tasks: notes-add-tags, notes-archive, notes-fix-data-loss, notes-import-export, notes-search);
+**Only rows with the same suite hash are comparable** (current: `8999c314026d`, tasks: notes-add-tags, notes-archive, notes-fix-data-loss, notes-import-export, notes-search, notes-sync-merge);
 ⚠️stale-suite rows predate a suite change. Wilson 95% CI shown — with few cells the interval is wide;
 treat overlapping intervals as "not distinguished yet," and raise runs to tighten.
 
 | Run | Date | Suite | Config | Resolved | 95% CI | F2P tests |
 |---|---|---|---|---|---|---|
+| base-opus48-1m-high | 2026-07-14 | `484dce71c275` ⚠️stale-suite | claude-opus-4-8[1m] / high | **5/5 (100%)** | 57%–100% | 15/15 |
+| base-opus48-1m-med | 2026-07-14 | `484dce71c275` ⚠️stale-suite | claude-opus-4-8[1m] / medium | **4/5 (80%)** | 38%–96% | 12/12 |
+| base-sonnet5-high | 2026-07-14 | `484dce71c275` ⚠️stale-suite | claude-sonnet-5 / high | **2/5 (40%)** | 12%–77% | 6/6 |
 | t3-opus-high | 2026-07-14 | `d6f7224a5da7` ⚠️stale-suite | claude-opus-4-8 / high | **2/2 (100%)** | 34%–100% | 6/6 |
 | t3-opus-med | 2026-07-14 | `d6f7224a5da7` ⚠️stale-suite | claude-opus-4-8 / medium | **2/2 (100%)** | 34%–100% | 6/6 |
 

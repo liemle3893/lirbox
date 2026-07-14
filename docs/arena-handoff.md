@@ -60,6 +60,19 @@ docs/arena-guide.md             # full how-to        docs/eval-rungs-2-5-guide.m
    branch) → forfeits. Engagement is asserted, never assumed.
 6. **First results** — pairwise: current conductor (`7a2c5ee`) beat baseline (`455ff36`) 3–0 (quality,
    not correctness — all diffs resolved). Absolute: opus high 2/2, opus med 2/2 (CI 34–100%).
+7. **The 5-task ladder discriminates (era 484dce71c275 calibration, 2026-07-14)** — opus/high 5/5
+   (engagement 100%) > opus/medium 4/5 (bypassed conductor on the hard bug-fix) > sonnet-5/high 2/5
+   (bypassed 3 of 5). The discriminating dimension is ENGAGEMENT DISCIPLINE: small-patch /
+   hard-localization tasks tempt direct implementation; lower effort and smaller models yield to
+   the temptation.
+8. **Bypassed work can still be correct** — every cell sonnet-5 forfeited graded `resolved: true`
+   when its working-tree diff was graded out-of-band; sonnet even one-shot the xhard sync-merge
+   task (4/4). **Measurement posture:** at micro-fixture scale, the fairness law (graders assert
+   only task.md-named behavior) hands the solver a complete spec, and frontier models one-shot
+   complete specs. This benchmark therefore honestly measures (a) conductor regressions from the
+   ceiling, (b) engagement discrimination, (c) pairwise quality-beyond-correctness — NOT raw
+   frontier capability. Capability discrimination needs real-repo scale (SWE-bench Pro's path);
+   deferred deliberately.
 
 ## Invariants — do not break
 
