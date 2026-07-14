@@ -181,5 +181,14 @@ if (okPure) console.log('PASS conductor purity (no fs/git/clock/random)');
   console.log('PASS swe-score fingerprint + scorecard math');
 }
 
+// ---------------------------------------------------------------- 7. SWE-RUN MODEL PINNING
+// Scorecards must record exact model IDs — floating aliases drift and corrupt comparability.
+{
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('node', [path.join(__dirname, 'swe-run.mjs'), '--name', 'x', '--model', 'opus'], { encoding: 'utf8' });
+  assert(r.status === 2 && /floating alias/.test(r.stderr), 'swe-run: bare alias "--model opus" must be rejected');
+  if (!failures) console.log('PASS swe-run rejects floating model aliases');
+}
+
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
 console.log('\nALL PASS');

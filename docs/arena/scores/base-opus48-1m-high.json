@@ -1,0 +1,101 @@
+{
+  "name": "base-opus48-1m-high",
+  "date": "2026-07-14",
+  "suiteHash": "484dce71c275",
+  "suiteTasks": [
+    "notes-add-tags",
+    "notes-archive",
+    "notes-fix-data-loss",
+    "notes-import-export",
+    "notes-search"
+  ],
+  "config": {
+    "model": "claude-opus-4-8[1m]",
+    "effort": "high",
+    "runs": 1
+  },
+  "cells": [
+    {
+      "task": "notes-add-tags",
+      "file": "notes-add-tags--run0.grade",
+      "engaged": true,
+      "resolved": true,
+      "f2p": {
+        "passed": 3,
+        "total": 3,
+        "failures": []
+      },
+      "p2p": {
+        "pass": true
+      }
+    },
+    {
+      "task": "notes-archive",
+      "file": "notes-archive--run0.grade",
+      "engaged": true,
+      "resolved": true,
+      "f2p": {
+        "passed": 3,
+        "total": 3,
+        "failures": []
+      },
+      "p2p": {
+        "pass": true
+      }
+    },
+    {
+      "task": "notes-fix-data-loss",
+      "file": "notes-fix-data-loss--run0.grade",
+      "engaged": true,
+      "resolved": true,
+      "f2p": {
+        "passed": 3,
+        "total": 3,
+        "failures": []
+      },
+      "p2p": {
+        "pass": true
+      }
+    },
+    {
+      "task": "notes-import-export",
+      "file": "notes-import-export--run0.grade",
+      "engaged": true,
+      "resolved": true,
+      "f2p": {
+        "passed": 3,
+        "total": 3,
+        "failures": []
+      },
+      "p2p": {
+        "pass": true
+      }
+    },
+    {
+      "task": "notes-search",
+      "file": "notes-search--run0.grade",
+      "engaged": true,
+      "resolved": true,
+      "f2p": {
+        "passed": 3,
+        "total": 3,
+        "failures": []
+      },
+      "p2p": {
+        "pass": true
+      }
+    }
+  ],
+  "score": {
+    "resolved": 5,
+    "total": 5,
+    "rate": 1,
+    "wilson95": [
+      0.566,
+      1
+    ],
+    "f2pPassed": 15,
+    "f2pTotal": 15,
+    "engagementRate": 1
+  }
+}

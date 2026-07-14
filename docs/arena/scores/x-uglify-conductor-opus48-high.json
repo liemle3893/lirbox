@@ -1,0 +1,46 @@
+{
+  "name": "x-uglify-conductor-opus48-high",
+  "date": "2026-07-14",
+  "suiteHash": "68fc7b29894a",
+  "suiteTasks": [
+    "notes-add-tags",
+    "notes-archive",
+    "notes-fix-data-loss",
+    "notes-import-export",
+    "notes-search",
+    "notes-sync-merge",
+    "uglify-corner-cases"
+  ],
+  "config": {
+    "model": "claude-opus-4-8[1m]",
+    "effort": "high",
+    "pluginDir": null,
+    "runs": 1
+  },
+  "cells": [
+    {
+      "task": "uglify-corner-cases",
+      "run": 0,
+      "secs": 3603,
+      "engaged": true,
+      "resolved": false,
+      "f2p": {
+        "passed": 0,
+        "total": 0
+      },
+      "reason": "timeout"
+    }
+  ],
+  "score": {
+    "resolved": 0,
+    "total": 1,
+    "rate": 0,
+    "wilson95": [
+      0,
+      0.793
+    ],
+    "f2pPassed": 0,
+    "f2pTotal": 0,
+    "engagementRate": 1
+  }
+}

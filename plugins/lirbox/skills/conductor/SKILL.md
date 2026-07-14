@@ -164,7 +164,10 @@ Generate the conductor deterministically from `scripts/scaffold-workflow.cjs` �
 hand-edit it (that reintroduces drift). Pass the work-phase prompts as **DATA** (`--prompt` /
 `--prompts-file`); to change structure or fill an empty prompt, re-run the generator with `--force`.
 Size the workflow to the task's triage tier (bare / `--profile lite` / `--profile delivery`) — do
-NOT default to the full profile.
+NOT default to the full profile. When the work items are **independent** (N unrelated bugs/files,
+no shared state — e.g. "fix these 6 unrelated bugs"), add `--independent`: the items fan out
+**concurrently** in one `Work` phase via `parallel()` instead of N sequential phases, and the gates
+verify the combined diff once. Keep sequential `--phases` for genuinely dependent steps.
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
@@ -190,6 +193,12 @@ Then launch:
 ```
 Workflow({ scriptPath: ".workflows/<name>.js" })
 ```
+
+**Headless / non-interactive sessions (`claude -p`): launch the Workflow in the FOREGROUND —
+`run_in_background: false` — and do NOT end your turn while the workflow is still running.**
+Ending the turn exits the `-p` process and orphans the run (the background task is killed;
+the `wf/` branch is left with zero commits). Wait for the `Workflow(...)` call to return, then
+finalize (step 5). This applies equally to resume launches (step 4).
 
 Each phase merges `state.json` via its checkpoint worker (preserving `startedAt`).
 

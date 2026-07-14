@@ -1,0 +1,74 @@
+{
+  "name": "x-uglify-conductor-v2-opus48-high",
+  "date": "2026-07-14",
+  "suiteHash": "68fc7b29894a",
+  "suiteTasks": [
+    "notes-add-tags",
+    "notes-archive",
+    "notes-fix-data-loss",
+    "notes-import-export",
+    "notes-search",
+    "notes-sync-merge",
+    "uglify-corner-cases"
+  ],
+  "config": {
+    "model": "claude-opus-4-8[1m]",
+    "effort": "high",
+    "pluginDir": "/Users/liemlhd/Documents/git/Personal/lirbox/.worktrees/improve-conductor-20260714-182449/plugins/lirbox",
+    "runs": 1
+  },
+  "cells": [
+    {
+      "task": "uglify-corner-cases",
+      "run": 0,
+      "secs": 1507,
+      "engaged": true,
+      "resolved": false,
+      "f2p": {
+        "passed": 0,
+        "total": 6,
+        "failures": [
+          {
+            "test": "10-collapse-vars.test.cjs",
+            "out": "les/cjs/loader:1108:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:220:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: '{\"stdout\":\"FAIL\\\\n\",\"ok\":true,\"err\":\"\"}',\n  expected: '{\"stdout\":\"PASS\\\\n\",\"ok\":true,\"err\":\"\"}',\n  operator: 'strictEqual'\n}\n\nNode.js v22.14.0\n"
+          },
+          {
+            "test": "20-hoist-vars.test.cjs",
+            "out": "s/loader:1108:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:220:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: '{\"stdout\":\"number\\\\n\",\"ok\":true,\"err\":\"\"}',\n  expected: '{\"stdout\":\"function\\\\n\",\"ok\":true,\"err\":\"\"}',\n  operator: 'strictEqual'\n}\n\nNode.js v22.14.0\n"
+          },
+          {
+            "test": "30-dead-code.test.cjs",
+            "out": "es/cjs/loader:1108:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:220:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: '{\"stdout\":\"false\\\\n\",\"ok\":true,\"err\":\"\"}',\n  expected: '{\"stdout\":\"true\\\\n\",\"ok\":true,\"err\":\"\"}',\n  operator: 'strictEqual'\n}\n\nNode.js v22.14.0\n"
+          },
+          {
+            "test": "40-reduce-vars.test.cjs",
+            "out": "les/cjs/loader:1108:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:220:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: '{\"stdout\":\"FAIL\\\\n\",\"ok\":true,\"err\":\"\"}',\n  expected: '{\"stdout\":\"PASS\\\\n\",\"ok\":true,\"err\":\"\"}',\n  operator: 'strictEqual'\n}\n\nNode.js v22.14.0\n"
+          },
+          {
+            "test": "50-merge-vars.test.cjs",
+            "out": "ader:1108:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:220:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: '{\"stdout\":\"\",\"ok\":false,\"err\":\"SyntaxError\"}',\n  expected: '{\"stdout\":\"undefined\\\\n\",\"ok\":true,\"err\":\"\"}',\n  operator: 'strictEqual'\n}\n\nNode.js v22.14.0\n"
+          },
+          {
+            "test": "60-evaluate.test.cjs",
+            "out": "al/modules/cjs/loader:1108:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:220:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: '{\"stdout\":\"\",\"ok\":true,\"err\":\"\"}',\n  expected: '{\"stdout\":\"PASS\\\\n\",\"ok\":true,\"err\":\"\"}',\n  operator: 'strictEqual'\n}\n\nNode.js v22.14.0\n"
+          }
+        ]
+      },
+      "p2p": {
+        "pass": true
+      }
+    }
+  ],
+  "score": {
+    "resolved": 0,
+    "total": 1,
+    "rate": 0,
+    "wilson95": [
+      0,
+      0.793
+    ],
+    "f2pPassed": 0,
+    "f2pTotal": 6,
+    "engagementRate": 1
+  }
+}

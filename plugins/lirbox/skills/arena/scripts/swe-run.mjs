@@ -8,7 +8,9 @@
  *
  * Usage:
  *   node swe-run.mjs --name <label> --model <model> [--effort high] [--plugin-dir <lirbox-checkout>]
- *                    [--runs 1] [--cap 900] [--keep <dir>]
+ *                    [--runs 1] [--cap 900] [--keep <dir>] [--task <id>]
+ *   --task limits the run to ONE graded task (single-cell scorecard — used for era top-ups and
+ *     rung experiments; the row still records the full-suite fingerprint, so cells stay reusable).
  *   --plugin-dir benchmarks a specific conductor VERSION (a lirbox checkout); omit for the installed one.
  *   --keep saves per-cell diffs/traces/grades there (else a temp dir, removed on success).
  *
@@ -18,7 +20,7 @@
  * setup/usage errors only.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,14 +35,30 @@ function die(msg) { console.error('swe-run: ' + msg); process.exit(2); }
 
 const name = arg('name'); if (!name || name === true) die('--name <label> required');
 const model = arg('model'); if (!model || model === true) die('--model <model> required');
+// Floating aliases drift (tomorrow "opus" means a different model) and silently corrupt scorecard
+// comparability — the scorecard must record the EXACT model that ran.
+if (/^(opus|sonnet|haiku|fable|default)$/i.test(String(model))) die(`--model "${model}" is a floating alias — pin an exact model ID (e.g. claude-opus-4-8[1m])`);
 const effort = String(arg('effort', 'high'));
-const pluginDir = arg('plugin-dir', null);
+// --plugin-dir must reach `claude` at the PLUGIN level (<checkout>/plugins/lirbox) — the checkout
+// ROOT silently fails to load, and the installed plugin cache shadows the candidate (proven by
+// A/B skill-content probe 2026-07-15). Accept either and resolve to the plugin level.
+let pluginDir = arg('plugin-dir', null);
+if (pluginDir && pluginDir !== true) {
+  pluginDir = resolve(String(pluginDir));
+  const nested = join(pluginDir, 'plugins', 'lirbox');
+  if (existsSync(join(nested, '.claude-plugin')) || existsSync(join(nested, 'skills'))) pluginDir = nested;
+}
 const runs = Math.max(1, parseInt(arg('runs', '1'), 10) || 1);
 const cap = Math.max(60, parseInt(arg('cap', '900'), 10) || 900);
 const keep = arg('keep', null);
 
-const graded = SUITE.tasks.filter((t) => t.graded);
+let graded = SUITE.tasks.filter((t) => t.graded);
 if (!graded.length) die('no graded tasks in suite.json');
+const only = arg('task', null);
+if (only && only !== true) {
+  graded = graded.filter((t) => t.id === String(only));
+  if (!graded.length) die(`--task "${only}" is not a graded task in suite.json`);
+}
 const work = keep && keep !== true ? resolve(String(keep)) : mkdtempSync(join(tmpdir(), 'swe-run-'));
 mkdirSync(work, { recursive: true });
 
@@ -54,8 +72,10 @@ for (const t of graded) {
     execFileSync('git', ['clone', '-q', join(REPO, t.bundle), clone]);
     execFileSync('git', ['-C', clone, 'checkout', '-q', t.sha]);
     process.stdout.write(`  ${tag}: conductor… `);
+    // The foreground directive is part of the cell contract: in -p mode a driver that backgrounds
+    // the Workflow and ends its turn exits the process and orphans the run (seen 2/2 on long cells).
     const claudeArgs = ['-p',
-      `Use the lirbox:conductor skill to deliver this change end-to-end (durable multi-phase run):\n\n${taskText}`,
+      `Use the lirbox:conductor skill to deliver this change end-to-end (durable multi-phase run). IMPORTANT: this session is headless and non-interactive — if you launch the conductor Workflow in the background and end your turn, the process exits and the run is lost. Invoke the Workflow with run_in_background: false and do not end your turn until the workflow has completed and the delivery is finalized on the wf/ branch:\n\n${taskText}`,
       '--model', String(model), '--effort', effort, '--permission-mode', 'auto',
       '--output-format', 'stream-json', '--verbose'];
     if (pluginDir && pluginDir !== true) claudeArgs.push('--plugin-dir', resolve(String(pluginDir)));

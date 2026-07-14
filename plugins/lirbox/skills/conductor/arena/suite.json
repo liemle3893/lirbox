@@ -1,12 +1,13 @@
 {
   "budget": { "runs": 3, "judges": 4, "cellCapSec": 3600 },
   "configs": [
-    { "model": "opus", "mode": "auto", "effort": "high" },
-    { "model": "opus", "mode": "auto", "effort": "medium" }
+    { "model": "claude-opus-4-8[1m]", "mode": "auto", "effort": "high" },
+    { "model": "claude-opus-4-8[1m]", "mode": "auto", "effort": "medium" }
   ],
   "tasks": [
     {
       "id": "notes-add-tags",
+      "difficulty": "easy",
       "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/notes-add-tags/task.md",
       "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-add-tags/repo.bundle",
       "sha": "fbd6c0be49d8d40baee2f3ca812a9f6877809c4e",
@@ -14,9 +15,50 @@
     },
     {
       "id": "notes-archive",
+      "difficulty": "easy",
       "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/notes-archive/task.md",
       "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-archive/repo.bundle",
       "sha": "fbd6c0be49d8d40baee2f3ca812a9f6877809c4e",
+      "graded": true
+    },
+    {
+      "id": "notes-search",
+      "difficulty": "medium",
+      "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/notes-search/task.md",
+      "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-search/repo.bundle",
+      "sha": "fbd6c0be49d8d40baee2f3ca812a9f6877809c4e",
+      "graded": true
+    },
+    {
+      "id": "notes-import-export",
+      "difficulty": "medium-hard",
+      "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/notes-import-export/task.md",
+      "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-import-export/repo.bundle",
+      "sha": "fbd6c0be49d8d40baee2f3ca812a9f6877809c4e",
+      "graded": true
+    },
+    {
+      "id": "notes-fix-data-loss",
+      "difficulty": "hard",
+      "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/notes-fix-data-loss/task.md",
+      "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-fix-data-loss/repo.bundle",
+      "sha": "c29fa83b9f68fab6421bf81e4290f1387be89346",
+      "graded": true
+    },
+    {
+      "id": "notes-sync-merge",
+      "difficulty": "xhard",
+      "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/notes-sync-merge/task.md",
+      "bundle": "plugins/lirbox/skills/conductor/arena/tasks/notes-sync-merge/repo.bundle",
+      "sha": "b6aaf65c7a7f5bbea4f038af8ac6b935f76c220c",
+      "graded": true
+    },
+    {
+      "id": "uglify-corner-cases",
+      "difficulty": "xxhard",
+      "taskFile": "plugins/lirbox/skills/conductor/arena/tasks/uglify-corner-cases/task.md",
+      "bundle": "plugins/lirbox/skills/conductor/arena/tasks/uglify-corner-cases/repo.bundle",
+      "sha": "e7caa58a08915cafea060ef955d90a663e570a20",
       "graded": true
     }
   ]
