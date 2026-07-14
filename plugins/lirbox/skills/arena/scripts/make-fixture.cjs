@@ -149,6 +149,8 @@ const COMMIT_MSG = {
   'notes-app': 'initial: notes-app (store + service + cli + tests)',
   'notes-app-v2': 'initial: notes-app-v2 (store + service + cli + app + tests)',
   'notes-app-v3': 'initial: notes-app-v3 (sync-ready: clock + store + replica + codec + snapshot + app)',
+  'notes-app-v4': 'initial: notes-app-v4 (sync-capable: v3 + merge + peer registry)',
+  'uglify-js-3.17.4': 'initial: uglify-js-3.17.4 (upstream v3.17.4 + vendored acorn 8.7.1 / semver 6.3.0)',
 };
 
 const srcDir = arg('src', null);
