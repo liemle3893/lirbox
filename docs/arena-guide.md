@@ -98,6 +98,38 @@ Hold the model constant and vary the version to isolate the conductor delta.
 
 ---
 
+## 3b. SWE-bench-style grading (rung 1 — "know for sure")
+
+Every `graded: true` task in `suite.json` also ships a **hidden `grader/` dir** (never shown to the
+agent — the cell passes the task *content*, not the file path, into the sub-claude prompt):
+
+```
+tasks/<id>/grader/fail_to_pass/*.test.cjs   # RED on the base commit, GREEN iff the feature is correct
+# PASS_TO_PASS = the fixture's own `npm test` — must STAY green after the diff
+```
+
+The harness mirrors SWE-bench's FAIL_TO_PASS / PASS_TO_PASS verdict:
+
+```bash
+# grade a delivered diff → { p2p, f2p, resolved } ; exit 0 iff resolved
+node plugins/lirbox/skills/arena/scripts/swe-grade.mjs --task <id> --diff <path.diff>
+# or grade a wf/ branch in an existing clone
+node plugins/lirbox/skills/arena/scripts/swe-grade.mjs --task <id> --repo <clone> --ref wf/<branch>
+# discrimination gate: F2P must be RED on the unmodified base (run by test-arena.cjs for every graded task)
+node plugins/lirbox/skills/arena/scripts/swe-grade.mjs --task <id> --validate
+```
+
+**How it layers with judging:** `resolved` is the hard, deterministic gate — an unresolved delivery
+**forfeits** (cannot win, no matter how good it looks). Pairwise judging then ranks quality *among the
+resolved*. First real-data validation: all 3 committed evidence diffs (opus-new ×2, opus-old ×1)
+**resolve** — so the judge's 3–0 preference for the new conductor measured quality *beyond*
+correctness (coverage, thoroughness), exactly the intended layering.
+
+**Authoring a grader:** write F2P tests ONLY against interfaces `task.md` explicitly names (any correct
+implementation must pass); resolve modules via `process.cwd()`; one concern per file; then prove
+discrimination with `--validate` (all F2P RED on base). `test-arena.cjs` re-proves this for every
+graded task on every run.
+
 ## 4. How a cell is scored (and forfeited)
 
 Only the **delivered diff** is judged. A run is a **forfeit** (cannot win, flagged in the report,
@@ -105,7 +137,9 @@ never silently dropped) when:
 
 - conductor did **not** engage — no `wf/` branch / `.workflows/` dir / `Workflow` tool_use in the
   trace (the plain-claude fallback);
-- its gates failed, it errored, timed out against `cellCapSec`, or produced no diff.
+- its gates failed, it errored, timed out against `cellCapSec`, or produced no diff;
+- the delivery is **unresolved** under the task's hidden SWE grader (§3b) — functionally incorrect
+  deliveries can't win on style.
 
 Whole-pair resolution: one config with zero valid runs loses the pair; both zero → tie; both valid →
 judged. Per pair: `judges` blinded, position-swapped passes; ties count 0.5. Aggregate → Bradley-Terry

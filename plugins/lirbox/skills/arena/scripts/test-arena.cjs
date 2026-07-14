@@ -92,6 +92,9 @@ const STRUCTURE = [
   ['promote to docs/arena', /docs\/arena\//],
   ['stream-json trace',     /stream-json/],
   ['asserts conductor ran', /\.workflows\/|wf\/ branch|Workflow tool_use/],
+  ['swe-grade step',        /swe-grade\.mjs/],
+  ['unresolved forfeits',   /unresolved/],
+  ['task content inlined',  /paste its CONTENT|NEVER pass the file/],
 ];
 let okStruct = true;
 for (const [name, re] of STRUCTURE) if (!re.test(src)) { fail(`structure: missing ${name}`); okStruct = false; }
@@ -130,6 +133,24 @@ if (okPure) console.log('PASS conductor purity (no fs/git/clock/random)');
   assert(/win.?rate/i.test(md), 'report: md has win-rate matrix');
   assert(/forfeit/i.test(md) && md.indexOf('timeout') > -1, 'report: forfeited cell flagged, not dropped');
   if (!failures) console.log('PASS report render');
+}
+
+// ---------------------------------------------------------------- 5. SWE-GRADE DISCRIMINATION GATES
+// Every graded task's hidden F2P suite must be RED on the unmodified base (and P2P green) — else the
+// grader cannot discriminate and "resolved" is meaningless. Live check: clones the bundle + runs node.
+{
+  const { execFileSync } = require('child_process');
+  const fs = require('fs');
+  const suitePath = path.join(__dirname, '..', '..', 'conductor', 'arena', 'suite.json');
+  const suite = JSON.parse(fs.readFileSync(suitePath, 'utf8'));
+  for (const t of suite.tasks.filter((t) => t.graded)) {
+    try {
+      execFileSync('node', [path.join(__dirname, 'swe-grade.mjs'), '--task', t.id, '--validate'], { encoding: 'utf8' });
+      console.log(`PASS swe-grade discrimination gate (${t.id})`);
+    } catch (e) {
+      fail(`swe-grade: ${t.id} discrimination gate — ${(e.stdout || e.message || '').slice(0, 200)}`);
+    }
+  }
 }
 
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
