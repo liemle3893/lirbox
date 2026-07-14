@@ -84,6 +84,21 @@ docs/arena-guide.md             # full how-to        docs/eval-rungs-2-5-guide.m
    With the suite's `cellCapSec: 3600`, that effort profile IS the discriminator: weak configs
    time out, forfeit, or regress the 126-file P2P minefield. notes-selective-sync stays an
    UNREGISTERED reserve task (proven fair both ways; sonnet one-shots it in ~25 min).
+   CORRECTION from the capped head-to-head (below): the ~2 h figure was inflated by two
+   kill/resume cycles — a clean uninterrupted raw session resolves in ~53 min (~$24, 279 calls).
+10. **Capped head-to-head on uglify-corner-cases (cap=3600s, 2026-07-14) — conductor LOSES to
+    raw today** — raw sonnet-5 one-shot: RESOLVED 6/6 in ~53 min. opus-4-8[1m]/high + conductor:
+    TIMEOUT at 3603s with 2/6 fixed (surgical, gold-quality fixes — but sequential Report1…6
+    phases each paying worker spin-up + a ~5-min full-suite verification). Two harness-level
+    findings first: (a) on LONG tasks the headless driver backgrounds the Workflow and ends its
+    turn, orphaning the run (2/2 reproduction; empty wf/ branch; filed as
+    `headless-background-workflow-orphan`; swe-run's cell prompt now pins
+    `run_in_background: false` as part of the cell contract); (b) the capability gap itself is
+    filed as `parallelize-independent-work-items` — the six bugs were embarrassingly parallel and
+    conductor serialized them. Until conductor parallelizes, NO cap value can make
+    "one-shot fails, conductor succeeds" true (conductor is the slower arm); the xxhard rung
+    currently measures conductor's process overhead honestly — that's the arena doing its job.
+    Experiment scorecard: `docs/arena/scores/x-uglify-conductor-opus48-high.json` (0/1, timeout).
 
 ## Invariants — do not break
 
@@ -125,6 +140,9 @@ docs/arena-guide.md             # full how-to        docs/eval-rungs-2-5-guide.m
   at 10 min; the sandbox discards writes between calls). Keep run logs **outside** the fixture clone.
 - A killed run's completed work is recoverable from its `wf/` branch.
 - ~2 parallel cells max — each spawns a full subagent fleet.
+- **uglify-corner-cases P2P is load-sensitive, not flaky** (proven 3/3 green idle after one red
+  under load): its mocha half has 10s timeouts and heavy process-spawning, so NEVER overlap two
+  full-suite runs (a cell's grade + `test-arena` validate, or two uglify cells). Grade serially.
 - PRs on this repo: `gh auth switch --user liemle3893` → create → switch back to `liemlhd_msn`.
 
 ## History

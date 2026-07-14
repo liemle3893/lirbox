@@ -13,6 +13,7 @@ treat overlapping intervals as "not distinguished yet," and raise runs to tighte
 | base-sonnet5-high | 2026-07-14 | `484dce71c275` ⚠️stale-suite | claude-sonnet-5 / high | **2/5 (40%)** | 12%–77% | 6/6 |
 | t3-opus-high | 2026-07-14 | `d6f7224a5da7` ⚠️stale-suite | claude-opus-4-8 / high | **2/2 (100%)** | 34%–100% | 6/6 |
 | t3-opus-med | 2026-07-14 | `d6f7224a5da7` ⚠️stale-suite | claude-opus-4-8 / medium | **2/2 (100%)** | 34%–100% | 6/6 |
+| x-uglify-conductor-opus48-high | 2026-07-14 | `68fc7b29894a` | claude-opus-4-8[1m] / high | **0/1 (0%)** | 0%–79% | 0/0 |
 
 Produce a new row: `node plugins/lirbox/skills/arena/scripts/swe-run.mjs --name <label> --model <m> --effort <e> [--plugin-dir <lirbox-checkout>] [--runs N]`
 Quality-beyond-correctness (style, coverage, thoroughness) is NOT in this score — that stays pairwise
