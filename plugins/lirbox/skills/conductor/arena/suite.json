@@ -1,5 +1,5 @@
 {
-  "budget": { "runs": 3, "judges": 5, "cellCapSec": 3600 },
+  "budget": { "runs": 3, "judges": 4, "cellCapSec": 3600 },
   "configs": [
     { "model": "opus", "mode": "auto", "effort": "high" },
     { "model": "opus", "mode": "auto", "effort": "medium" }

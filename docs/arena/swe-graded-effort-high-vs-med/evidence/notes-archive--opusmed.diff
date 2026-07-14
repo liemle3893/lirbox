@@ -1,0 +1,104 @@
+diff --git a/implementation-notes/Implement.html b/implementation-notes/Implement.html
+new file mode 100644
+index 0000000..42cb6d8
+--- /dev/null
++++ b/implementation-notes/Implement.html
+@@ -0,0 +1 @@
++<p>Legacy-note tolerance in <code>Store.load</code>: notes are mapped through <code>{ archived: false, ...n }</code> so any note serialized before archiving existed loads with <code>archived:false</code>, while notes that already carry the flag keep their persisted value. This keeps old JSON files readable without a migration step.</p>
+diff --git a/src/cli.js b/src/cli.js
+index afb0045..bb2dbef 100644
+--- a/src/cli.js
++++ b/src/cli.js
+@@ -4,6 +4,9 @@ function run(argv, svc) {
+   const [cmd, ...rest] = argv;
+   if (cmd === "add") return svc.create(rest.join(" "));
+   if (cmd === "list") return svc.pending();
++  if (cmd === "archive") return svc.archive(Number(rest[0]));
++  if (cmd === "unarchive") return svc.unarchive(Number(rest[0]));
++  if (cmd === "archived") return svc.archived();
+   throw new Error("unknown command: " + cmd);
+ }
+ module.exports = { run };
+diff --git a/src/service.js b/src/service.js
+index c9c426d..d0bdfa5 100644
+--- a/src/service.js
++++ b/src/service.js
+@@ -4,6 +4,9 @@ class NoteService {
+   constructor(store) { this.store = store || new Store(); }
+   create(text) { if (!text) throw new Error("text required"); return this.store.add(text); }
+   complete(id) { const n = this.store.get(id); if (!n) throw new Error("not found"); n.done = true; return n; }
+-  pending() { return this.store.all().filter(n => !n.done); }
++  archive(id) { if (!this.store.get(id)) throw new Error("not found"); return this.store.archive(id); }
++  unarchive(id) { if (!this.store.get(id)) throw new Error("not found"); return this.store.unarchive(id); }
++  pending() { return this.store.all().filter(n => !n.done && !n.archived); }
++  archived() { return this.store.all().filter(n => n.archived); }
+ }
+ module.exports = { NoteService };
+diff --git a/src/store.js b/src/store.js
+index f0c794e..cbfb431 100644
+--- a/src/store.js
++++ b/src/store.js
+@@ -2,10 +2,12 @@
+ const fs = require("fs");
+ class Store {
+   constructor() { this.notes = []; this.seq = 0; }
+-  add(text) { const n = { id: ++this.seq, text, done: false }; this.notes.push(n); return n; }
++  add(text) { const n = { id: ++this.seq, text, done: false, archived: false }; this.notes.push(n); return n; }
+   get(id) { return this.notes.find(n => n.id === id) || null; }
++  archive(id) { const n = this.get(id); if (!n) return null; n.archived = true; return n; }
++  unarchive(id) { const n = this.get(id); if (!n) return null; n.archived = false; return n; }
+   all() { return this.notes.slice(); }
+   save(path) { fs.writeFileSync(path, JSON.stringify({ notes: this.notes, seq: this.seq })); }
+-  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes; s.seq = d.seq; return s; }
++  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes.map(n => ({ archived: false, ...n })); s.seq = d.seq; return s; }
+ }
+ module.exports = { Store };
+diff --git a/test/run.js b/test/run.js
+index 949ca50..38b2f53 100644
+--- a/test/run.js
++++ b/test/run.js
+@@ -1,4 +1,7 @@
+ const assert = require("assert");
++const fs = require("fs");
++const os = require("os");
++const path = require("path");
+ const { Store } = require("../src/store");
+ const { NoteService } = require("../src/service");
+ const { run } = require("../src/cli");
+@@ -9,4 +12,36 @@ assert.strictEqual(svc.pending().length, 1);
+ svc.complete(1);
+ assert.strictEqual(svc.pending().length, 0);
+ assert.strictEqual(run(["add", "via", "cli"], svc).text, "via cli");
++
++// archiving: flag defaults false, archive/unarchive toggle it
++const b = svc.create("archive me");
++assert.strictEqual(b.archived, false);
++svc.archive(b.id);
++assert.strictEqual(svc.store.get(b.id).archived, true);
++svc.unarchive(b.id);
++assert.strictEqual(svc.store.get(b.id).archived, false);
++
++// pending() excludes archived notes; archived() lists them
++svc.archive(b.id);
++assert.ok(!svc.pending().some(n => n.id === b.id));
++assert.deepStrictEqual(svc.archived().map(n => n.id), [b.id]);
++
++// archive/unarchive on unknown id throws
++assert.throws(() => svc.archive(999), /not found/);
++assert.throws(() => svc.unarchive(999), /not found/);
++
++// save/load round-trips the archived flag; legacy notes default to false
++const tmp = path.join(os.tmpdir(), "notes-archive-test-" + process.pid + ".json");
++svc.store.save(tmp);
++const loaded = Store.load(tmp);
++assert.strictEqual(loaded.get(b.id).archived, true);
++fs.writeFileSync(tmp, JSON.stringify({ notes: [{ id: 7, text: "legacy", done: false }], seq: 7 }));
++assert.strictEqual(Store.load(tmp).get(7).archived, false);
++fs.unlinkSync(tmp);
++
++// CLI archive/unarchive/archived commands
++assert.strictEqual(run(["archive", String(a.id)], svc).archived, true);
++assert.ok(run(["archived"], svc).some(n => n.id === a.id));
++assert.strictEqual(run(["unarchive", String(a.id)], svc).archived, false);
++
+ console.log("all tests passed");

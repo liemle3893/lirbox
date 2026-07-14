@@ -1,0 +1,3 @@
+{"note":"6 blinded passes, 3 per task (2 unswapped + 1 swapped). Judge picked shown-position B in ALL 6 — position-bias artifact, not a quality signal.",
+ "notes-add-tags":[{"winner":"B","swap":false},{"winner":"B","swap":true},{"winner":"B","swap":false}],
+ "notes-archive":[{"winner":"B","swap":false},{"winner":"B","swap":true},{"winner":"B","swap":false}]}

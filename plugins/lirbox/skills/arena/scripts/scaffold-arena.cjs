@@ -173,7 +173,8 @@ function generate(name) {
   L.push("const CONFIGS  = Array.isArray(CONFIG.configs) ? CONFIG.configs : []      // [{ model, mode, effort }]  (v1 — no skillRef)");
   L.push("const BUDGET   = CONFIG.budget || {}");
   L.push("const RUNS     = (typeof BUDGET.runs === 'number' && BUDGET.runs >= 1) ? Math.floor(BUDGET.runs) : 3");
-  L.push("const PASSES   = (typeof BUDGET.judges === 'number' && BUDGET.judges >= 1) ? Math.floor(BUDGET.judges) : 5");
+  L.push("// EVEN default: with an odd pass count a pure position-bias judge yields a fake 2-1 winner; even = exact swap balance");
+  L.push("const PASSES   = (typeof BUDGET.judges === 'number' && BUDGET.judges >= 1) ? Math.floor(BUDGET.judges) : 4");
   L.push("const CELLCAPSEC = (typeof BUDGET.cellCapSec === 'number' && BUDGET.cellCapSec > 0) ? Math.floor(BUDGET.cellCapSec) : 3600");
   L.push("");
   L.push("// --- Resume accumulators (re-passed via args; conductor cannot read fs). ---");

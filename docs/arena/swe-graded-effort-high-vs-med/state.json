@@ -1,0 +1,56 @@
+{
+  "name": "swe-graded-effort-high-vs-med",
+  "ratings": {
+    "11d899ef": 0.6666666666666666,
+    "7fa03fa6": 1.3333333333333333
+  },
+  "matrix": {
+    "11d899ef": {
+      "11d899ef": null,
+      "7fa03fa6": 0.3333333333333333
+    },
+    "7fa03fa6": {
+      "11d899ef": 0.6666666666666667,
+      "7fa03fa6": null
+    }
+  },
+  "tallies": [
+    {
+      "a": "11d899ef",
+      "b": "7fa03fa6",
+      "aWins": 2,
+      "bWins": 4,
+      "ties": 0
+    }
+  ],
+  "runs": [
+    {
+      "taskId": "notes-add-tags",
+      "configHash": "11d899ef",
+      "runIndex": 0,
+      "forfeit": false,
+      "resolved": true
+    },
+    {
+      "taskId": "notes-add-tags",
+      "configHash": "7fa03fa6",
+      "runIndex": 0,
+      "forfeit": false,
+      "resolved": true
+    },
+    {
+      "taskId": "notes-archive",
+      "configHash": "11d899ef",
+      "runIndex": 0,
+      "forfeit": false,
+      "resolved": true
+    },
+    {
+      "taskId": "notes-archive",
+      "configHash": "7fa03fa6",
+      "runIndex": 0,
+      "forfeit": false,
+      "resolved": true
+    }
+  ]
+}

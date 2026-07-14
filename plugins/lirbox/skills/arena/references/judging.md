@@ -27,12 +27,14 @@ report**, never silently dropped.
 
 ## Pairwise passes — position balance
 
-Per task, per unordered config-pair: `PASSES` (default 5) blinded passes (`judgePass`). `pickPairSamples` rotates
+Per task, per unordered config-pair: `PASSES` (default 4 — **even**, for exact position balance) blinded passes (`judgePass`). `pickPairSamples` rotates
 over the available run indices (folding run-variance into the passes) and alternates `swap` so shown-A/shown-B
 position bias cancels. `tallyVerdicts` un-swaps each verdict back to the true config before counting.
 
-> Caveat: with 5 passes only 2 are swapped (3 unswapped) — a small residual order bias toward position A.
-> Acceptable for v1; use an even `judges` budget for exact balance.
+> **Even pass counts are mandatory in practice — proven live.** In a real run the judge picked shown-
+> position B in 6/6 passes (pure position bias); with an ODD count the swap protocol converts that
+> artifact into a fake 2–1 winner, while an EVEN count yields the honest exact tie. If all verdicts
+> pick the same shown-position across swapped+unswapped passes, treat the pair as position-biased ⇒ tie.
 
 ## Scoring
 
