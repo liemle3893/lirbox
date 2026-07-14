@@ -53,7 +53,7 @@ node plugins/lirbox/skills/arena/scripts/make-fixture.cjs --task <id> --dir /tmp
 
 ```jsonc
 {
-  "budget": { "runs": 3, "judges": 5, "cellCapSec": 3600 },
+  "budget": { "runs": 3, "judges": 4, "cellCapSec": 3600 },
   "configs": [ { "model": "opus", "mode": "auto", "effort": "high" },
                { "model": "opus", "mode": "auto", "effort": "medium" } ],
   "tasks": [ { "id": "<id>", "taskFile": "…/task.md", "bundle": "…/repo.bundle", "sha": "<SHA>" } ]
@@ -142,7 +142,7 @@ never silently dropped) when:
   deliveries can't win on style.
 
 Whole-pair resolution: one config with zero valid runs loses the pair; both zero → tie; both valid →
-judged. Per pair: `judges` blinded, position-swapped passes; ties count 0.5. Aggregate → Bradley-Terry
+judged. Per pair: `judges` blinded, position-swapped passes (**keep it EVEN** — an odd count turns a position-biased judge into a fake winner; proven live, see the swe-graded-effort run); ties count 0.5. Aggregate → Bradley-Terry
 rating (headline) + win-rate matrix (the legible number the report leads with).
 
 **Capture the diff from conductor's `wf/` branch, not the working tree** — conductor delivers on

@@ -1,7 +1,7 @@
 ---
 name: arena
 argument-hint: "[ <goal to start> | <name to resume> | list ]"
-description: "Reproducible pairwise ARENA for skills (conductor-first): runs conductor against frozen fixture tasks under multiple configs (model/mode/effort), judges the DELIVERED DIFFS pairwise (3 runs × 5 position-swapped passes), and emits a Bradley-Terry/win-rate leaderboard on an isolated branch that is NEVER auto-merged. Overnight, durable, resumable on conductor's backbone. USE WHEN you want to know whether a change (or config) actually improves conductor's delivered output across a frozen task suite, scored reproducibly. NOT WHEN there's an objective scalar to hill-climb (use prospector), a single filed concern to turn RED→GREEN (use whetstone), or you need a one-shot delivery (use conductor)."
+description: "Reproducible pairwise ARENA for skills (conductor-first): runs conductor against frozen fixture tasks under multiple configs (model/mode/effort), judges the DELIVERED DIFFS pairwise (3 runs × 4 position-swapped passes (even count = exact position balance)), and emits a Bradley-Terry/win-rate leaderboard on an isolated branch that is NEVER auto-merged. Overnight, durable, resumable on conductor's backbone. USE WHEN you want to know whether a change (or config) actually improves conductor's delivered output across a frozen task suite, scored reproducibly. NOT WHEN there's an objective scalar to hill-climb (use prospector), a single filed concern to turn RED→GREEN (use whetstone), or you need a one-shot delivery (use conductor)."
 allowed-tools:
   - Read
   - Write

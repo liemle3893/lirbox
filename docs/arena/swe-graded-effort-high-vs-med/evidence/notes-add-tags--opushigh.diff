@@ -1,0 +1,124 @@
+diff --git a/implementation-notes/Implement.html b/implementation-notes/Implement.html
+new file mode 100644
+index 0000000..2118ec4
+--- /dev/null
++++ b/implementation-notes/Implement.html
+@@ -0,0 +1 @@
++<p><strong>store.load defensiveness:</strong> legacy persisted notes lacking <code>tags</code> are defaulted to <code>[]</code> at load time via <code>notes.map(n =&gt; ({ ...n, tags: n.tags || [] }))</code>, so old files round-trip without losing other fields. Also guarded <code>d.notes || []</code> against an empty/absent notes array.</p>
+diff --git a/src/cli.js b/src/cli.js
+index afb0045..20b6c2d 100644
+--- a/src/cli.js
++++ b/src/cli.js
+@@ -4,6 +4,9 @@ function run(argv, svc) {
+   const [cmd, ...rest] = argv;
+   if (cmd === "add") return svc.create(rest.join(" "));
+   if (cmd === "list") return svc.pending();
++  if (cmd === "tag") return svc.tag(Number(rest[0]), rest[1]);
++  if (cmd === "bytag") return svc.byTag(rest[0]);
++  if (cmd === "stats") return svc.stats();
+   throw new Error("unknown command: " + cmd);
+ }
+ module.exports = { run };
+diff --git a/src/service.js b/src/service.js
+index c9c426d..b15ac0f 100644
+--- a/src/service.js
++++ b/src/service.js
+@@ -5,5 +5,9 @@ class NoteService {
+   create(text) { if (!text) throw new Error("text required"); return this.store.add(text); }
+   complete(id) { const n = this.store.get(id); if (!n) throw new Error("not found"); n.done = true; return n; }
+   pending() { return this.store.all().filter(n => !n.done); }
++  tag(id, tag) { const n = this.store.addTag(id, tag); if (!n) throw new Error("not found"); return n; }
++  untag(id, tag) { const n = this.store.removeTag(id, tag); if (!n) throw new Error("not found"); return n; }
++  byTag(tag) { return this.store.all().filter(n => n.tags.includes(tag)); }
++  stats() { const out = {}; for (const n of this.store.all()) for (const t of n.tags) out[t] = (out[t] || 0) + 1; return out; }
+ }
+ module.exports = { NoteService };
+diff --git a/src/store.js b/src/store.js
+index f0c794e..e55c22e 100644
+--- a/src/store.js
++++ b/src/store.js
+@@ -2,10 +2,12 @@
+ const fs = require("fs");
+ class Store {
+   constructor() { this.notes = []; this.seq = 0; }
+-  add(text) { const n = { id: ++this.seq, text, done: false }; this.notes.push(n); return n; }
++  add(text) { const n = { id: ++this.seq, text, done: false, tags: [] }; this.notes.push(n); return n; }
+   get(id) { return this.notes.find(n => n.id === id) || null; }
+   all() { return this.notes.slice(); }
++  addTag(id, tag) { const n = this.get(id); if (!n) return null; if (!n.tags.includes(tag)) n.tags.push(tag); return n; }
++  removeTag(id, tag) { const n = this.get(id); if (!n) return null; const i = n.tags.indexOf(tag); if (i !== -1) n.tags.splice(i, 1); return n; }
+   save(path) { fs.writeFileSync(path, JSON.stringify({ notes: this.notes, seq: this.seq })); }
+-  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = d.notes; s.seq = d.seq; return s; }
++  static load(path) { const s = new Store(); const d = JSON.parse(fs.readFileSync(path, "utf8")); s.notes = (d.notes || []).map(n => Object.assign({ tags: [] }, n, { tags: n.tags || [] })); s.seq = d.seq; return s; }
+ }
+ module.exports = { Store };
+diff --git a/test/run.js b/test/run.js
+index 949ca50..e68a3c6 100644
+--- a/test/run.js
++++ b/test/run.js
+@@ -1,4 +1,7 @@
+ const assert = require("assert");
++const fs = require("fs");
++const os = require("os");
++const path = require("path");
+ const { Store } = require("../src/store");
+ const { NoteService } = require("../src/service");
+ const { run } = require("../src/cli");
+@@ -9,4 +12,57 @@ assert.strictEqual(svc.pending().length, 1);
+ svc.complete(1);
+ assert.strictEqual(svc.pending().length, 0);
+ assert.strictEqual(run(["add", "via", "cli"], svc).text, "via cli");
++
++// new note defaults to empty tags
++assert.deepStrictEqual(a.tags, []);
++
++// addTag / removeTag with no-duplicate rule and absent-removal no-op
++svc.tag(1, "urgent");
++svc.tag(1, "urgent"); // duplicate ignored
++assert.deepStrictEqual(svc.store.get(1).tags, ["urgent"]);
++svc.untag(1, "missing"); // no-op when absent
++assert.deepStrictEqual(svc.store.get(1).tags, ["urgent"]);
++svc.untag(1, "urgent");
++assert.deepStrictEqual(svc.store.get(1).tags, []);
++
++// unknown id throws
++assert.throws(() => svc.tag(999, "x"), /not found/);
++assert.throws(() => svc.untag(999, "x"), /not found/);
++
++// byTag
++svc.tag(1, "work");
++svc.tag(2, "work");
++assert.strictEqual(svc.byTag("work").length, 2);
++assert.strictEqual(svc.byTag("nope").length, 0);
++
++// stats counts
++svc.tag(1, "home");
++const st = svc.stats();
++assert.strictEqual(st.work, 2);
++assert.strictEqual(st.home, 1);
++assert.strictEqual(st.nope, undefined);
++
++// save/load round-trip of tags (temp file)
++const tmp = path.join(os.tmpdir(), "notes-test-" + process.pid + ".json");
++try {
++  svc.store.save(tmp);
++  const loaded = Store.load(tmp);
++  assert.deepStrictEqual(loaded.get(1).tags, ["work", "home"]);
++  assert.deepStrictEqual(loaded.get(2).tags, ["work"]);
++  // defensive load: legacy notes without tags default to []
++  fs.writeFileSync(tmp, JSON.stringify({ notes: [{ id: 1, text: "old", done: false }], seq: 1 }));
++  const legacy = Store.load(tmp);
++  assert.deepStrictEqual(legacy.get(1).tags, []);
++} finally {
++  fs.unlinkSync(tmp);
++}
++
++// new CLI commands
++const csvc = new NoteService();
++csvc.create("one");
++run(["tag", "1", "cli-tag"], csvc);
++assert.deepStrictEqual(csvc.store.get(1).tags, ["cli-tag"]);
++assert.strictEqual(run(["bytag", "cli-tag"], csvc).length, 1);
++assert.strictEqual(run(["stats"], csvc)["cli-tag"], 1);
++
+ console.log("all tests passed");
