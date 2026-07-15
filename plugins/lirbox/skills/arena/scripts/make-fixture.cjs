@@ -151,6 +151,7 @@ const COMMIT_MSG = {
   'notes-app-v3': 'initial: notes-app-v3 (sync-ready: clock + store + replica + codec + snapshot + app)',
   'notes-app-v4': 'initial: notes-app-v4 (sync-capable: v3 + merge + peer registry)',
   'uglify-js-3.17.4': 'initial: uglify-js-3.17.4 (upstream v3.17.4 + vendored acorn 8.7.1 / semver 6.3.0)',
+  'notes-app-v5': 'initial: notes-app-v5 (plugin-capable: v4 + plugin dispatcher)',
 };
 
 const srcDir = arg('src', null);
