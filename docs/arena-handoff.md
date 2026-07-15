@@ -122,7 +122,14 @@ docs/arena-guide.md             # full how-to        docs/eval-rungs-2-5-guide.m
     EXPENSIVE items (8-10 uglify bugs), blocked on `independent-work-needs-per-worker-worktrees`.
     Conductor smoke cell (merged plugin): **RESOLVED 8/8 in 33 min — the first clean end-to-end
     parallel cell** (`--independent` used, foreground pin held, wf/ delivery graded). Both PR #31
-    fixes are live-proven. Conductor overhead on trivial work: ~28 min of process tax.
+    fixes are live-proven. Conductor overhead on trivial work: ~28 min of process tax. Full
+    2x2 (all four arms resolved 8/8, cap 3600s): raw sonnet 4.4 min ($0.99) ~= raw opus 4.6 min —
+    model speed is NOT the differentiator; conductor+opus 33 min; conductor+sonnet ~47 min
+    (wall-clock sleep-polluted, same ballpark). Notable: sonnet ENGAGED conductor and used
+    parallel() — its first resolved conductor cell ever (calibration had it bypassing 3/5); the
+    merged skill + explicit foreground contract appears to fix the engagement gap. The bookends
+    (planning + gates), not the model, are conductor's entire cost — and the opus gate caught a
+    real dedupe bug a worker introduced, converting a would-be 7/8 into a resolution.
 
 ## Invariants — do not break
 
