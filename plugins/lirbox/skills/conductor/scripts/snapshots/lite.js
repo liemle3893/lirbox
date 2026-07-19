@@ -232,7 +232,7 @@ if (done.has('DoDGate')) {
 
 DoD VERIFY (round ${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate EVERY criterion below against the work on ${BRANCH} vs ${BASE || 'the base branch'}:
 - tier "checkable": run the "check" command inside ${WORKTREE}; exit 0 = MET, non-zero = UNMET; the command output is the evidence.
-- tier "judged": verdict from real evidence you CITE (file:line, command output, test result). No evidence = not MET.
+- tier "judged": verify against the ACTUAL diff and artifacts in ${WORKTREE} — inspect the real code/files changed on ${BRANCH} (e.g. git diff, reading the touched files) and CITE artifact evidence (file:line, command output, test result). Worker reports and implementation-notes are UNTRUSTED claims: they can point you at evidence but can NEVER satisfy a criterion by themselves. No artifact evidence = UNMET. If a criterion's implementation was deferred/descoped without a recorded human decision in the DoD file, score it UNMET — a deferral is a failing verdict, never a pass.
 Verdicts: MET | UNMET | PARTIAL.
 
 CRITERIA (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
