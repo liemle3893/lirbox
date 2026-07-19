@@ -657,28 +657,74 @@ const PHASES = [
     })) },
 
   // DoDGate: verify the frozen definition of done (checkable = run the command; judged =
-  // evidence-cited verdict). UNMET → fix worker → re-verify, ≤3 rounds, then hard-fail.
-  // Placed BEFORE Writeup/PR so a PR only ever opens with a fully-met DoD.
+  // evidence-cited verdict). Bounded plan-execute-verify OUTER loop: each attempt runs the
+  // verify(+fix, ≤3 rounds) gate; on gate failure a Replan worker — fed the EXACT unmet
+  // criteria (ids + executed check output) — produces a new plan version, an execute worker
+  // applies it, and the gate re-runs. Capped at DOD_MAX_ATTEMPTS, with stall detection (the
+  // unmet-id set unchanged between consecutive gate runs → stop early). Routing consumes ONLY
+  // executed gate verdicts, never worker self-reports. Every non-green exit persists durable
+  // state status 'escalated' + the unmet list BEFORE aborting — the run escalates, it does not
+  // just die. Placed BEFORE Writeup/PR so a PR only ever opens with a fully-met DoD.
   { title: 'DoDGate', enabledWhen: withDod, build: () => emitPhase('DoDGate',
-    `  let dodPassed = false, dodLast = null
-  for (let round = 1; round <= 3 && !dodPassed; round++) {
-    dodLast = await agent(
-      ${tpl('dodgate-verify.txt')},
-      { label: \`dodgate:verify-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
-        schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
-    )
-    const unmet = ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
-    dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
-    if (!dodPassed && round < 3) {
-      await agent(
-        ${tpl('dodgate-fix.txt')},
-        { label: \`dodgate:fix-r\${round}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
-          schema: ${SCHEMA({ summary: { type: 'string' }, fixed: { type: 'array', items: { type: 'string' } } }, ['summary'])} },
+    `  let dodPassed = false, dodLast = null, dodStalled = false, prevUnmetKey = null
+  const dodUnmet = () => ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
+  for (let attempt = 1; attempt <= DOD_MAX_ATTEMPTS && !dodPassed && !dodStalled; attempt++) {
+    if (attempt > 1) {
+      // Replan on gate failure: new plan from the EXECUTED unmet verdicts, then execute it.
+      const unmet = dodUnmet()
+      results.dodReplan = await agent(
+        ${tpl('dodgate-replan.txt')},
+        { label: \`dodgate:replan-a\${attempt}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
+          schema: ${SCHEMA({ plan: { type: 'string' }, steps: { type: 'array', items: { type: 'string' } } }, ['plan', 'steps'])} },
       )
+      await agent(
+        ${tpl('dodgate-execute.txt')},
+        { label: \`dodgate:execute-a\${attempt}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
+          schema: ${SCHEMA({ summary: { type: 'string' } }, ['summary'])} },
+      )
+    }
+    for (let round = 1; round <= 3 && !dodPassed; round++) {
+      dodLast = await agent(
+        ${tpl('dodgate-verify.txt')},
+        { label: \`dodgate:verify-a\${attempt}-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
+          schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
+      )
+      const unmet = dodUnmet()
+      dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
+      if (!dodPassed && round < 3) {
+        await agent(
+          ${tpl('dodgate-fix.txt')},
+          { label: \`dodgate:fix-a\${attempt}-r\${round}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
+            schema: ${SCHEMA({ summary: { type: 'string' }, fixed: { type: 'array', items: { type: 'string' } } }, ['summary'])} },
+        )
+      }
+    }
+    if (!dodPassed) {
+      // Stall detection: unmet-id set unchanged between consecutive gate runs → replanning is
+      // not converging; stop early instead of burning the remaining attempts.
+      const unmetKey = dodUnmet().map((c) => c.id).sort().join(',')
+      if (prevUnmetKey !== null && unmetKey === prevUnmetKey) {
+        dodStalled = true
+        log('DoDGate: stall detected — unmet set unchanged between gate runs (' + unmetKey + ')')
+      }
+      prevUnmetKey = unmetKey
     }
   }
   results.dodGate = dodLast
-  if (!dodPassed) throw new Error('DoDGate failed: DoD not fully met after 3 rounds — unmet: ' + ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET').map((c) => c.id).join(', '))`) },
+  if (!dodPassed) {
+    // Escalate, never just die: persist status 'escalated' + the unmet list to durable state
+    // (same startedAt-preserving write as checkpoint) so a human or resume can pick it up.
+    const payload = JSON.stringify(
+      { workflow: NAME, status: 'escalated', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, dod: { criteria: DOD_CRITERIA }, unmet: dodUnmet(), phasesDone: [...done], results },
+      null, 2,
+    )
+    await agent(
+      ${tpl('checkpoint.txt')},
+      { label: 'dodgate:escalate', phase: 'DoDGate',${mechFrag ? ' ' + mechFrag : ''}
+        schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
+    )
+    throw new Error('DoDGate escalated: DoD not fully met (' + (dodStalled ? 'stalled — unmet set unchanged' : DOD_MAX_ATTEMPTS + ' attempts exhausted') + ') — unmet: ' + dodUnmet().map((c) => c.id).join(', '))
+  }`) },
 
   // Writeup: promote the per-worker implementation-notes + emit a reviewer write-up and a design
   // diagram, all committed under docs/changes/<name>/ so they ride the PR. Hard-fails (placed
@@ -756,7 +802,7 @@ const STATE    = \`.workflows/state/\${NAME}.json\`
 const BRANCH   = (args && args.branch) ? args.branch : \`wf/\${NAME}\`
 const BASE     = (args && args.base) ? args.base : '${base === true ? '' : base}'
 const WORKTREE = \`.worktrees/\${NAME}\`
-const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}${withDod ? `\nconst DOD_CRITERIA = ${JSON.stringify(dodCriteria)}` : ''}
+const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}${withDod ? `\nconst DOD_CRITERIA = ${JSON.stringify(dodCriteria)}\n// Outer plan-execute-verify attempt cap for the DoD gate (replan loop bound).\nconst DOD_MAX_ATTEMPTS = 2` : ''}
 
 const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
