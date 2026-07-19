@@ -1,0 +1,7 @@
+${inWorktree('dodgate-execute')}
+
+DoD EXECUTE (attempt ${attempt}/${DOD_MAX_ATTEMPTS}): carry out the revised plan below IN FULL — implement it, run each unmet criterion's relevant checks yourself, re-run the project test suite (your changes must not regress it), and commit. Do NOT weaken, game, or delete a check; if a step proves impossible, say so in the summary instead of faking it. The DoD verify worker re-adjudicates afterwards — only executed check results count, never your own report.
+
+REVISED PLAN (JSON): ${JSON.stringify(results.dodReplan)}
+UNMET CRITERIA (JSON): ${JSON.stringify(unmet)}
+FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}

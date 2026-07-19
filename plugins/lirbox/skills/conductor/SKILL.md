@@ -164,10 +164,11 @@ Generate the conductor deterministically from `scripts/scaffold-workflow.cjs` �
 hand-edit it (that reintroduces drift). Pass the work-phase prompts as **DATA** (`--prompt` /
 `--prompts-file`); to change structure or fill an empty prompt, re-run the generator with `--force`.
 Size the workflow to the task's triage tier (bare / `--profile lite` / `--profile delivery`) — do
-NOT default to the full profile. When the work items are **independent** (N unrelated bugs/files,
-no shared state — e.g. "fix these 6 unrelated bugs"), add `--independent`: the items fan out
-**concurrently** in one `Work` phase via `parallel()` instead of N sequential phases, and the gates
-verify the combined diff once. Keep sequential `--phases` for genuinely dependent steps.
+NOT default to the full profile. When the work items are **independent** (N unrelated bugs — even
+ones touching the same files), add `--independent`: the items fan out **concurrently** in one
+`Work` phase via `parallel()` instead of N sequential phases — each worker in its OWN
+worktree/branch off the run branch, merged back by an integrate step — and the gates verify the
+combined diff once. Keep sequential `--phases` for genuinely dependent steps.
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
@@ -196,9 +197,14 @@ Workflow({ scriptPath: ".workflows/<name>.js" })
 
 **Headless / non-interactive sessions (`claude -p`): launch the Workflow in the FOREGROUND —
 `run_in_background: false` — and do NOT end your turn while the workflow is still running.**
-Ending the turn exits the `-p` process and orphans the run (the background task is killed;
-the `wf/` branch is left with zero commits). Wait for the `Workflow(...)` call to return, then
-finalize (step 5). This applies equally to resume launches (step 4).
+The foreground `Workflow(...)` tool call itself BLOCKS until the workflow completes — the
+blocking call IS the wait. Never launch it backgrounded and then narrate "holding my turn open /
+waiting for completion": saying you are waiting does not make it so, and ending the turn exits
+the `-p` process and orphans the run (the background task is killed; the `wf/` branch is left
+with zero commits). After the `Workflow(...)` call returns, VERIFY the run actually finished
+before finalizing: re-read `.workflows/state/<name>.json` and confirm its `status` is no longer
+`running` (i.e. the workflow is complete/finished). Only then finalize (step 5). This applies
+equally to resume launches (step 4).
 
 Each phase merges `state.json` via its checkpoint worker (preserving `startedAt`).
 

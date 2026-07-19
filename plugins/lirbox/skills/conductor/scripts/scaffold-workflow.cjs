@@ -17,8 +17,11 @@
  *   --independent        declare the work items INDEPENDENT: fan them out concurrently in ONE
  *                        Work phase via parallel() (one worker per item) instead of N sequential
  *                        phases, so wide decomposable tasks don't pay N× worker spin-up +
- *                        per-item verification. Downstream gates still verify the combined diff
- *                        once. Reserve sequential --phases for genuinely dependent steps.
+ *                        per-item verification. Each worker gets its OWN worktree/branch off the
+ *                        run branch (items may touch the SAME file without colliding); an
+ *                        integrate step merges the per-item branches back (sequential --no-ff
+ *                        merges with a conflict-fix loop) BEFORE the downstream gates verify the
+ *                        combined diff once. Reserve sequential --phases for dependent steps.
  *   --prompt <text>      prompt for the sole work phase (data-in; errors if >1 work phase)
  *   --prompts-file <j>   JSON { "<PhaseTitle>": "<prompt>" } filling work-phase prompts from data
  *   --desc <text>        meta.description (default derived from name)
@@ -85,9 +88,10 @@ if (!name || name === true) { console.error('ERROR: --name <slug> is required');
 if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a kebab slug (a-z0-9-)'); process.exit(1); }
 
 const phases = String(arg('phases', 'Work')).split(',').map((s) => s.trim()).filter(Boolean);
-// --independent: the work items share no files/state — fan them out CONCURRENTLY in one Work
-// phase (parallel(), one worker per item) instead of N sequential phases. Sequential emission
-// stays the default and is reserved for genuinely dependent steps.
+// --independent: the work items are independent — fan them out CONCURRENTLY in one Work phase
+// (parallel(), one worker per item, each in its OWN worktree/branch, integrated afterwards)
+// instead of N sequential phases. Sequential emission stays the default and is reserved for
+// genuinely dependent steps.
 const independent = arg('independent', false) === true;
 const desc = arg('desc', `Durable workflow: ${name}`);
 const base = arg('base', '');
@@ -484,8 +488,10 @@ function agentCall({ key, prompt, schema, agentFrag, modelFrag, label, phase: ph
 }
 
 // ---- work-phase descriptor: expands to one phase per --phases title (prompts are data-in) ----
-// Under --independent it instead expands to ONE 'Work' phase that fans every item out via
-// parallel() — one worker per item, per-item spec overrides preserved, gates verify once.
+// Under --independent it instead expands to ONE 'Work' phase: per-item worktrees are created,
+// every item fans out via parallel() — one worker per item, each in its own worktree/branch,
+// per-item spec overrides preserved — then an integrate step merges the branches back into the
+// run branch so the gates verify the combined diff once.
 const workItem = (p) => {
   const key = camel(p);
   const provided = (spec.phases && spec.phases[p]) || (promptMap[p] != null ? String(promptMap[p]) : '');
@@ -500,25 +506,44 @@ const workItem = (p) => {
 };
 const workPhasesBuild = () => {
   if (independent) {
-    // Sibling workers share ONE worktree — each item's prompt carries the concurrency rules
-    // (touch only your files, retry on index.lock, no repo-wide git ops, no full-suite runs).
+    // Per-worker isolation: each parallel worker gets its OWN worktree/branch off the run
+    // branch (created SEQUENTIALLY before the fan-out — concurrent `git worktree add`
+    // contends on .git locks), so N independent items that touch the SAME file never collide
+    // on the file or on .git/index.lock. An integrate step then merges the per-item branches
+    // back into the run branch BEFORE the downstream gates verify the combined diff ONCE.
     const conc = promptTpl('independent-concurrency.txt');
     const items = phases.map(workItem);
+    const itemLines = items.map(({ key }) => `setup_item "\${WORKTREE}--${key}" "\${BRANCH}--${key}"`).join('\n');
+    const itemBranches = items.map(({ key }) => `\${BRANCH}--${key}`).join(', ');
+    const itemWorktrees = items.map(({ key }) => `\${WORKTREE}--${key}`).join(', ');
     const calls = items.map(({ p, key, greenLine, body, sch, agentFrag }) => {
       const lead = [agentFrag, mdl('work')].filter(Boolean).join(' ');
       return `    () => agent(
-      \`\${inWorktree('${p}')}\n\n${conc}\n${greenLine}\n${body}\`,
+      \`\${inItemWorktree('${p}', WORKTREE + '--${key}', BRANCH + '--${key}')}\n\n${conc}\n${greenLine}\n${body}\`,
       { label: '${key}', phase: 'Work',${lead ? ' ' + lead : ''}
         schema: ${sch} },
     ),`;
     });
-    const body = `  // Declared-independent work items: fan out CONCURRENTLY — one worker per item,
-  // no shared files/state, and the downstream gates verify the combined diff ONCE.
+    const body = `  // Declared-independent work items: fan out CONCURRENTLY — one worker per item, each
+  // in its OWN worktree on its OWN branch off the run branch (no shared tree/index), then
+  // integrate the per-item branches so the downstream gates verify the combined diff ONCE.
+  results.workFanout = await agent(
+    ${tpl('setup-item-worktrees.txt', { ITEM_LINES: itemLines })},
+    { label: 'work:fanout-setup', phase: 'Work',${mechFrag ? ' ' + mechFrag : ''}
+      schema: ${SCHEMA({ ready: { type: 'boolean' }, summary: { type: 'string' } }, ['ready'])} },
+  )
+  if (!results.workFanout || !results.workFanout.ready) throw new Error('Work fan-out setup failed: per-item worktrees not ready — ' + ((results.workFanout && results.workFanout.summary) || ''))
   const workOut = await parallel([
 ${calls.join('\n')}
   ])
   const workKeys = ${JSON.stringify(items.map((i) => i.key))}
-  workOut.forEach((r, i) => { results[workKeys[i]] = r })`;
+  workOut.forEach((r, i) => { results[workKeys[i]] = r })
+  results.workIntegrate = await agent(
+    ${tpl('integrate-items.txt', { ITEM_BRANCHES: itemBranches, ITEM_WORKTREES: itemWorktrees })},
+    { label: 'work:integrate', phase: 'Work',${mdl('think') ? ' ' + mdl('think') : ''}
+      schema: ${SCHEMA({ merged: { type: 'boolean' }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['merged'])} },
+  )
+  if (!results.workIntegrate || !results.workIntegrate.merged) throw new Error('Integrate failed: per-item branches did not all merge into ' + BRANCH + ' — ' + ((results.workIntegrate && results.workIntegrate.summary) || ''))`;
     return [{ title: 'Work', src: emitPhase('Work', body) }];
   }
   return phases.map((p) => {
@@ -657,28 +682,74 @@ const PHASES = [
     })) },
 
   // DoDGate: verify the frozen definition of done (checkable = run the command; judged =
-  // evidence-cited verdict). UNMET → fix worker → re-verify, ≤3 rounds, then hard-fail.
-  // Placed BEFORE Writeup/PR so a PR only ever opens with a fully-met DoD.
+  // evidence-cited verdict). Bounded plan-execute-verify OUTER loop: each attempt runs the
+  // verify(+fix, ≤3 rounds) gate; on gate failure a Replan worker — fed the EXACT unmet
+  // criteria (ids + executed check output) — produces a new plan version, an execute worker
+  // applies it, and the gate re-runs. Capped at DOD_MAX_ATTEMPTS, with stall detection (the
+  // unmet-id set unchanged between consecutive gate runs → stop early). Routing consumes ONLY
+  // executed gate verdicts, never worker self-reports. Every non-green exit persists durable
+  // state status 'escalated' + the unmet list BEFORE aborting — the run escalates, it does not
+  // just die. Placed BEFORE Writeup/PR so a PR only ever opens with a fully-met DoD.
   { title: 'DoDGate', enabledWhen: withDod, build: () => emitPhase('DoDGate',
-    `  let dodPassed = false, dodLast = null
-  for (let round = 1; round <= 3 && !dodPassed; round++) {
-    dodLast = await agent(
-      ${tpl('dodgate-verify.txt')},
-      { label: \`dodgate:verify-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
-        schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
-    )
-    const unmet = ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
-    dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
-    if (!dodPassed && round < 3) {
-      await agent(
-        ${tpl('dodgate-fix.txt')},
-        { label: \`dodgate:fix-r\${round}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
-          schema: ${SCHEMA({ summary: { type: 'string' }, fixed: { type: 'array', items: { type: 'string' } } }, ['summary'])} },
+    `  let dodPassed = false, dodLast = null, dodStalled = false, prevUnmetKey = null
+  const dodUnmet = () => ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
+  for (let attempt = 1; attempt <= DOD_MAX_ATTEMPTS && !dodPassed && !dodStalled; attempt++) {
+    if (attempt > 1) {
+      // Replan on gate failure: new plan from the EXECUTED unmet verdicts, then execute it.
+      const unmet = dodUnmet()
+      results.dodReplan = await agent(
+        ${tpl('dodgate-replan.txt')},
+        { label: \`dodgate:replan-a\${attempt}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
+          schema: ${SCHEMA({ plan: { type: 'string' }, steps: { type: 'array', items: { type: 'string' } } }, ['plan', 'steps'])} },
       )
+      await agent(
+        ${tpl('dodgate-execute.txt')},
+        { label: \`dodgate:execute-a\${attempt}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
+          schema: ${SCHEMA({ summary: { type: 'string' } }, ['summary'])} },
+      )
+    }
+    for (let round = 1; round <= 3 && !dodPassed; round++) {
+      dodLast = await agent(
+        ${tpl('dodgate-verify.txt')},
+        { label: \`dodgate:verify-a\${attempt}-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
+          schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
+      )
+      const unmet = dodUnmet()
+      dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
+      if (!dodPassed && round < 3) {
+        await agent(
+          ${tpl('dodgate-fix.txt')},
+          { label: \`dodgate:fix-a\${attempt}-r\${round}\`, phase: 'DoDGate',${mdl('work') ? ' ' + mdl('work') : ''}
+            schema: ${SCHEMA({ summary: { type: 'string' }, fixed: { type: 'array', items: { type: 'string' } } }, ['summary'])} },
+        )
+      }
+    }
+    if (!dodPassed) {
+      // Stall detection: unmet-id set unchanged between consecutive gate runs → replanning is
+      // not converging; stop early instead of burning the remaining attempts.
+      const unmetKey = dodUnmet().map((c) => c.id).sort().join(',')
+      if (prevUnmetKey !== null && unmetKey === prevUnmetKey) {
+        dodStalled = true
+        log('DoDGate: stall detected — unmet set unchanged between gate runs (' + unmetKey + ')')
+      }
+      prevUnmetKey = unmetKey
     }
   }
   results.dodGate = dodLast
-  if (!dodPassed) throw new Error('DoDGate failed: DoD not fully met after 3 rounds — unmet: ' + ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET').map((c) => c.id).join(', '))`) },
+  if (!dodPassed) {
+    // Escalate, never just die: persist status 'escalated' + the unmet list to durable state
+    // (same startedAt-preserving write as checkpoint) so a human or resume can pick it up.
+    const payload = JSON.stringify(
+      { workflow: NAME, status: 'escalated', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, dod: { criteria: DOD_CRITERIA }, unmet: dodUnmet(), phasesDone: [...done], results },
+      null, 2,
+    )
+    await agent(
+      ${tpl('checkpoint.txt')},
+      { label: 'dodgate:escalate', phase: 'DoDGate',${mechFrag ? ' ' + mechFrag : ''}
+        schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
+    )
+    throw new Error('DoDGate escalated: DoD not fully met (' + (dodStalled ? 'stalled — unmet set unchanged' : DOD_MAX_ATTEMPTS + ' attempts exhausted') + ') — unmet: ' + dodUnmet().map((c) => c.id).join(', '))
+  }`) },
 
   // Writeup: promote the per-worker implementation-notes + emit a reviewer write-up and a design
   // diagram, all committed under docs/changes/<name>/ so they ride the PR. Hard-fails (placed
@@ -756,7 +827,7 @@ const STATE    = \`.workflows/state/\${NAME}.json\`
 const BRANCH   = (args && args.branch) ? args.branch : \`wf/\${NAME}\`
 const BASE     = (args && args.base) ? args.base : '${base === true ? '' : base}'
 const WORKTREE = \`.worktrees/\${NAME}\`
-const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}${withDod ? `\nconst DOD_CRITERIA = ${JSON.stringify(dodCriteria)}` : ''}
+const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}${withDod ? `\nconst DOD_CRITERIA = ${JSON.stringify(dodCriteria)}\n// Outer plan-execute-verify attempt cap for the DoD gate (replan loop bound).\nconst DOD_MAX_ATTEMPTS = 2` : ''}
 
 const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
@@ -787,7 +858,7 @@ const results = { ...prior }
   }
 })()
 
-${promptTpl('in-worktree.txt')}
+${promptTpl('in-worktree.txt')}${independent ? '\n\n' + promptTpl('in-item-worktree.txt') : ''}
 
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
