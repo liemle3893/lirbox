@@ -21,6 +21,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`flowchart`** | Turn a branching process (CI/deploy pipeline, approval/OTP funnel, state machine) into an interactive HTML flowchart — Mermaid diagram with decision diamonds + clickable per-node detail panel. Note: renders via a CDN, so this one needs internet. |
 | **`component-diagram`** | Draw a system's static structure as a self-contained interactive HTML component diagram — Mermaid flowchart with subgraph boundaries + typed dependency edges + a clickable per-component panel (responsibility / interface / deps). Note: renders via a CDN, so this one needs internet. |
 | **`sequence-diagram`** | Draw a time-ordered interaction as a self-contained interactive HTML sequence diagram — Mermaid sequenceDiagram (autonumbered) + a numbered step list driving a clickable detail panel (who→who, sync/async, code at the call site). Note: renders via a CDN, so this one needs internet. |
+| **`c4-model`** | Model a system's architecture as a C4 model (LikeC4): one `.c4` source → landscape/container/component drill-down views, built into a single self-contained interactive HTML page (offline-viewable) + the committed `.c4` source of truth. Note: toolchain runs in a throwaway docker container (pinned image, ~1 GB first pull) — needs docker, installs nothing on the host. |
 | **`deep-understanding`** | Interactive tutor: teaches you to deeply understand a PR/change/subsystem, incrementally — assesses what you know, fills gaps, quizzes you (problem → solution → impact), and doesn't stop until mastery is verified. Not a document — a guided session. |
 | **`conductor`** | Drive the Workflow tool with durable on-disk state, crash/restart resume, worktree isolation, opt-in enforcement gates, and a cost report. For long or interruptible multi-subagent runs (migrations, audits, staged delivery). |
 | **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE surface — keeping a change only when it strictly beats the metric **and** passes the gate, within an optional edit-size budget — then opens a PR for review (never auto-merges). For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost — or a skill's held-out task-pass-rate (see the [`skill-train`](./plugins/lirbox/skills/prospector/references/skill-train.md) recipe). |
@@ -61,6 +62,7 @@ codewalk the auth flow              # codewalk
 flowchart the deploy pipeline       # flowchart
 diagram the components of <service>  # component-diagram
 sequence-diagram the login flow      # sequence-diagram
+C4 model of <system>                # c4-model (LikeC4; needs docker)
 help me deeply understand PR 1059   # deep-understanding (interactive, quizzes you)
 implement <plan/spec> with resume   # conductor (durable, crash-safe multi-subagent run)
 make the /search endpoint faster    # prospector (proposes a metric + gate, confirms once)
@@ -69,7 +71,7 @@ which conductor config wins         # arena (pairwise leaderboard over frozen fi
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:arena`, `lirbox:skill-lint`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:arena`, `lirbox:skill-lint`).
 
 ## Test locally (no install)
 

@@ -27,6 +27,7 @@ implementation-notes/
 *-plan-deck.html
 *-component.html
 *-sequence.html
+*-c4.html
 
 # EXCEPTION: conductor's Writeup phase PROMOTES delivery artifacts into docs/changes/<name>/
 # (writeup.html, design.html, notes/*.html, summary.md) — these ARE tracked, they ride the PR.
