@@ -29,13 +29,16 @@ More phases = more subagent round-trips; reserve them for work that warrants the
 ## Phase / prompt flags
 
 - `--phases` — comma-list of work phase titles.
-- `--independent` — declare the work items **independent** (no shared files/state): they fan out
+- `--independent` — declare the work items **independent** (no ordering dependencies): they fan out
   **concurrently** in ONE `Work` phase via `parallel()` — one worker per item, per-item prompts/spec
-  overrides preserved, downstream gates verify the combined diff **once**. Use for wide decomposable
-  tasks (N unrelated bugs/items) so the run doesn't pay N× worker spin-up + per-item verification;
-  keep sequential `--phases` for genuinely dependent steps. Each worker's prompt carries the shared-
-  worktree concurrency rules (touch only your item's files, retry on `index.lock`, no repo-wide git
-  ops). Resume granularity is the whole `Work` phase (a crash mid-fan-out re-runs all items).
+  overrides preserved, downstream gates verify the combined diff **once**. Each worker gets its
+  **OWN worktree/branch** off the run branch (`<worktree>--<item>` / `<branch>--<item>`, created
+  sequentially before the fan-out), so items may safely touch the **same file** without colliding on
+  it or on `.git/index.lock`; an integrate step then merges the per-item branches back into the run
+  branch (sequential `--no-ff` merges with a conflict-fix loop, hard-fail if an item can't land)
+  before the gates run. Use for wide decomposable tasks (N unrelated bugs/items) so the run doesn't
+  pay N× worker spin-up + per-item verification; keep sequential `--phases` for genuinely dependent
+  steps. Resume granularity is the whole `Work` phase (a crash mid-fan-out re-runs all items).
 - `--prompts-file <json>` — `{ "<PhaseTitle>": "<prompt text>", … }`; fills each work phase's prompt
   from **data** so you never read back or hand-edit the generated script. A phase with no entry keeps
   a `TODO:` stub (fill it by regenerating, not by editing).

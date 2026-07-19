@@ -1,0 +1,15 @@
+// Per-item variant for the --independent fan-out: each parallel worker OWNS one worktree/branch
+// (branched off the run branch), so siblings never share a working tree or index — N independent
+// items may touch the SAME file without colliding on it or on .git/index.lock. Same judgment-gated
+// notes contract as inWorktree; notes land in the ITEM worktree and ride its branch through the
+// integrate merge.
+function inItemWorktree(slot, wt, br) {
+  return `Work ONLY inside YOUR OWN git worktree at ${wt} (run \`cd ${wt}\` first; it is on ` +
+    `branch ${br}, branched off ${BRANCH}). Do NOT edit any file outside ${wt} — sibling workers ` +
+    `own the other worktrees. Commit your changes there.\n\nIf — and ONLY if — this step involved ` +
+    `a non-trivial design decision, an intentional deviation from the spec, a tradeoff between ` +
+    `real alternatives, or an open question a reviewer must confirm, append it to a notes file ` +
+    `UNIQUE to you at implementation-notes/${slot}.html in the worktree (mkdir -p the dir; create ` +
+    `if missing; APPEND — never clobber). For mechanical or no-decision work, SKIP the file — do ` +
+    `not create empty or boilerplate notes.`
+}

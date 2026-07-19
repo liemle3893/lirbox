@@ -17,8 +17,11 @@
  *   --independent        declare the work items INDEPENDENT: fan them out concurrently in ONE
  *                        Work phase via parallel() (one worker per item) instead of N sequential
  *                        phases, so wide decomposable tasks don't pay N× worker spin-up +
- *                        per-item verification. Downstream gates still verify the combined diff
- *                        once. Reserve sequential --phases for genuinely dependent steps.
+ *                        per-item verification. Each worker gets its OWN worktree/branch off the
+ *                        run branch (items may touch the SAME file without colliding); an
+ *                        integrate step merges the per-item branches back (sequential --no-ff
+ *                        merges with a conflict-fix loop) BEFORE the downstream gates verify the
+ *                        combined diff once. Reserve sequential --phases for dependent steps.
  *   --prompt <text>      prompt for the sole work phase (data-in; errors if >1 work phase)
  *   --prompts-file <j>   JSON { "<PhaseTitle>": "<prompt>" } filling work-phase prompts from data
  *   --desc <text>        meta.description (default derived from name)
@@ -85,9 +88,10 @@ if (!name || name === true) { console.error('ERROR: --name <slug> is required');
 if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a kebab slug (a-z0-9-)'); process.exit(1); }
 
 const phases = String(arg('phases', 'Work')).split(',').map((s) => s.trim()).filter(Boolean);
-// --independent: the work items share no files/state — fan them out CONCURRENTLY in one Work
-// phase (parallel(), one worker per item) instead of N sequential phases. Sequential emission
-// stays the default and is reserved for genuinely dependent steps.
+// --independent: the work items are independent — fan them out CONCURRENTLY in one Work phase
+// (parallel(), one worker per item, each in its OWN worktree/branch, integrated afterwards)
+// instead of N sequential phases. Sequential emission stays the default and is reserved for
+// genuinely dependent steps.
 const independent = arg('independent', false) === true;
 const desc = arg('desc', `Durable workflow: ${name}`);
 const base = arg('base', '');
@@ -484,8 +488,10 @@ function agentCall({ key, prompt, schema, agentFrag, modelFrag, label, phase: ph
 }
 
 // ---- work-phase descriptor: expands to one phase per --phases title (prompts are data-in) ----
-// Under --independent it instead expands to ONE 'Work' phase that fans every item out via
-// parallel() — one worker per item, per-item spec overrides preserved, gates verify once.
+// Under --independent it instead expands to ONE 'Work' phase: per-item worktrees are created,
+// every item fans out via parallel() — one worker per item, each in its own worktree/branch,
+// per-item spec overrides preserved — then an integrate step merges the branches back into the
+// run branch so the gates verify the combined diff once.
 const workItem = (p) => {
   const key = camel(p);
   const provided = (spec.phases && spec.phases[p]) || (promptMap[p] != null ? String(promptMap[p]) : '');
@@ -500,25 +506,44 @@ const workItem = (p) => {
 };
 const workPhasesBuild = () => {
   if (independent) {
-    // Sibling workers share ONE worktree — each item's prompt carries the concurrency rules
-    // (touch only your files, retry on index.lock, no repo-wide git ops, no full-suite runs).
+    // Per-worker isolation: each parallel worker gets its OWN worktree/branch off the run
+    // branch (created SEQUENTIALLY before the fan-out — concurrent `git worktree add`
+    // contends on .git locks), so N independent items that touch the SAME file never collide
+    // on the file or on .git/index.lock. An integrate step then merges the per-item branches
+    // back into the run branch BEFORE the downstream gates verify the combined diff ONCE.
     const conc = promptTpl('independent-concurrency.txt');
     const items = phases.map(workItem);
+    const itemLines = items.map(({ key }) => `setup_item "\${WORKTREE}--${key}" "\${BRANCH}--${key}"`).join('\n');
+    const itemBranches = items.map(({ key }) => `\${BRANCH}--${key}`).join(', ');
+    const itemWorktrees = items.map(({ key }) => `\${WORKTREE}--${key}`).join(', ');
     const calls = items.map(({ p, key, greenLine, body, sch, agentFrag }) => {
       const lead = [agentFrag, mdl('work')].filter(Boolean).join(' ');
       return `    () => agent(
-      \`\${inWorktree('${p}')}\n\n${conc}\n${greenLine}\n${body}\`,
+      \`\${inItemWorktree('${p}', WORKTREE + '--${key}', BRANCH + '--${key}')}\n\n${conc}\n${greenLine}\n${body}\`,
       { label: '${key}', phase: 'Work',${lead ? ' ' + lead : ''}
         schema: ${sch} },
     ),`;
     });
-    const body = `  // Declared-independent work items: fan out CONCURRENTLY — one worker per item,
-  // no shared files/state, and the downstream gates verify the combined diff ONCE.
+    const body = `  // Declared-independent work items: fan out CONCURRENTLY — one worker per item, each
+  // in its OWN worktree on its OWN branch off the run branch (no shared tree/index), then
+  // integrate the per-item branches so the downstream gates verify the combined diff ONCE.
+  results.workFanout = await agent(
+    ${tpl('setup-item-worktrees.txt', { ITEM_LINES: itemLines })},
+    { label: 'work:fanout-setup', phase: 'Work',${mechFrag ? ' ' + mechFrag : ''}
+      schema: ${SCHEMA({ ready: { type: 'boolean' }, summary: { type: 'string' } }, ['ready'])} },
+  )
+  if (!results.workFanout || !results.workFanout.ready) throw new Error('Work fan-out setup failed: per-item worktrees not ready — ' + ((results.workFanout && results.workFanout.summary) || ''))
   const workOut = await parallel([
 ${calls.join('\n')}
   ])
   const workKeys = ${JSON.stringify(items.map((i) => i.key))}
-  workOut.forEach((r, i) => { results[workKeys[i]] = r })`;
+  workOut.forEach((r, i) => { results[workKeys[i]] = r })
+  results.workIntegrate = await agent(
+    ${tpl('integrate-items.txt', { ITEM_BRANCHES: itemBranches, ITEM_WORKTREES: itemWorktrees })},
+    { label: 'work:integrate', phase: 'Work',${mdl('think') ? ' ' + mdl('think') : ''}
+      schema: ${SCHEMA({ merged: { type: 'boolean' }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['merged'])} },
+  )
+  if (!results.workIntegrate || !results.workIntegrate.merged) throw new Error('Integrate failed: per-item branches did not all merge into ' + BRANCH + ' — ' + ((results.workIntegrate && results.workIntegrate.summary) || ''))`;
     return [{ title: 'Work', src: emitPhase('Work', body) }];
   }
   return phases.map((p) => {
@@ -833,7 +858,7 @@ const results = { ...prior }
   }
 })()
 
-${promptTpl('in-worktree.txt')}
+${promptTpl('in-worktree.txt')}${independent ? '\n\n' + promptTpl('in-item-worktree.txt') : ''}
 
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
