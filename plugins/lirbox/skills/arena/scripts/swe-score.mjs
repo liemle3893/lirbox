@@ -92,7 +92,18 @@ function renderIndex() {
   const rows = cards.map((c) => {
     const cmp = c.suiteHash === cur.hash ? '' : ' ⚠️stale-suite';
     const ci = c.score.wilson95.map((x) => Math.round(x * 100) + '%').join('–');
-    return `| ${c.name} | ${c.date} | \`${c.suiteHash}\`${cmp} | ${c.config.model || '?'} / ${c.config.effort || '?'}${c.config.pluginDir ? ' / ' + c.config.pluginDir : ''} | **${c.score.resolved}/${c.score.total} (${Math.round(c.score.rate * 100)}%)** | ${ci} | ${c.score.f2pPassed}/${c.score.f2pTotal} |`;
+    // Engagement is derived from the stored cells (exact counts, and it backfills every recorded
+    // card) — never from score.engagementRate, which is a rounded rate. Cards built by --cells come
+    // from .grade files, which only exist where the skill engaged: their engagement is assumed, not
+    // measured, so mark them (†) rather than let a construction artifact read as a 100% result.
+    const cells = c.cells || [];
+    const eng = cells.filter((x) => x.engaged !== false).length;
+    const assumed = cells.length > 0 && cells.every((x) => x.file !== undefined);
+    const engaged = cells.length ? `${eng}/${c.score.total}${assumed ? '†' : ''}` : '?';
+    const condRes = !cells.length ? '?' : eng ? `${cells.filter((x) => x.engaged !== false && x.resolved).length}/${eng}` : '-';
+    const cfg = `${c.config.model || '?'} / ${c.config.effort || '?'}${c.config.pluginDir ? ' / ' + c.config.pluginDir : ''}`;
+    const headline = `**${c.score.resolved}/${c.score.total} (${Math.round(c.score.rate * 100)}%)**`;
+    return `| ${c.name} | ${c.date} | \`${c.suiteHash}\`${cmp} | ${cfg} | ${headline} | ${ci} | ${engaged} | ${condRes} | ${c.score.f2pPassed}/${c.score.f2pTotal} |`;
   });
   const md = `# Conductor scoreboard — absolute SWE-style scores
 
@@ -102,9 +113,32 @@ per cell). Runs are INDEPENDENT: benchmark a new config/version alone, compare a
 ⚠️stale-suite rows predate a suite change. Wilson 95% CI shown — with few cells the interval is wide;
 treat overlapping intervals as "not distinguished yet," and raise runs to tighten.
 
-| Run | Date | Suite | Config | Resolved | 95% CI | F2P tests |
-|---|---|---|---|---|---|---|
+**A low headline may be ENGAGEMENT failure, not quality failure — check the Engaged column first.**
+A cell scores 0 both when the skill ran and got the change wrong AND when the skill never ran at all
+(no \`wf/\` branch). Those are different defects with different fixes: non-engagement is a skill/prompt
+problem, wrong output is a model-capability problem. **Engaged** = cells that produced a \`wf/\` branch;
+**Resolved | Eng** = resolution among only those. Worked example: \`base-sonnet5-high\` reads **2/5 (40%)**,
+but engaged only 2/5 and resolved 2/2 of what it attempted — every failure in that row is
+non-engagement, and nothing in it supports "worse at the work". Never read the headline alone.
+
+**Minimum detectable effect.** The suite is ~7 cells and \`--runs 1\` is the default, so n ≈ 7 per arm:
+only differences of roughly **20 percentage points or larger** are detectable here. Resolving ~10pp
+would need on the order of **293 observations per arm**. Overlapping Wilson intervals mean "not
+distinguished yet" — not "equal", and not "one is better". (The 5/5-vs-2/5 engagement gap above is
+Fisher-exact p = 0.167 at n = 5: visible, not established.)
+
+**Null control — run it before trusting any comparison.** Benchmark the SAME config twice under two
+names. That pair measures the harness, not the model: if the two rows differ materially, the harness
+is the noise source and any A-vs-B gap smaller than that spread is unreadable.
+
+| Run | Date | Suite | Config | Resolved | 95% CI | Engaged | Resolved \\| Eng | F2P tests |
+|---|---|---|---|---|---|---|---|---|
 ${rows.join('\n')}
+
+† engagement assumed, not measured: the row was built from \`.grade\` files (\`--cells\`), which exist
+only for cells that engaged — non-engaged cells leave no grade and never enter the denominator. Only
+\`swe-run.mjs\` rows measure engagement. **F2P tests** is pooled over all cells, so non-engaged cells
+contribute 0/0 and vanish from it — it says nothing about engagement either.
 
 Produce a new row: \`node plugins/lirbox/skills/arena/scripts/swe-run.mjs --name <label> --model <m> --effort <e> [--plugin-dir <lirbox-checkout>] [--runs N]\`
 Quality-beyond-correctness (style, coverage, thoroughness) is NOT in this score — that stays pairwise
