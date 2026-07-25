@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Expectation manifest for the frozen acceptance-checks under evals/checks/.",
+    "Enforced by evals/floor/06-checks-manifest.test.mjs, so it runs on the whetstone baseline AND",
+    "after every kept item — which is what makes a past fix's regression loud instead of invisible.",
+    "",
+    "expect 'green' = a past item whose fix must not regress. MUST exit 0.",
+    "expect 'red'   = a known-failing check: an open concern or an in-flight item. MUST exit 0 or 1,",
+    "                 never >=2 (>=2 is harness rot: the check failed to run, e.g. a generator flag",
+    "                 it passes became invalid). A 'red' check that turns GREEN does NOT fail the",
+    "                 floor -- the floor gates the whetstone loop, so an exact-match rule would",
+    "                 revert the very fix that resolves the concern. The floor prints a promote-me",
+    "                 notice instead; move it to 'green' when its fix lands.",
+    "",
+    "LOCKED (evals/**): the whetstone fixer may never edit this file. That is the point -- otherwise",
+    "the loop could flip a regressing check to 'red' and escape its own fence."
+  ],
+  "checks": {
+    "book-under-flag": {
+      "expect": "red",
+      "note": "REGRESSION, not yet refixed. Fixed once (SKILL.md 2826 -> 1479 words), then re-accreted to 2469 across seven consecutive runs; skill-lint counts 2077 prose words vs the 1200 flag threshold. Needs a shrink pass (whetstone consolidate) -- tracked, not hidden."
+    },
+    "checks-manifest-guard": { "expect": "green" },
+    "codegate-lead-build-evidence": { "expect": "green" },
+    "codegate-lead-medium-fate": { "expect": "green" },
+    "codegate-lead-output-contract": { "expect": "green" },
+    "codegate-lead-skip-audit": { "expect": "green" },
+    "conductor-warn-before-overkill-run": { "expect": "green" },
+    "dod-gate": { "expect": "green" },
+    "dodgate-replan-outer-loop": { "expect": "green" },
+    "dynamic-fanout-within-phase": { "expect": "green" },
+    "effort-think": { "expect": "green" },
+    "flag-error-echo": { "expect": "green" },
+    "frontend-gate-phase": { "expect": "green" },
+    "headless-driver-still-ends-turn": { "expect": "green" },
+    "independent-fanout-never-chosen": { "expect": "green" },
+    "independent-work-needs-per-worker-worktrees": { "expect": "green" },
+    "judged-dod-report-vulnerable": { "expect": "green" },
+    "model-flag-guard": { "expect": "green" },
+    "model-mode-auto-by-default": { "expect": "green" },
+    "model-mode-echo": { "expect": "green" },
+    "panel-codegate": { "expect": "green" },
+    "scaffold-golden-snapshots": { "expect": "green" },
+    "scaffold-prompts-as-data": { "expect": "green" }
+  }
+}
