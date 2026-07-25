@@ -124,8 +124,14 @@ non-engagement, and nothing in it supports "worse at the work". Never read the h
 **Minimum detectable effect.** The suite is ~7 cells and \`--runs 1\` is the default, so n ≈ 7 per arm:
 only differences of roughly **20 percentage points or larger** are detectable here. Resolving ~10pp
 would need on the order of **293 observations per arm**. Overlapping Wilson intervals mean "not
-distinguished yet" — not "equal", and not "one is better". (The 5/5-vs-2/5 engagement gap above is
-Fisher-exact p = 0.167 at n = 5: visible, not established.)
+distinguished yet" — not "equal", and not "one is better".
+
+**There is currently NO usable cross-model engagement comparison** — worth stating plainly, because
+the apparent one is a trap. \`base-sonnet5-high\` measured 2/5, but the obvious comparator
+\`base-opus48-1m-high\` is a † row: its 5/5 was assumed by construction, never measured. The only
+measured opus arm is \`base-opus48-1m-med\` at 4/5, which differs from the sonnet row in **effort as
+well as model**, so it is confounded. Even taken at face value, 4/5 vs 2/5 is Fisher-exact p = 0.52
+at n = 5. Producing a real answer needs one \`swe-run\` per model at matched effort.
 
 **Null control — run it before trusting any comparison.** Benchmark the SAME config twice under two
 names. That pair measures the harness, not the model: if the two rows differ materially, the harness
