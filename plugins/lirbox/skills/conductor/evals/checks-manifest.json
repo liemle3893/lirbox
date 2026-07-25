@@ -20,27 +20,69 @@
       "expect": "red",
       "note": "REGRESSION, not yet refixed. Fixed once (SKILL.md 2826 -> 1479 words), then re-accreted to 2469 across seven consecutive runs; skill-lint counts 2077 prose words vs the 1200 flag threshold. Needs a shrink pass (whetstone consolidate) -- tracked, not hidden."
     },
-    "checks-manifest-guard": { "expect": "green" },
-    "codegate-lead-build-evidence": { "expect": "green" },
-    "codegate-lead-medium-fate": { "expect": "green" },
-    "codegate-lead-output-contract": { "expect": "green" },
-    "codegate-lead-skip-audit": { "expect": "green" },
-    "conductor-warn-before-overkill-run": { "expect": "green" },
-    "dod-gate": { "expect": "green" },
-    "dodgate-replan-outer-loop": { "expect": "green" },
-    "dynamic-fanout-within-phase": { "expect": "green" },
-    "effort-think": { "expect": "green" },
-    "flag-error-echo": { "expect": "green" },
-    "frontend-gate-phase": { "expect": "green" },
-    "headless-driver-still-ends-turn": { "expect": "green" },
-    "independent-fanout-never-chosen": { "expect": "green" },
-    "independent-work-needs-per-worker-worktrees": { "expect": "green" },
-    "judged-dod-report-vulnerable": { "expect": "green" },
-    "model-flag-guard": { "expect": "green" },
-    "model-mode-auto-by-default": { "expect": "green" },
-    "model-mode-echo": { "expect": "green" },
-    "panel-codegate": { "expect": "green" },
-    "scaffold-golden-snapshots": { "expect": "green" },
-    "scaffold-prompts-as-data": { "expect": "green" }
+    "checks-manifest-guard": {
+      "expect": "green"
+    },
+    "codegate-lead-build-evidence": {
+      "expect": "green"
+    },
+    "codegate-lead-medium-fate": {
+      "expect": "green"
+    },
+    "codegate-lead-output-contract": {
+      "expect": "green"
+    },
+    "codegate-lead-skip-audit": {
+      "expect": "green"
+    },
+    "conductor-warn-before-overkill-run": {
+      "expect": "green"
+    },
+    "dod-gate": {
+      "expect": "green"
+    },
+    "dodgate-replan-outer-loop": {
+      "expect": "green"
+    },
+    "dynamic-fanout-within-phase": {
+      "expect": "green"
+    },
+    "effort-think": {
+      "expect": "green"
+    },
+    "flag-error-echo": {
+      "expect": "green"
+    },
+    "frontend-gate-phase": {
+      "expect": "green"
+    },
+    "headless-driver-still-ends-turn": {
+      "expect": "green"
+    },
+    "judged-dod-report-vulnerable": {
+      "expect": "green"
+    },
+    "loop-decides-decomposition": {
+      "expect": "red",
+      "note": "Filed 2026-07-25, not yet run. The caller must stop deciding the decomposition: drop SKILL.md step 1d and reject --independent; the runtime planner already derives items and edges from a worker that read the repo. Prep DONE: independent-fanout-never-chosen and independent-work-needs-per-worker-worktrees were retired in this PR (they asserted the opposite doctrine and would have taken the floor RED); per-worker worktree isolation stays covered by dynamic-fanout-within-phase assertion 6."
+    },
+    "model-flag-guard": {
+      "expect": "green"
+    },
+    "model-mode-auto-by-default": {
+      "expect": "green"
+    },
+    "model-mode-echo": {
+      "expect": "green"
+    },
+    "panel-codegate": {
+      "expect": "green"
+    },
+    "scaffold-golden-snapshots": {
+      "expect": "green"
+    },
+    "scaffold-prompts-as-data": {
+      "expect": "green"
+    }
   }
 }
