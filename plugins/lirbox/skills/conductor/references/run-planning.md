@@ -1,9 +1,10 @@
-# Run planning — triage, DoD acquisition, decomposition (SKILL.md steps 1b / 1c / 1d)
+# Run planning — triage, DoD acquisition, decomposition (SKILL.md steps 1b / 1c / 2)
 
 SKILL.md keeps the DECISION for each of these steps (which tier, which flag, the hard rules).
 This file holds the HOW: the long-form probes, formats, precedence rules and worked examples.
-Read it while working a NEW run's steps 1b → 1c → 1d; a resume skips all three (its profile,
-DoD and decomposition are already frozen in `state.json` / `.workflows/<name>.dod.json`).
+Read it while working a NEW run's steps 1b → 1c; a resume skips both (its profile and DoD are
+already frozen in `state.json` / `.workflows/<name>.dod.json`, and the decomposition — which the
+loop, not you, decides — is checkpointed per phase).
 
 ---
 
@@ -103,48 +104,34 @@ as non-discriminating.
 
 ---
 
-## 3. Decomposition detail (SKILL.md step 1d)
+## 3. Decomposition — the loop's job, not the caller's (SKILL.md step 2)
 
-Item titles in the table become the `--phases` entries and the `--prompts-file` keys.
+**You declare the GOAL (step 1) and the DEFINITION OF DONE (step 1c). The loop decides the
+SPLIT.** There is no caller-facing decomposition step: writing down work items and their edges
+before generating means guessing at a shape nothing has read the code to confirm, and a wrong edge
+does not fail loudly — it produces a clean merge over semantically broken work.
 
-| id | work item | depends on |
-|----|-----------|------------|
-| w1 | migrate `/users` handler | none |
-| w2 | migrate `/orders` handler | none |
-| w3 | delete the legacy adapter | w1, w2 |
-
-`depends on` is a comma-list of item ids or the literal `none` — never blank, never prose. An edge
-means the item needs another item's **output** to exist first (its decision, API, or code).
-Touching the same file is **NOT** an edge: per-item worktrees + the integrate step handle that.
-
-Corollaries of the hard rule (every no-edge item in ONE `--independent` fan-out):
-
-- exactly one no-edge item → a single plain phase, no fan-out;
-- every item carrying an edge → strictly linear, now justified by the table rather than by default.
-
-This table is the **coarse** cut — the items you can name before reading the repo. Each resulting
-work phase is decomposed AGAIN at runtime by its own planner worker (SKILL.md step 2), so a phase
-you could only write as one line here still fans out inside itself once a worker has read the code.
-Table entries a driver can already see as independent belong in the `--independent` fan-out anyway:
-declaring them costs nothing and skips a planner round-trip.
-
-### 3a. `--independent` fan-out (declared, generation time)
-
-≥2 items declared `depends on: none` → pass `--independent` with exactly those items as `--phases`.
-They fan out **concurrently** in one `Work` phase via `parallel()` instead of N sequential phases —
-each worker in its OWN worktree/branch off the run branch, merged back by an integrate step — with
-the gates verifying the combined diff once. Items carrying a declared dependency edge stay
-sequential `--phases`, ordered after the fan-out.
-
-### 3b. Planner fan-out (dynamic, runtime — work inside a phase is not serial)
+### 3a. Planner fan-out (runtime — work inside a phase is not serial)
 
 By default each work phase first runs a **planner** worker (`plan:<Phase>`) that reads the repo and
 returns its items plus each item's `dependsOn`; the conductor then dispatches them **by dependency
 level** — every ready item in ONE `parallel()` batch, each worker in its own worktree/branch, each
-level integrated back into the run branch before the next. Phase ORDER is untouched. The plan is
+level integrated back into the run branch before the next level branches off it, so a dependent item
+always starts from a base carrying what it needs. Phase ORDER is untouched. The plan is
 checkpointed before the first item runs, so a resume reuses that decomposition instead of
 re-planning a different one, and a one-item plan is just today's single worker. Pass
 `--no-plan-fanout` to turn a phase back into one serial worker.
+
+### 3b. What the caller still controls
+
+- **The prompt.** If you already know the items, name them in the phase prompt — the planner reads
+  it and returns them, with the edges it derives from the code rather than from your guess.
+- **`--phases`.** Genuinely staged, human-visible stages (e.g. `Analyze,Implement`) — each stage
+  gets its own planner. Not a way to spell out work items.
+- **`--no-plan-fanout`.** The single escape hatch: force ONE serial worker for the phase.
+
+`--independent` (caller-declared items, fanned out at scaffold time) has been **removed** and now
+hard-errors; its per-worker worktree isolation lives on in the planner fan-out.
 
 ---
 

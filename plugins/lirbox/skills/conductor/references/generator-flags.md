@@ -28,30 +28,29 @@ More phases = more subagent round-trips; reserve them for work that warrants the
 
 ## Phase / prompt flags
 
-- `--phases` — comma-list of work phase titles.
-- `--independent` — declare the work items **independent** (no ordering dependencies): they fan out
-  **concurrently** in ONE `Work` phase via `parallel()` — one worker per item, per-item prompts/spec
-  overrides preserved, downstream gates verify the combined diff **once**. Each worker gets its
-  **OWN worktree/branch** off the run branch (`<worktree>--<item>` / `<branch>--<item>`, created
-  sequentially before the fan-out), so items may safely touch the **same file** without colliding on
-  it or on `.git/index.lock`; an integrate step then merges the per-item branches back into the run
-  branch (sequential `--no-ff` merges with a conflict-fix loop, hard-fail if an item can't land)
-  before the gates run. Use for wide decomposable tasks (N unrelated bugs/items) so the run doesn't
-  pay N× worker spin-up + per-item verification; keep sequential `--phases` for genuinely dependent
-  steps. Resume granularity is the whole `Work` phase (a crash mid-fan-out re-runs all items).
+- `--phases` — comma-list of work phase titles. These are human-declared **stages**, not a
+  decomposition: what each stage splits into is decided at runtime by its planner (below).
 - `--no-plan-fanout` — opt OUT of **in-phase concurrency**. By default every work phase is
   *decomposed at runtime*: the phase first runs a **planner** worker (`plan:<Phase>`, think-tier)
   that reads the repo and returns `{ items: [{ id, title, prompt, dependsOn }] }`, and the conductor
   then dispatches those items **by dependency level** — every item whose `dependsOn` is already
   satisfied ships in ONE `parallel()` batch, each worker in its **OWN worktree/branch**
   (`<worktree>--<phase>-<id>`), and each level is integrated back into the run branch before the next
-  level branches off it. So a mixed graph (`w1`,`w2` independent → `w3` depends on both) is
-  expressible **inside one phase**, which `--independent` (all-or-nothing, scaffold-time) cannot do.
+  level branches off it — so a dependent item always starts from a base that already carries the
+  output it depends on. A mixed graph (`w1`,`w2` independent → `w3` needing both) is therefore
+  expressible **inside one phase**.
   The plan is checkpointed **before** the first item runs, so a resume reuses the same decomposition
   the branch's commits already belong to instead of re-planning a different one. A one-item plan
   degenerates to the single serial worker this phase used to be (cost: one cheap planner round-trip).
   Pass `--no-plan-fanout` when the phase is small, strictly serial, or you want the byte-minimal
-  script. Ignored under `--independent`, whose items are declared at scaffold time.
+  script. This is the **only** decomposition mechanism, and its only escape hatch.
+
+**Removed flag.** `--independent` (caller-declared items + edges, fanned out at scaffold time) is
+gone and now **hard-errors**: it asked for the split before anything had read the repo, and a
+mis-declared edge was silent — every declared item branched off the *same* base and never saw
+another's output, so semantically broken work still merged cleanly. The planner above derives the
+items *and* their edges from a worker that has read the code, and gives each item a base containing
+its dependencies. To get specific items, name them in the phase prompt.
 - `--prompts-file <json>` — `{ "<PhaseTitle>": "<prompt text>", … }`; fills each work phase's prompt
   from **data** so you never read back or hand-edit the generated script. A phase with no entry keeps
   a `TODO:` stub (fill it by regenerating, not by editing).

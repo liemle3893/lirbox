@@ -13,15 +13,11 @@
  *   node scaffold-workflow.cjs --name <slug> [options]
  * Options:
  *   --name <slug>        required; drives state/branch/worktree paths
- *   --phases <a,b,c>     work phase titles (default: "Work")
- *   --independent        declare the work items INDEPENDENT: fan them out concurrently in ONE
- *                        Work phase via parallel() (one worker per item) instead of N sequential
- *                        phases, so wide decomposable tasks don't pay N× worker spin-up +
- *                        per-item verification. Each worker gets its OWN worktree/branch off the
- *                        run branch (items may touch the SAME file without colliding); an
- *                        integrate step merges the per-item branches back (sequential --no-ff
- *                        merges with a conflict-fix loop) BEFORE the downstream gates verify the
- *                        combined diff once. Reserve sequential --phases for dependent steps.
+ *   --phases <a,b,c>     work phase titles (default: "Work") — human-declared STAGES, not a
+ *                        decomposition; each phase decomposes itself at runtime.
+ *   --independent        REMOVED — hard-errors. It made the CALLER declare the decomposition at
+ *                        scaffold time, before anything had read the repo. Decomposition is the
+ *                        loop's job now (see --no-plan-fanout).
  *   --no-plan-fanout     opt OUT of in-phase concurrency: every work phase runs as ONE serial
  *                        worker again. By DEFAULT each work phase first runs a PLANNER worker
  *                        (label `plan:<Phase>`) that reads the repo and returns
@@ -29,8 +25,8 @@
  *                        those items out BY DEPENDENCY LEVEL — every item whose dependsOn is
  *                        satisfied goes out in ONE parallel() batch, each worker in its OWN
  *                        worktree/branch, each level integrated back before the next. A one-item
- *                        plan degenerates to today's single worker. (No effect under --independent,
- *                        whose items are declared at scaffold time.)
+ *                        plan degenerates to today's single worker. This is the ONLY decomposition
+ *                        mechanism, and the only escape hatch from it.
  *   --prompt <text>      prompt for the sole work phase (data-in; errors if >1 work phase)
  *   --prompts-file <j>   JSON { "<PhaseTitle>": "<prompt>" } filling work-phase prompts from data
  *   --desc <text>        meta.description (default derived from name)
@@ -98,19 +94,22 @@ if (!name || name === true) { console.error('ERROR: --name <slug> is required');
 if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a kebab slug (a-z0-9-)'); process.exit(1); }
 
 const phases = String(arg('phases', 'Work')).split(',').map((s) => s.trim()).filter(Boolean);
-// --independent: the work items are independent — fan them out CONCURRENTLY in one Work phase
-// (parallel(), one worker per item, each in its OWN worktree/branch, integrated afterwards)
-// instead of N sequential phases. Sequential emission stays the default and is reserved for
-// genuinely dependent steps.
-const independent = arg('independent', false) === true;
-// In-phase concurrency (DEFAULT ON). The phase used to BE the unit of concurrency — one phase, one
-// worker, everything inside it serial — and the only fan-out in a generated conductor ran over
-// scaffold-time constants. With plan fan-out, each work phase first asks a PLANNER worker (which
-// has read the repo) for its items + dependency edges, then dispatches them by dependency LEVEL.
-// `--no-plan-fanout` restores the single serial worker. `--independent` is a different (scaffold-
-// time) fan-out and is left exactly as it was.
-const planFanout = arg('no-plan-fanout', false) !== true;
-const usePlanFanout = planFanout && !independent;
+// --independent is GONE (hard error). It asked the CALLER to declare the work items and their
+// edges at scaffold time — a guess made before anything had read the repo — and a mis-declared
+// edge failed SILENTLY: every declared item branched off the SAME base and never saw another
+// item's output, so semantically broken work still merged cleanly. Decomposition belongs to the
+// loop: the planner below derives the items AND their edges from a worker that has read the code,
+// and merges each item's dependencies into its branch point before it starts.
+if (process.argv.includes('--independent')) {
+  console.error("ERROR: --independent no longer exists — the LOOP decides the decomposition, not the caller. Drop the flag: by default every work phase runs a PLANNER worker (it has read the repo) that returns the phase's items AND their dependency edges, and the conductor fans them out by dependency level, each item in its OWN worktree/branch with its dependencies already merged in. If you want specific items, name them in the phase prompt and the planner will return them; pass --no-plan-fanout only to force ONE serial worker per phase.");
+  process.exit(1);
+}
+// In-phase concurrency (DEFAULT ON) — the ONLY decomposition mechanism. The phase used to BE the
+// unit of concurrency — one phase, one worker, everything inside it serial — and the only fan-out
+// in a generated conductor ran over scaffold-time constants. With plan fan-out, each work phase
+// first asks a PLANNER worker (which has read the repo) for its items + dependency edges, then
+// dispatches them by dependency LEVEL. `--no-plan-fanout` restores the single serial worker.
+const usePlanFanout = arg('no-plan-fanout', false) !== true;
 const desc = arg('desc', `Durable workflow: ${name}`);
 const base = arg('base', '');
 const profile = arg('profile', false);
@@ -512,10 +511,8 @@ function agentCall({ key, prompt, schema, agentFrag, modelFrag, label, phase: ph
 }
 
 // ---- work-phase descriptor: expands to one phase per --phases title (prompts are data-in) ----
-// Under --independent it instead expands to ONE 'Work' phase: per-item worktrees are created,
-// every item fans out via parallel() — one worker per item, each in its own worktree/branch,
-// per-item spec overrides preserved — then an integrate step merges the branches back into the
-// run branch so the gates verify the combined diff once.
+// A --phases title is a human-declared STAGE, never a work item: the items inside it are derived
+// at runtime by that phase's planner worker (see planFanoutBody).
 const workItem = (p) => {
   const key = camel(p);
   const provided = (spec.phases && spec.phases[p]) || (promptMap[p] != null ? String(promptMap[p]) : '');
@@ -603,47 +600,6 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
 }
 
 const workPhasesBuild = () => {
-  if (independent) {
-    // Per-worker isolation: each parallel worker gets its OWN worktree/branch off the run
-    // branch (created SEQUENTIALLY before the fan-out — concurrent `git worktree add`
-    // contends on .git locks), so N independent items that touch the SAME file never collide
-    // on the file or on .git/index.lock. An integrate step then merges the per-item branches
-    // back into the run branch BEFORE the downstream gates verify the combined diff ONCE.
-    const conc = promptTpl('independent-concurrency.txt');
-    const items = phases.map(workItem);
-    const itemLines = items.map(({ key }) => `setup_item "\${WORKTREE}--${key}" "\${BRANCH}--${key}"`).join('\n');
-    const itemBranches = items.map(({ key }) => `\${BRANCH}--${key}`).join(', ');
-    const itemWorktrees = items.map(({ key }) => `\${WORKTREE}--${key}`).join(', ');
-    const calls = items.map(({ p, key, greenLine, body, sch, agentFrag }) => {
-      const lead = [agentFrag, mdl('work')].filter(Boolean).join(' ');
-      return `    () => agent(
-      \`\${inItemWorktree('${p}', WORKTREE + '--${key}', BRANCH + '--${key}')}\n\n${conc}\n${greenLine}\n${body}\`,
-      { label: '${key}', phase: 'Work',${lead ? ' ' + lead : ''}
-        schema: ${sch} },
-    ),`;
-    });
-    const body = `  // Declared-independent work items: fan out CONCURRENTLY — one worker per item, each
-  // in its OWN worktree on its OWN branch off the run branch (no shared tree/index), then
-  // integrate the per-item branches so the downstream gates verify the combined diff ONCE.
-  results.workFanout = await agent(
-    ${tpl('setup-item-worktrees.txt', { ITEM_LINES: itemLines })},
-    { label: 'work:fanout-setup', phase: 'Work',${mechFrag ? ' ' + mechFrag : ''}
-      schema: ${SCHEMA({ ready: { type: 'boolean' }, summary: { type: 'string' } }, ['ready'])} },
-  )
-  if (!results.workFanout || !results.workFanout.ready) throw new Error('Work fan-out setup failed: per-item worktrees not ready — ' + ((results.workFanout && results.workFanout.summary) || ''))
-  const workOut = await parallel([
-${calls.join('\n')}
-  ])
-  const workKeys = ${JSON.stringify(items.map((i) => i.key))}
-  workOut.forEach((r, i) => { results[workKeys[i]] = r })
-  results.workIntegrate = await agent(
-    ${tpl('integrate-items.txt', { ITEM_BRANCHES: itemBranches, ITEM_WORKTREES: itemWorktrees })},
-    { label: 'work:integrate', phase: 'Work',${mdl('think') ? ' ' + mdl('think') : ''}
-      schema: ${SCHEMA({ merged: { type: 'boolean' }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['merged'])} },
-  )
-  if (!results.workIntegrate || !results.workIntegrate.merged) throw new Error('Integrate failed: per-item branches did not all merge into ' + BRANCH + ' — ' + ((results.workIntegrate && results.workIntegrate.summary) || ''))`;
-    return [{ title: 'Work', src: emitPhase('Work', body) }];
-  }
   return phases.map((p) => {
     const { key, greenLine, body, sch, agentFrag } = workItem(p);
     if (usePlanFanout) {
@@ -959,7 +915,7 @@ const results = { ...prior }
   }
 })()
 
-${promptTpl('in-worktree.txt')}${(independent || usePlanFanout) ? '\n\n' + promptTpl('in-item-worktree.txt') : ''}${usePlanFanout ? '\n\n' + promptTpl('plan-helpers.txt') : ''}
+${promptTpl('in-worktree.txt')}${usePlanFanout ? '\n\n' + promptTpl('in-item-worktree.txt') + '\n\n' + promptTpl('plan-helpers.txt') : ''}
 
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
@@ -998,9 +954,7 @@ console.log(`Generated ${out}`);
 console.log(`Phases: ${phaseOrder.join(' → ')}`);
 console.log(usePlanFanout
   ? 'Work fan-out: runtime plan — each work phase plans its items, then dispatches them by dependency level (--no-plan-fanout for one serial worker per phase)'
-  : (independent
-    ? 'Work fan-out: --independent — the declared items fan out concurrently in one Work phase'
-    : 'Work fan-out: none — each work phase runs as ONE serial worker (--no-plan-fanout)'));
+  : 'Work fan-out: none — each work phase runs as ONE serial worker (--no-plan-fanout)');
 console.log(modelMode === 'auto'
   ? `Model mode: auto — the default (think=${modelThink}, work=${modelWork}, mechanical=haiku)`
   : `Model mode: inherit (no model opt emitted; every worker inherits the session model)`);
