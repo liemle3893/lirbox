@@ -63,6 +63,9 @@ const work = keep && keep !== true ? resolve(String(keep)) : mkdtempSync(join(tm
 mkdirSync(work, { recursive: true });
 
 console.log(`swe-run "${name}": ${graded.length} task(s) × ${runs} run(s), model=${model} effort=${effort}${pluginDir ? ` plugin-dir=${pluginDir}` : ''}, cap=${cap}s`);
+// One run per cell gives a point estimate with NO variance estimate — the spread between two
+// identical runs is unmeasured, so the row can't support an A-vs-B claim. Warn once; never block.
+if (runs === 1) console.error('swe-run: WARNING --runs 1 gives no variance estimate — this row is indicative, NOT comparison-grade. Use --runs 3, and benchmark the same config twice as a null control before comparing rows.');
 const cells = [];
 for (const t of graded) {
   const taskText = readFileSync(join(REPO, t.taskFile), 'utf8'); // CONTENT inlined — never the path
