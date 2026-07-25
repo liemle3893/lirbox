@@ -115,13 +115,18 @@ More phases = more subagent round-trips; reserve them for work that warrants the
 
 Orthogonal to the phase flags; does not change phase structure.
 
-- `--model-mode default` (default) — emit no `model:` opt; every worker inherits the session model
-  (today's behavior, byte-for-byte).
-- `--model-mode auto` — tier each worker by phase class: **haiku** for mechanical work (Setup, every
-  checkpoint, Verify/ReVerify, PR, TicketUpdate), the **think** model for reasoning (Brief, RED,
-  PathGap, CodeGate/Review, TestGate, DocsGate, Writeup), and the **work** model for the `--phases`
-  tasks. Tune with `--model-think <sonnet|opus|haiku|fable>` (default `opus`) and `--model-work <…>`
-  (default `sonnet`).
+- **`auto` is the DEFAULT — no flag needed.** Each worker is tiered by phase class: **haiku** for
+  mechanical work (Setup, every checkpoint, Verify/ReVerify, PR, TicketUpdate), the **think** model
+  (+ `effort: 'high'`) for reasoning (Brief, RED, PathGap, CodeGate/Review, TestGate, DocsGate,
+  Writeup), and the **work** model for the `--phases` tasks. Tune with
+  `--model-think <sonnet|opus|haiku|fable>` (default `opus`) and `--model-work <…>` (default
+  `sonnet`). This is what nearly every run wants: it stops mechanical workers from burning a strong
+  model.
+- `--model-mode inherit` — opt out: emit no `model:`/`effort:` opt at all, so every worker inherits
+  the session model. `--model-think`/`--model-work` are **rejected** under `inherit` (they would be
+  silently ignored).
+- `--model-mode default` **hard-errors.** It used to name the inherit behavior; keeping it as an
+  alias would leave a value called `default` meaning the non-default. The error points at `inherit`.
 
 ## Swapping the gate agents
 

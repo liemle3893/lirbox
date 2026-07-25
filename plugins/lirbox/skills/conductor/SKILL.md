@@ -178,7 +178,9 @@ node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,I
 
 → **Full flag reference: [`references/generator-flags.md`](references/generator-flags.md)** — read
 before generating. It documents every flag (phase/prompt/spec, the delivery flags, the gates, the
-`--cycle` TDD ordering, the profiles), `--model-mode` model selection, gate-agent swapping, and the
+`--cycle` TDD ordering, the profiles), `--model-mode` model selection (**`auto` per-phase tiering is
+the default — pass `--model-mode inherit` to make every worker inherit the session model instead**),
+gate-agent swapping, and the
 `implementation-notes/` → `docs/changes/` promotion policy.
 
 ### 3. Launch (fresh)

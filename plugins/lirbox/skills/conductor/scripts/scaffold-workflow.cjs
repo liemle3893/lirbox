@@ -45,7 +45,8 @@
  *                        E2E specs + an evidence manifest at implementation-notes/frontend-evidence/
  *                        manifest.json. The engine chain/viewports come from the DoD file's
  *                        "frontend" block as DATA — the generator never probes the machine.
- *   --model-mode <m>     default (inherit session model, no opt emitted) | auto (tier by phase)
+ *   --model-mode <m>     auto (DEFAULT — tier by phase class) | inherit (no opt emitted, every
+ *                        worker inherits the session model). The literal `default` hard-errors.
  *   --model-think <m>    auto thinking-tier model: sonnet|opus|haiku|fable (default opus)
  *   --model-work <m>     auto work-phase model:    sonnet|opus|haiku|fable (default sonnet)
  *   --profile lite       routine small-task delivery: --ticket --pr --merge-gates, 1 work phase
@@ -199,21 +200,27 @@ const agentMobile = arg('agent-mobile', 'lirbox:lirbox-mobile-verifier');
 const at = (a) => (a && a !== 'none' && a !== true) ? `agentType: '${a}',` : '';
 
 // --- model selection (--model-mode) ---
-// default  : emit NO `model:` opt at all → every worker inherits the session model. Output is
-//            byte-identical to the pre-mode generator (the backward-compat invariant).
-// auto     : tag each agent() call with a `model:` opt by phase CLASS — a cheap model for
-//            mechanical/IO work, a strong model for reasoning, the work phases the advisor's call.
+// auto (DEFAULT) : tag each agent() call with a `model:` opt by phase CLASS — a cheap model for
+//                  mechanical/IO work, a strong model for reasoning, the work phases the advisor's
+//                  call. This is what nearly every run wants, so it needs no flag.
+// inherit        : emit NO `model:`/`effort:` opt at all → every worker inherits the session model
+//                  (byte-identical to the pre-mode generator). Opt in when you want that.
+// The literal `default` is NOT a mode: it used to name the inherit behavior, so silently aliasing
+// it would leave a flag value called 'default' meaning the non-default. It hard-errors instead.
 const MODEL_VALUES = ['sonnet', 'opus', 'haiku', 'fable'];
-const modelMode = arg('model-mode', 'default');
-if (modelMode !== 'default' && modelMode !== 'auto') {
-  console.error(`ERROR: --model-mode must be 'default' or 'auto' (got '${modelMode}')`); process.exit(1);
-}
-// In default mode no `model:` opt is emitted, so --model-think/--model-work would be silently
-// ignored. Reject them loudly instead of pretending they took effect.
+const modelMode = arg('model-mode', 'auto');
 if (modelMode === 'default') {
+  console.error("ERROR: --model-mode 'default' no longer exists — 'auto' IS the default now (no flag needed). Pass --model-mode inherit for the old behavior (no model opt emitted; every worker inherits the session model)."); process.exit(1);
+}
+if (modelMode !== 'auto' && modelMode !== 'inherit') {
+  console.error(`ERROR: --model-mode must be 'auto' (the default) or 'inherit' (got '${modelMode}')`); process.exit(1);
+}
+// Under `inherit` no `model:` opt is emitted, so --model-think/--model-work would be silently
+// ignored. Reject them loudly instead of pretending they took effect.
+if (modelMode === 'inherit') {
   for (const flag of ['--model-think', '--model-work']) {
     if (process.argv.includes(flag)) {
-      console.error(`ERROR: ${flag} requires --model-mode auto (ignored in default mode)`); process.exit(1);
+      console.error(`ERROR: ${flag} requires the auto model mode (it is ignored under --model-mode inherit) — drop the flag or drop --model-mode inherit`); process.exit(1);
     }
   }
 }
@@ -227,7 +234,7 @@ for (const [flag, val] of [['--model-think', modelThink], ['--model-work', model
 // class → model. mechanical: worktree/checkpoint/verify/push/ticket. think: RED, gates, pathgap,
 // docs, writeup, brief. work: the --phases tasks.
 const MODEL_TIER = { mechanical: 'haiku', think: modelThink, work: modelWork };
-// Emits the class opt fragment in auto mode (or '' in default mode, no opt emitted): the
+// Emits the class opt fragment in auto mode (or '' under `inherit`, no opt emitted): the
 // `model: '<m>',` opt, plus `effort: 'high',` for the think class — reasoning phases get the
 // stronger reasoning budget; mechanical/work phases never carry an effort opt.
 const mdl = (cls) => (modelMode === 'auto' && MODEL_TIER[cls])
@@ -896,8 +903,8 @@ fs.writeFileSync(out, src);
 console.log(`Generated ${out}`);
 console.log(`Phases: ${phaseOrder.join(' → ')}`);
 console.log(modelMode === 'auto'
-  ? `Model mode: auto (think=${modelThink}, work=${modelWork}, mechanical=haiku)`
-  : `Model mode: default (workers inherit the session model)`);
+  ? `Model mode: auto — the default (think=${modelThink}, work=${modelWork}, mechanical=haiku)`
+  : `Model mode: inherit (no model opt emitted; every worker inherits the session model)`);
 if (pendingTodos > 0) {
   console.log(`${pendingTodos} work phase(s) still hold a TODO prompt — regenerate with --prompt/--prompts-file (+ --force) to fill them from data. Do NOT hand-edit. Then launch.`);
 } else {

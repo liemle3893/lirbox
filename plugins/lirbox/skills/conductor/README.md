@@ -76,7 +76,7 @@ task-specific bit (the `TODO:` agent prompts).
 ```
 node scripts/scaffold-workflow.cjs --name <slug> [--phases "A,B"] \
   [--ticket] [--pr] [--merge-gates] [--enforce-code] [--enforce-tests] [--enforce-docs] \
-  [--writeup|--no-writeup] [--model-mode default|auto] [--model-think <m>] [--model-work <m>] \
+  [--writeup|--no-writeup] [--model-mode auto|inherit] [--model-think <m>] [--model-work <m>] \
   [--profile lite|delivery] [--base <ref>] [--desc "..."] [--out <path>] [--force]
 ```
 
@@ -105,12 +105,15 @@ reviewer `writeup.html` (via `lirbox:pr-writeup`) and a `design.html` diagram (v
 they're tracked and ride the PR; the PR body links them. This is why DocsGate's `summary.md` now
 lands in the same `docs/changes/<name>/` directory.
 
-**Model selection (`--model-mode`).** `default` emits no `model:` opt (every worker inherits the
-session model — byte-identical to before). `auto` tiers each `agent()` call by phase class:
-**haiku** for mechanical work (Setup/checkpoint/Verify/ReVerify/PR/TicketUpdate), `--model-think`
-(default **opus**) for reasoning (Brief/RED/PathGap/CodeGate/Review/TestGate/DocsGate/Writeup), and
-`--model-work` (default **sonnet**) for the work phases. The `mdl(class)` helper mirrors `at(agent)`
-— it emits the `model: '…',` fragment or `''`. Invalid model values are rejected at generation time.
+**Model selection (`--model-mode`).** `auto` is the **default** (no flag needed): it tiers each
+`agent()` call by phase class — **haiku** for mechanical work
+(Setup/checkpoint/Verify/ReVerify/PR/TicketUpdate), `--model-think` (default **opus**, plus
+`effort: 'high'`) for reasoning (Brief/RED/PathGap/CodeGate/Review/TestGate/DocsGate/Writeup), and
+`--model-work` (default **sonnet**) for the work phases. `--model-mode inherit` opts out — no
+`model:`/`effort:` opt at all, every worker inherits the session model (byte-identical to before),
+and the tuning flags are rejected because they'd be ignored. The old `--model-mode default` spelling
+hard-errors and points at `inherit`. The `mdl(class)` helper mirrors `at(agent)` — it emits the
+`model: '…',` fragment or `''`. Invalid model values are rejected at generation time.
 
 What is generated (do NOT hand-edit) vs what the LLM fills:
 - **Generated/deterministic**: meta, NAME/STATE/BRANCH/BASE/WORKTREE consts, `inWorktree(slot)`,

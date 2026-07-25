@@ -109,7 +109,7 @@ node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${
 node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
 
 Return whether the file was written and parses.`,
-    { label: `checkpoint:${phaseTitle}`, phase: phaseTitle,
+    { label: `checkpoint:${phaseTitle}`, phase: phaseTitle, model: 'haiku',
       schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
   )
 }
@@ -146,7 +146,7 @@ else
 fi
 [ -e "${WORKTREE}/node_modules" ] || [ ! -d "$ROOT/node_modules" ] || ln -s "$ROOT/node_modules" "${WORKTREE}/node_modules"
 test -d "${WORKTREE}" && echo OK`,
-    { label: 'setup:worktree', phase: 'Setup',
+    { label: 'setup:worktree', phase: 'Setup', model: 'haiku',
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
@@ -163,7 +163,8 @@ if (done.has('DoDBaseline')) {
 DoD BASELINE (pre-work measurement): for EACH criterion below, run its "check" command inside ${WORKTREE} and record met (exit 0) / unmet (non-zero) / error (could not run). Do NOT fix anything — measure only.
 
 CHECKABLE CRITERIA (JSON): ${JSON.stringify(DOD_CRITERIA.filter((c) => c.tier === 'checkable'))}`,
-    { label: 'dod-baseline', phase: 'DoDBaseline', schema: { type: 'object', additionalProperties: false, required: ["baselines"], properties: {"baselines":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","status"],"properties":{"id":{"type":"string"},"status":{"type":"string","enum":["met","unmet","error"]}}}}} } },
+    { label: 'dod-baseline', phase: 'DoDBaseline', model: 'haiku',
+      schema: { type: 'object', additionalProperties: false, required: ["baselines"], properties: {"baselines":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","status"],"properties":{"id":{"type":"string"},"status":{"type":"string","enum":["met","unmet","error"]}}}}} } },
   )
   done.add('DoDBaseline')
   await checkpoint('DoDBaseline')
@@ -180,7 +181,8 @@ if (!TICKET) {
 Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase AC/DoD):
 - Jira:   mcp__atlassian__getJiraIssue (issueIdOrKey: "${TICKET}")
 - Linear: the Linear MCP get-issue tool, ONLY if a Linear server is connected.`,
-    { label: 'brief', phase: 'Brief', schema: { type: 'object', additionalProperties: false, required: ["goal"], properties: {"title":{"type":"string"},"goal":{"type":"string"},"acceptanceCriteria":{"type":"array","items":{"type":"string"}}} } },
+    { label: 'brief', phase: 'Brief', model: 'opus', effort: 'high',
+      schema: { type: 'object', additionalProperties: false, required: ["goal"], properties: {"title":{"type":"string"},"goal":{"type":"string"},"acceptanceCriteria":{"type":"array","items":{"type":"string"}}} } },
   )
   done.add('Brief')
   await checkpoint('Brief')
@@ -194,7 +196,7 @@ if (done.has('RED')) {
     `${inWorktree('red')}
 
 RED (test-first): from the goal${TICKET ? ' / ticket ' + TICKET : ''} and its acceptance criteria, write the tests BEFORE any implementation. Decide per behavior whether it needs a tryve E2E (tests/e2e/*.yaml) or a Jest unit test, and write them. Run them and CONFIRM THEY FAIL for the right reason — a test that already passes is not exercising the new behavior; fix it until it fails. Commit the failing tests.`,
-    { label: 'red', phase: 'RED', agentType: 'lirbox:lirbox-test-writer',
+    { label: 'red', phase: 'RED', agentType: 'lirbox:lirbox-test-writer', model: 'opus', effort: 'high',
       schema: { type: 'object', additionalProperties: false, required: ["red"], properties: {"red":{"type":"boolean"},"tests":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
   )
   if (!results.red || !results.red.red) throw new Error('RED failed: tests did not establish a failing baseline — ' + (results.red && results.red.summary || ''))
@@ -212,7 +214,8 @@ if (done.has('Implement')) {
 GREEN: implement until the RED tests pass; never weaken or delete tests to go green.
 
 Implement the change described in the run brief.`,
-    { label: 'implement', phase: 'Implement', schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
+    { label: 'implement', phase: 'Implement', model: 'sonnet',
+      schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
   )
   done.add('Implement')
   await checkpoint('Implement')
@@ -226,7 +229,8 @@ if (done.has('Verify')) {
     `${inWorktree('verify')}
 
 VERIFY (GREEN): run the full relevant test suite for the changes on ${BRANCH} vs ${BASE || 'the base branch'} (Jest unit + any tryve E2E from RED). EVERYTHING must pass. If any test fails, the implementation is incomplete — STOP and report which failed; do NOT weaken tests to pass.`,
-    { label: 'verify', phase: 'Verify', schema: { type: 'object', additionalProperties: false, required: ["green"], properties: {"green":{"type":"boolean"},"failing":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
+    { label: 'verify', phase: 'Verify', model: 'haiku',
+      schema: { type: 'object', additionalProperties: false, required: ["green"], properties: {"green":{"type":"boolean"},"failing":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
   )
   if (!results.verify || !results.verify.green) throw new Error('Verify failed: not green — ' + (results.verify && (results.verify.failing || []).join(', ')))
   done.add('Verify')
@@ -249,7 +253,7 @@ PATH-GAP: the ACs do NOT cover every code path. Steps:
 2. For EACH uncovered changed branch, do ONE: (a) add a unit/integration test that meaningfully exercises AND asserts it, or (b) if it is genuinely unreachable/defensive, record an explicit justification in implementation-notes/pathgap.html.
 3. Re-run coverage. There must be NO silent gaps — every uncovered changed branch is either tested or justified.
 Do NOT delete/alter source branches just to raise coverage. Commit new tests + notes.` + carry,
-      { label: `pathgap:r${round}`, phase: 'PathGap',
+      { label: `pathgap:r${round}`, phase: 'PathGap', model: 'opus', effort: 'high',
         schema: { type: 'object', additionalProperties: false, required: ["closed"], properties: {"closed":{"type":"boolean"},"uncovered":{"type":"number"},"tested":{"type":"number"},"justified":{"type":"number"},"summary":{"type":"string"}} } },
     )
     passed = last && last.closed
@@ -269,7 +273,7 @@ if (done.has('CodeGate')) {
     `${inWorktree('codegate-guard', { notes: false })}
 
 Inspect the diff of ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WORKTREE}). Is this a CODE change (source/test code — not solely docs, config, comments, or generated artifacts)? Return isCode and a one-line reason. Do NOT edit anything.`,
-    { label: 'codegate:guard', phase: 'CodeGate',
+    { label: 'codegate:guard', phase: 'CodeGate', model: 'haiku',
       schema: { type: 'object', additionalProperties: false, required: ["isCode"], properties: {"isCode":{"type":"boolean"},"reason":{"type":"string"}} } },
   )
   if (!guard || !guard.isCode) {
@@ -283,7 +287,7 @@ Inspect the diff of ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WOR
 READ-ONLY panel review of the changes on ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WORKTREE}) — do NOT edit or fix anything; you only report findings.
 DIMENSION — ${d.focus}
 Return findings with exact repo-relative file + line + severity (Critical|High|Medium|Low) + title + detail. No findings is a valid answer.`,
-      { label: 'codegate:' + d.key, phase: 'CodeGate',
+      { label: 'codegate:' + d.key, phase: 'CodeGate', model: 'opus', effort: 'high',
         schema: { type: 'object', additionalProperties: false, required: ["findings"], properties: {"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["file","line","severity","title"],"properties":{"file":{"type":"string"},"line":{"type":"number"},"severity":{"type":"string","enum":["Critical","High","Medium","Low"]},"title":{"type":"string"},"detail":{"type":"string"}}}}} } },
     )))
     const all = rawResults.filter(Boolean).flatMap((r) => r.findings || [])
@@ -306,7 +310,7 @@ Score 0-100 how confident you are the finding is REAL and WORTH FIXING:
 - 100: Absolutely certain. Double-checked, definitely real, will happen frequently; evidence directly confirms it.
 Automatic false positives (score 0): pre-existing issues; linter/typechecker/compiler-catchable; pedantic nitpicks; issues on lines the diff did not modify; intentional changes related to the goal.
 Return the score and a one-line reason.`,
-      { label: 'codegate:score-' + i, phase: 'CodeGate',
+      { label: 'codegate:score-' + i, phase: 'CodeGate', model: 'haiku',
         schema: { type: 'object', additionalProperties: false, required: ["score"], properties: {"score":{"type":"number"},"reason":{"type":"string"}} } },
     ).then((v) => ({ ...f, confidence: v ? v.score : 0 })))) : []
     const confirmed = scored.filter(Boolean).filter((f) => f.confidence >= 80)
@@ -326,7 +330,7 @@ OUTPUT CONTRACT: return gatePassed=true ONLY if every Critical and High finding 
 EVIDENCE: report the exact build/lint command you ran as buildCmd and its numeric exit code as buildExit; if the project has no build/lint, run the closest verification command (e.g. the test suite) and report that instead. The gate rejects gatePassed=true unless buildExit is 0.
 
 FINDINGS (JSON): ${JSON.stringify(confirmed)}` + dod + carry,
-          { label: `codegate:lead-r${round}`, phase: 'CodeGate', agentType: 'lirbox:lirbox-code-reviewer',
+          { label: `codegate:lead-r${round}`, phase: 'CodeGate', agentType: 'lirbox:lirbox-code-reviewer', model: 'opus', effort: 'high',
             schema: { type: 'object', additionalProperties: false, required: ["gatePassed","critical","high","buildCmd","buildExit","skippedFindings","knownOpen"], properties: {"gatePassed":{"type":"boolean"},"critical":{"type":"number"},"high":{"type":"number"},"summary":{"type":"string"},"buildCmd":{"type":"string"},"buildExit":{"type":"number"},"skippedFindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["title","reason"],"properties":{"title":{"type":"string"},"reason":{"type":"string"}}}},"knownOpen":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["file","line","severity","title"],"properties":{"file":{"type":"string"},"line":{"type":"number"},"severity":{"type":"string"},"title":{"type":"string"}}}}} } },
         )
         passed = last && last.gatePassed && last.buildExit === 0
@@ -347,7 +351,8 @@ if (done.has('ReVerify')) {
     `${inWorktree('reverify')}
 
 RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branch coverage for the changes on ${BRANCH} vs ${BASE || 'the base branch'}. Everything green before must STILL be green and coverage must not have regressed. If a refactor broke anything, STOP and report; do NOT weaken tests.`,
-    { label: 'reverify', phase: 'ReVerify', schema: { type: 'object', additionalProperties: false, required: ["green"], properties: {"green":{"type":"boolean"},"regressions":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
+    { label: 'reverify', phase: 'ReVerify', model: 'haiku',
+      schema: { type: 'object', additionalProperties: false, required: ["green"], properties: {"green":{"type":"boolean"},"regressions":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
   )
   if (!results.reVerify || !results.reVerify.green) throw new Error('ReVerify failed: regression after improve/simplify — ' + (results.reVerify && (results.reVerify.regressions || []).join(', ')))
   done.add('ReVerify')
@@ -362,7 +367,7 @@ if (done.has('DocsGate')) {
     `${inWorktree('docsgate')}
 
 Write an implementation summary for the changes on ${BRANCH} vs ${BASE || 'the base branch'} into docs/changes/${NAME}/summary.md with proper frontmatter (mkdir -p the dir). Read the diff, the goal${TICKET ? ' and ticket ' + TICKET : ''}, and ALL fragments in the implementation-notes/ directory — fold their design decisions / deviations / tradeoffs / open questions into the summary. Commit it.`,
-    { label: 'docs', phase: 'DocsGate', agentType: 'lirbox:lirbox-docs-writer',
+    { label: 'docs', phase: 'DocsGate', agentType: 'lirbox:lirbox-docs-writer', model: 'opus', effort: 'high',
       schema: { type: 'object', additionalProperties: false, required: ["written"], properties: {"written":{"type":"boolean"},"docPath":{"type":"string"}} } },
   )
   if (!results.docs || !results.docs.written) throw new Error('DocsGate failed: no implementation summary written')
@@ -389,7 +394,7 @@ DoD REPLAN (attempt ${attempt}/${DOD_MAX_ATTEMPTS}) — PLAN ONLY, do NOT edit c
 
 UNMET CRITERIA + EXECUTED CHECK OUTPUT (JSON): ${JSON.stringify(unmet)}
 FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
-        { label: `dodgate:replan-a${attempt}`, phase: 'DoDGate',
+        { label: `dodgate:replan-a${attempt}`, phase: 'DoDGate', model: 'opus', effort: 'high',
           schema: { type: 'object', additionalProperties: false, required: ["plan","steps"], properties: {"plan":{"type":"string"},"steps":{"type":"array","items":{"type":"string"}}} } },
       )
       await agent(
@@ -400,7 +405,7 @@ DoD EXECUTE (attempt ${attempt}/${DOD_MAX_ATTEMPTS}): carry out the revised plan
 REVISED PLAN (JSON): ${JSON.stringify(results.dodReplan)}
 UNMET CRITERIA (JSON): ${JSON.stringify(unmet)}
 FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
-        { label: `dodgate:execute-a${attempt}`, phase: 'DoDGate',
+        { label: `dodgate:execute-a${attempt}`, phase: 'DoDGate', model: 'sonnet',
           schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
       )
     }
@@ -414,7 +419,7 @@ DoD VERIFY (round ${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate 
 Verdicts: MET | UNMET | PARTIAL.
 
 CRITERIA (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
-        { label: `dodgate:verify-a${attempt}-r${round}`, phase: 'DoDGate',
+        { label: `dodgate:verify-a${attempt}-r${round}`, phase: 'DoDGate', model: 'opus', effort: 'high',
           schema: { type: 'object', additionalProperties: false, required: ["criteria"], properties: {"criteria":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","verdict","evidence"],"properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["MET","UNMET","PARTIAL"]},"evidence":{"type":"string"}}}}} } },
       )
       const unmet = dodUnmet()
@@ -427,7 +432,7 @@ DoD FIX (round ${round}/3): the definition-of-done criteria below are NOT met. M
 
 UNMET (JSON): ${JSON.stringify(unmet)}
 FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
-          { label: `dodgate:fix-a${attempt}-r${round}`, phase: 'DoDGate',
+          { label: `dodgate:fix-a${attempt}-r${round}`, phase: 'DoDGate', model: 'sonnet',
             schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"},"fixed":{"type":"array","items":{"type":"string"}}} } },
         )
       }
@@ -462,7 +467,7 @@ node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${
 node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
 
 Return whether the file was written and parses.`,
-      { label: 'dodgate:escalate', phase: 'DoDGate',
+      { label: 'dodgate:escalate', phase: 'DoDGate', model: 'haiku',
         schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
     )
     throw new Error('DoDGate escalated: DoD not fully met (' + (dodStalled ? 'stalled — unmet set unchanged' : DOD_MAX_ATTEMPTS + ' attempts exhausted') + ') — unmet: ' + dodUnmet().map((c) => c.id).join(', '))
@@ -484,7 +489,8 @@ Produce reviewer-facing delivery artifacts for the changes on ${BRANCH} vs ${BAS
 3. DESIGN DIAGRAM — invoke the lirbox:flowchart skill (via the Skill tool, by name) to visualize the design of this change; choose the Mermaid diagram type (flowchart OR sequenceDiagram) that best fits; save to docs/changes/${NAME}/design.html. The flowchart skill validates its own output — ensure that validation passes before continuing. If the Skill tool is unavailable, read plugins/lirbox/skills/flowchart/SKILL.md + assets/template.html, follow them, and run that skill's assets/validate.mjs on the result.
 4. COMMIT all of docs/changes/${NAME}/ on ${BRANCH}.
 Return what was written.`,
-    { label: 'writeup', phase: 'Writeup', schema: { type: 'object', additionalProperties: false, required: ["written"], properties: {"written":{"type":"boolean"},"writeupPath":{"type":"string"},"designPath":{"type":"string"},"notesPreserved":{"type":"number"}} } },
+    { label: 'writeup', phase: 'Writeup', model: 'opus', effort: 'high',
+      schema: { type: 'object', additionalProperties: false, required: ["written"], properties: {"written":{"type":"boolean"},"writeupPath":{"type":"string"},"designPath":{"type":"string"},"notesPreserved":{"type":"number"}} } },
   )
   if (!results.writeup || !results.writeup.written) throw new Error('Writeup failed: reviewer artifacts not written under docs/changes/')
   done.add('Writeup')
@@ -503,7 +509,8 @@ git push -u origin ${BRANCH}
 gh pr create --base ${BASE || 'main'} --head ${BRANCH} --title "TODO title" --body "TODO summary. Reviewer artifacts are committed under docs/changes/snap/ — link writeup.html, design.html, and notes/ in the PR body${TICKET ? '; refs ' + TICKET : ''}"
 Include a "## Definition of done" section in the PR body — headline "DoD: <met>/<total> MET", then one line per criterion (id, verdict, evidence) from this JSON: ${JSON.stringify((results.dodGate && results.dodGate.criteria) || [])}
 If a PR for this branch already exists, return its URL instead of erroring.`,
-    { label: 'pr', phase: 'PR', schema: { type: 'object', additionalProperties: false, required: ["prUrl"], properties: {"prUrl":{"type":"string"}} } },
+    { label: 'pr', phase: 'PR', model: 'haiku',
+      schema: { type: 'object', additionalProperties: false, required: ["prUrl"], properties: {"prUrl":{"type":"string"}} } },
   )
   done.add('PR')
   await checkpoint('PR')
@@ -519,7 +526,8 @@ if (!TICKET) {
     `Update tracker ticket ${TICKET}. Use ToolSearch to load the tracker tools.
 Jira: getTransitionsForJiraIssue → transitionJiraIssue to the review state (match name case-insensitively; skip if none) → addCommentToJiraIssue with the PR link ${results.pr && results.pr.prUrl}.
 Linear: use the Linear MCP update/comment tools instead, ONLY if connected.`,
-    { label: 'ticket-update', phase: 'TicketUpdate', schema: { type: 'object', additionalProperties: false, required: ["updated"], properties: {"updated":{"type":"boolean"},"transition":{"type":"string"}} } },
+    { label: 'ticket-update', phase: 'TicketUpdate', model: 'haiku',
+      schema: { type: 'object', additionalProperties: false, required: ["updated"], properties: {"updated":{"type":"boolean"},"transition":{"type":"string"}} } },
   )
   done.add('TicketUpdate')
   await checkpoint('TicketUpdate')
