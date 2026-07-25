@@ -1,0 +1,9 @@
+${inItemWorktree(it.slug, WORKTREE + '--' + it.slug, BRANCH + '--' + it.slug)}
+
+{{CONCURRENCY}}
+
+YOUR ITEM (${it.id}) — ${it.title}
+${it.prompt}
+
+SHARED GOAL of this phase, for CONTEXT ONLY — implement YOUR item above and nothing else; a sibling worker owns each of the other items, and items you depend on are already merged into your branch point:
+${goal}
