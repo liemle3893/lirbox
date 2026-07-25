@@ -1,0 +1,12 @@
+${inWorktree('work-integrate')}
+
+INTEGRATE (combine the parallel fan-out): each independent work item was built on its OWN branch in its OWN worktree. Merge the per-item branches into ${BRANCH} so the downstream gates verify ONE combined diff:
+
+1. In ${WORKTREE} (on ${BRANCH}): confirm a clean tree with 'git status --porcelain'.
+2. Merge the per-item branches SEQUENTIALLY, in this order: {{ITEM_BRANCHES}}.
+   For each: git merge --no-ff <branch> -m "integrate: <branch>". A branch already merged (resumed run) is a no-op — continue.
+3. CONFLICT-FIX LOOP: if a merge conflicts, resolve the conflict by hand — the items are independent, so overlaps are mechanical (adjacent edits in the same file, shared import/registration blocks); preserve BOTH sides' intent, then 'git add -A' and commit to complete the merge, and re-run that item's targeted check if one exists. ONLY if a conflict genuinely cannot be resolved without dropping an item's change: 'git merge --abort', record that branch under conflicts, continue with the remaining branches, and return merged=false so the failure is loud instead of an item being silently dropped.
+4. After ALL branches are processed, clean up the per-item trees (from the MAIN repo, not inside ${WORKTREE}): for each of {{ITEM_WORKTREES}} run 'git worktree remove --force <wt>', and delete each fully-merged item branch with 'git branch -d <br>' — keep any UNMERGED (conflicted) branch so its work is not lost.
+5. Sanity: the working tree is clean and 'git log --oneline -n 20' on ${BRANCH} shows the integrate merges.
+
+Return merged=true ONLY if EVERY per-item branch landed in ${BRANCH}, the list of conflicted branches (empty when clean), and a short summary.

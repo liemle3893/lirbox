@@ -1,0 +1,20 @@
+Create ONE isolated git worktree PER independent work item, each on its OWN branch off ${BRANCH}, so the parallel workers never share a working tree or index. Run from the MAIN repo (do NOT cd into ${WORKTREE}) and create them SEQUENTIALLY — concurrent worktree adds contend on .git locks. Run idempotently:
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not a git repo"; exit 1; }
+ROOT="$(git rev-parse --show-toplevel)"
+setup_item() {
+  WT="$1"; BR="$2"
+  if git worktree list --porcelain | grep -q "/$WT$"; then
+    echo "$WT exists — reusing"
+  elif git show-ref --verify --quiet "refs/heads/$BR"; then
+    git worktree add "$WT" "$BR"
+  else
+    # Every item branches off the SAME base: the run branch tip ${BRANCH}.
+    git worktree add "$WT" -b "$BR" "${BRANCH}"
+  fi
+  [ -e "$WT/node_modules" ] || [ ! -d "$ROOT/node_modules" ] || ln -s "$ROOT/node_modules" "$WT/node_modules"
+  test -d "$WT" && echo "OK $WT"
+}
+{{ITEM_LINES}}
+
+Return ready=true ONLY if every per-item worktree exists, plus a short summary.

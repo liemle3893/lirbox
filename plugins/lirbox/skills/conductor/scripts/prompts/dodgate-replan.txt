@@ -1,0 +1,8 @@
+${inWorktree('dodgate-replan')}
+
+DoD REPLAN (attempt ${attempt}/${DOD_MAX_ATTEMPTS}) — PLAN ONLY, do NOT edit code in this step. The in-phase fix rounds could not close the unmet definition-of-done criteria below; patching the current approach harder is not working. Produce a NEW plan version:
+- Diagnose WHY each unmet criterion still fails, from the EXECUTED check output / cited evidence below. These verdicts came from actually running the checks — they are the only routing input; worker self-reports are untrusted claims and can never override them.
+- Write a revised, ordered, concrete step list that CHANGES APPROACH where the old one failed (different design, different files, different strategy). Descoping is NOT allowed — every criterion must still end up MET; do not weaken, game, or delete any check.
+
+UNMET CRITERIA + EXECUTED CHECK OUTPUT (JSON): ${JSON.stringify(unmet)}
+FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}

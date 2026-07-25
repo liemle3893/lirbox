@@ -39,6 +39,8 @@ const BASE     = (args && args.base) ? args.base : ''
 const WORKTREE = `.worktrees/${NAME}`
 const TICKET   = (args && args.ticket) ? args.ticket : null
 const DOD_CRITERIA = [{"id":"ac1","text":"unit tests green","tier":"checkable","check":"yarn test"},{"id":"ac2","text":"error message is clear","tier":"judged"}]
+// Outer plan-execute-verify attempt cap for the DoD gate (replan loop bound).
+const DOD_MAX_ATTEMPTS = 2
 
 const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
@@ -225,37 +227,99 @@ phase('DoDGate')
 if (done.has('DoDGate')) {
   log('DoDGate already complete (resumed)')
 } else {
-  let dodPassed = false, dodLast = null
-  for (let round = 1; round <= 3 && !dodPassed; round++) {
-    dodLast = await agent(
-      `${inWorktree('dodgate-verify', { notes: false })}
+  let dodPassed = false, dodLast = null, dodStalled = false, prevUnmetKey = null
+  const dodUnmet = () => ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
+  for (let attempt = 1; attempt <= DOD_MAX_ATTEMPTS && !dodPassed && !dodStalled; attempt++) {
+    if (attempt > 1) {
+      // Replan on gate failure: new plan from the EXECUTED unmet verdicts, then execute it.
+      const unmet = dodUnmet()
+      results.dodReplan = await agent(
+        `${inWorktree('dodgate-replan')}
+
+DoD REPLAN (attempt ${attempt}/${DOD_MAX_ATTEMPTS}) — PLAN ONLY, do NOT edit code in this step. The in-phase fix rounds could not close the unmet definition-of-done criteria below; patching the current approach harder is not working. Produce a NEW plan version:
+- Diagnose WHY each unmet criterion still fails, from the EXECUTED check output / cited evidence below. These verdicts came from actually running the checks — they are the only routing input; worker self-reports are untrusted claims and can never override them.
+- Write a revised, ordered, concrete step list that CHANGES APPROACH where the old one failed (different design, different files, different strategy). Descoping is NOT allowed — every criterion must still end up MET; do not weaken, game, or delete any check.
+
+UNMET CRITERIA + EXECUTED CHECK OUTPUT (JSON): ${JSON.stringify(unmet)}
+FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
+        { label: `dodgate:replan-a${attempt}`, phase: 'DoDGate',
+          schema: { type: 'object', additionalProperties: false, required: ["plan","steps"], properties: {"plan":{"type":"string"},"steps":{"type":"array","items":{"type":"string"}}} } },
+      )
+      await agent(
+        `${inWorktree('dodgate-execute')}
+
+DoD EXECUTE (attempt ${attempt}/${DOD_MAX_ATTEMPTS}): carry out the revised plan below IN FULL — implement it, run each unmet criterion's relevant checks yourself, re-run the project test suite (your changes must not regress it), and commit. Do NOT weaken, game, or delete a check; if a step proves impossible, say so in the summary instead of faking it. The DoD verify worker re-adjudicates afterwards — only executed check results count, never your own report.
+
+REVISED PLAN (JSON): ${JSON.stringify(results.dodReplan)}
+UNMET CRITERIA (JSON): ${JSON.stringify(unmet)}
+FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
+        { label: `dodgate:execute-a${attempt}`, phase: 'DoDGate',
+          schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
+      )
+    }
+    for (let round = 1; round <= 3 && !dodPassed; round++) {
+      dodLast = await agent(
+        `${inWorktree('dodgate-verify', { notes: false })}
 
 DoD VERIFY (round ${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate EVERY criterion below against the work on ${BRANCH} vs ${BASE || 'the base branch'}:
 - tier "checkable": run the "check" command inside ${WORKTREE}; exit 0 = MET, non-zero = UNMET; the command output is the evidence.
-- tier "judged": verdict from real evidence you CITE (file:line, command output, test result). No evidence = not MET.
+- tier "judged": verify against the ACTUAL diff and artifacts in ${WORKTREE} — inspect the real code/files changed on ${BRANCH} (e.g. git diff, reading the touched files) and CITE artifact evidence (file:line, command output, test result). Worker reports and implementation-notes are UNTRUSTED claims: they can point you at evidence but can NEVER satisfy a criterion by themselves. No artifact evidence = UNMET. If a criterion's implementation was deferred/descoped without a recorded human decision in the DoD file, score it UNMET — a deferral is a failing verdict, never a pass.
 Verdicts: MET | UNMET | PARTIAL.
 
 CRITERIA (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
-      { label: `dodgate:verify-r${round}`, phase: 'DoDGate',
-        schema: { type: 'object', additionalProperties: false, required: ["criteria"], properties: {"criteria":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","verdict","evidence"],"properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["MET","UNMET","PARTIAL"]},"evidence":{"type":"string"}}}}} } },
-    )
-    const unmet = ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
-    dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
-    if (!dodPassed && round < 3) {
-      await agent(
-        `${inWorktree('dodgate-fix')}
+        { label: `dodgate:verify-a${attempt}-r${round}`, phase: 'DoDGate',
+          schema: { type: 'object', additionalProperties: false, required: ["criteria"], properties: {"criteria":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","verdict","evidence"],"properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["MET","UNMET","PARTIAL"]},"evidence":{"type":"string"}}}}} } },
+      )
+      const unmet = dodUnmet()
+      dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
+      if (!dodPassed && round < 3) {
+        await agent(
+          `${inWorktree('dodgate-fix')}
 
 DoD FIX (round ${round}/3): the definition-of-done criteria below are NOT met. Make them met — implement what is missing, run the relevant checks yourself, then re-run the project test suite (your fix must not regress it) and commit. Do NOT weaken, game, or delete a check; if a criterion is genuinely impossible, say so in the summary instead of faking it.
 
 UNMET (JSON): ${JSON.stringify(unmet)}
 FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
-        { label: `dodgate:fix-r${round}`, phase: 'DoDGate',
-          schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"},"fixed":{"type":"array","items":{"type":"string"}}} } },
-      )
+          { label: `dodgate:fix-a${attempt}-r${round}`, phase: 'DoDGate',
+            schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"},"fixed":{"type":"array","items":{"type":"string"}}} } },
+        )
+      }
+    }
+    if (!dodPassed) {
+      // Stall detection: unmet-id set unchanged between consecutive gate runs → replanning is
+      // not converging; stop early instead of burning the remaining attempts.
+      const unmetKey = dodUnmet().map((c) => c.id).sort().join(',')
+      if (prevUnmetKey !== null && unmetKey === prevUnmetKey) {
+        dodStalled = true
+        log('DoDGate: stall detected — unmet set unchanged between gate runs (' + unmetKey + ')')
+      }
+      prevUnmetKey = unmetKey
     }
   }
   results.dodGate = dodLast
-  if (!dodPassed) throw new Error('DoDGate failed: DoD not fully met after 3 rounds — unmet: ' + ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET').map((c) => c.id).join(', '))
+  if (!dodPassed) {
+    // Escalate, never just die: persist status 'escalated' + the unmet list to durable state
+    // (same startedAt-preserving write as checkpoint) so a human or resume can pick it up.
+    const payload = JSON.stringify(
+      { workflow: NAME, status: 'escalated', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, dod: { criteria: DOD_CRITERIA }, unmet: dodUnmet(), phasesDone: [...done], results },
+      null, 2,
+    )
+    await agent(
+      `Persist durable workflow state to the MAIN repo (do NOT cd into the worktree). Run EXACTLY:
+
+mkdir -p .workflows/state
+cat > .workflows/state/.${NAME}.payload.json <<'DURABLE_JSON'
+${payload}
+DURABLE_JSON
+node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${NAME}.payload.json';let prev={};try{prev=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){};const s=JSON.parse(fs.readFileSync(p,'utf8'));const n=new Date().toISOString();s.startedAt=prev.startedAt||n;s.updatedAt=n;fs.writeFileSync(f,JSON.stringify(s,null,2));fs.unlinkSync(p)"
+node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
+
+Return whether the file was written and parses.`,
+      { label: 'dodgate:escalate', phase: 'DoDGate',
+        schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
+    )
+    throw new Error('DoDGate escalated: DoD not fully met (' + (dodStalled ? 'stalled — unmet set unchanged' : DOD_MAX_ATTEMPTS + ' attempts exhausted') + ') — unmet: ' + dodUnmet().map((c) => c.id).join(', '))
+  }
   done.add('DoDGate')
   await checkpoint('DoDGate')
 }
