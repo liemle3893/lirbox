@@ -17,8 +17,8 @@
   ],
   "checks": {
     "book-under-flag": {
-      "expect": "red",
-      "note": "REGRESSION, not yet refixed. Fixed once (SKILL.md 2826 -> 1479 words), then re-accreted to 2469 across seven consecutive runs; skill-lint counts 2077 prose words vs the 1200 flag threshold. Needs a shrink pass (whetstone consolidate) -- tracked, not hidden."
+      "expect": "green",
+      "note": "Twice-fixed, now guarded. Fixed once (2826 -> 1479 words), silently re-accreted to 2469 across seven runs, then re-shrunk by the consolidate pass in PR #37. Promoted to 'green' on 2026-07-25 so a THIRD re-accretion breaks the floor instead of decaying unnoticed -- which is the whole reason this manifest exists."
     },
     "checks-manifest-guard": {
       "expect": "green"
@@ -63,8 +63,8 @@
       "expect": "green"
     },
     "loop-decides-decomposition": {
-      "expect": "red",
-      "note": "Filed 2026-07-25, not yet run. The caller must stop deciding the decomposition: drop SKILL.md step 1d and reject --independent; the runtime planner already derives items and edges from a worker that read the repo. Prep DONE: independent-fanout-never-chosen and independent-work-needs-per-worker-worktrees were retired in this PR (they asserted the opposite doctrine and would have taken the floor RED); per-worker worktree isolation stays covered by dynamic-fanout-within-phase assertion 6."
+      "expect": "green",
+      "note": "Fixed by run conductor-20260725-093937 (2a401f5): --independent hard-errors, SKILL.md step 1d is gone, decomposition is documented as the runtime planner's job. Keeps the doctrine from drifting back: the human declares the goal + DoD, the loop decides the split."
     },
     "model-flag-guard": {
       "expect": "green"
