@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Refuse to push straight to main — every change lands through a pull request.
+#
+# GitHub is the authority here: the "main: pull requests only" ruleset rejects any
+# direct push to the default branch, with an EMPTY bypass list (admins included).
+# This hook is the fail-fast copy of that rule: it stops the push locally, before
+# the network round-trip, with a message that says what to do instead.
+#
+# So `--no-verify` skips THIS hook but not the ruleset — the server still says no.
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+set -euo pipefail
+
+PROTECTED="main"
+
+# pre-push receives one line per ref being pushed on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  [ -n "${remote_ref:-}" ] || continue
+
+  branch="${remote_ref#refs/heads/}"
+  [ "$branch" = "$PROTECTED" ] || continue
+
+  echo "✋ push blocked — '$branch' is pull-request-only" >&2
+  echo "" >&2
+  echo "   Put the work on a branch and open a PR instead:" >&2
+  echo "     git switch -c <type>/<slug>" >&2
+  echo "     git push -u origin HEAD" >&2
+  echo "     gh pr create --fill" >&2
+  echo "" >&2
+  echo "   GitHub enforces this too (ruleset 'main: pull requests only', no bypass)," >&2
+  echo "   so --no-verify will not get the push through." >&2
+  exit 1
+done
+
+exit 0
