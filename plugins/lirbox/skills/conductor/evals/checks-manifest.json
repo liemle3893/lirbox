@@ -45,7 +45,8 @@
       "expect": "green"
     },
     "dynamic-fanout-within-phase": {
-      "expect": "green"
+      "expect": "green",
+      "note": "SUCCESSOR CHECK -- also carries the protection of two concerns whose own checks were retired in PR #38 because they asserted the pre-#40 doctrine: 'independent-work-needs-per-worker-worktrees' (per-item worktree isolation -> assertion 6) and 'parallelize-independent-work-items' (work inside a phase must not be serial -> assertions 3-5, the parallel() batching). Do not weaken those assertions thinking they are redundant; nothing else guards them."
     },
     "effort-think": {
       "expect": "green"
@@ -57,7 +58,8 @@
       "expect": "green"
     },
     "headless-driver-still-ends-turn": {
-      "expect": "green"
+      "expect": "green",
+      "note": "SUCCESSOR CHECK -- supersedes the earlier concern 'headless-background-workflow-orphan' (a headless -p driver backgrounded the workflow, ended its turn, and the exiting process killed the orphan). That fix is assertion 1 here (SKILL.md pins run_in_background: false); assertions 2-3 add the blocking-call and state-file re-verify requirements on top."
     },
     "judged-dod-report-vulnerable": {
       "expect": "green"
