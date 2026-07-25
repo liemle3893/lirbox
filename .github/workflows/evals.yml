@@ -1,0 +1,60 @@
+# Repo-wide regression gate.
+#
+# Every skill's frozen acceptance-check is the durable residue of a bug that was already fixed
+# once. Before this workflow existed, nothing ran them outside a whetstone run targeting that
+# skill — so a fixed bug could come back with nothing watching. It happened: conductor's
+# book-under-flag was fixed, verified, merged, then silently re-accreted across seven runs.
+#
+# This runs every skill's floor + every guarded check on every push and PR.
+name: evals
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast gate: floors + every frozen acceptance-check, for every skill.
+  # Milliseconds-to-seconds each. This is the one that must never be skipped.
+  checks:
+    name: floors + frozen checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Regression gate
+        run: node scripts/evals-all.mjs --fast
+
+  # Generator regression nets (scripts/test-*.cjs). Slower — arena's clones fixture bundles and
+  # runs their npm suites — so it is a separate job and does not hold up the fast gate.
+  nets:
+    name: generator regression nets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generator nets
+        run: |
+          set -o pipefail
+          fails=0
+          for f in plugins/lirbox/skills/*/scripts/test-*.cjs; do
+            echo "── $f"
+            node "$f" || { echo "FAIL $f"; fails=$((fails+1)); }
+          done
+          echo "---"
+          if [ "$fails" -gt 0 ]; then echo "GATE RED — $fails generator net(s) failed"; exit 1; fi
+          echo "GATE GREEN — all generator nets passed"
