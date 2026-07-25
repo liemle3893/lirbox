@@ -77,6 +77,80 @@ function inWorktree(slot, opts) {
     `no-decision work, SKIP the file — do not create empty or boilerplate notes.`
 }
 
+// Per-item variant for the --independent fan-out: each parallel worker OWNS one worktree/branch
+// (branched off the run branch), so siblings never share a working tree or index — N independent
+// items may touch the SAME file without colliding on it or on .git/index.lock. Same judgment-gated
+// notes contract as inWorktree; notes land in the ITEM worktree and ride its branch through the
+// integrate merge.
+function inItemWorktree(slot, wt, br) {
+  return `Work ONLY inside YOUR OWN git worktree at ${wt} (run \`cd ${wt}\` first; it is on ` +
+    `branch ${br}, branched off ${BRANCH}). Do NOT edit any file outside ${wt} — sibling workers ` +
+    `own the other worktrees. Commit your changes there.\n\nIf — and ONLY if — this step involved ` +
+    `a non-trivial design decision, an intentional deviation from the spec, a tradeoff between ` +
+    `real alternatives, or an open question a reviewer must confirm, append it to a notes file ` +
+    `UNIQUE to you at implementation-notes/${slot}.html in the worktree (mkdir -p the dir; create ` +
+    `if missing; APPEND — never clobber). For mechanical or no-decision work, SKIP the file — do ` +
+    `not create empty or boilerplate notes.`
+}
+
+// --- Runtime plan fan-out: pure JS over a value a PLANNER worker returned ---------------------
+// The phase's unit of concurrency is no longer the phase: a planner that has READ the repo returns
+// the work items, and these two helpers turn that runtime value into dispatchable batches. Both are
+// pure (no fs/git/Date/Math.random) — every side-effect still lives in a worker prompt.
+
+// Normalize the planner's answer into a stable item list: a unique id, a filesystem-safe slug (the
+// item's own worktree/branch suffix), and a dependsOn list filtered to ids that actually exist. A
+// planner that returns nothing usable degenerates to ONE item carrying the phase's own goal — i.e.
+// exactly the single serial worker this phase used to be.
+function planItems(res, prefix, fallback) {
+  const raw = (res && Array.isArray(res.items)) ? res.items : []
+  const items = []
+  const ids = new Set()
+  const slugs = new Set()
+  for (const r of raw) {
+    const prompt = (r && typeof r.prompt === 'string') ? r.prompt.trim() : ''
+    if (!prompt) continue
+    const id = String((r && r.id) || '').trim() || ('item' + (items.length + 1))
+    if (ids.has(id)) continue
+    let slug = (prefix + '-' + id).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 48)
+    if (!slug) slug = prefix + '-item' + (items.length + 1)
+    while (slugs.has(slug)) slug = slug + '-' + (items.length + 1)
+    ids.add(id)
+    slugs.add(slug)
+    items.push({
+      id,
+      slug,
+      title: String((r && r.title) || id),
+      prompt,
+      dependsOn: (r && Array.isArray(r.dependsOn)) ? r.dependsOn.map(String) : [],
+    })
+  }
+  if (!items.length) return [{ id: 'all', slug: prefix + '-all', title: prefix, prompt: fallback, dependsOn: [] }]
+  for (const it of items) it.dependsOn = it.dependsOn.filter((d) => d !== it.id && ids.has(d))
+  return items
+}
+
+// Dependency LEVELS: every item whose dependsOn is already satisfied lands in the same level (one
+// parallel() batch); an item waits until every id it depends on has resolved. A dependency cycle
+// can never stall the run — the remaining items are emitted as one final level, loudly.
+function planLevels(items) {
+  let pending = items.slice()
+  const settled = new Set()
+  const levels = []
+  while (pending.length) {
+    let level = pending.filter((it) => it.dependsOn.every((d) => settled.has(d)))
+    if (!level.length) {
+      log('plan: dependency cycle among [' + pending.map((it) => it.id).join(', ') + '] — dispatching them as ONE level')
+      level = pending
+    }
+    const inLevel = new Set(level)
+    for (const it of level) settled.add(it.id)
+    pending = pending.filter((it) => !inLevel.has(it))
+    levels.push(level)
+  }
+  return levels
+}
+
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
   const payload = JSON.stringify(
@@ -142,13 +216,124 @@ phase('Work')
 if (done.has('Work')) {
   log('Work already complete (resumed)')
 } else {
-  results.work = await agent(
-    `${inWorktree('Work')}
+  // In-phase concurrency: a PLANNER worker (it has READ the repo) returns this phase's items and
+  // their dependency edges, then the conductor fans them out BY DEPENDENCY LEVEL — every item whose
+  // dependsOn is satisfied ships in ONE parallel() batch, each worker in its OWN worktree/branch,
+  // each level integrated back into the run branch before the next level branches off it. The plan
+  // is persisted before any item runs, so a resume reuses it instead of re-decomposing. Regenerate
+  // with --no-plan-fanout for the single serial worker.
+  const goal = `
+Apply the change described in the run brief.`
+  let items = (results.workPlan && Array.isArray(results.workPlan.items) && results.workPlan.items.length)
+    ? results.workPlan.items
+    : null
+  if (items) {
+    log('Work: reusing the persisted plan (' + items.length + ' item(s)) — a resume never re-decomposes')
+  } else {
+    const planned = await agent(
+      `${inWorktree('plan-work', { notes: false })}
 
-Apply the change described in the run brief.`,
-    { label: 'work', phase: 'Work', model: 'sonnet',
-      schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
-  )
+DECOMPOSE (runtime planning): you are the PLANNER for this phase, not its implementer. READ the repo first, then split the work below into the smallest set of items that ONE worker can each finish end-to-end, and declare every item's dependency edges. Plan only — change nothing, commit nothing.
+
+Rules:
+- One item = one coherent slice a single worker can own (a module, a handler, a migration step, a document). Never split work that only makes sense as ONE commit; never bundle unrelated work into one item.
+- dependsOn lists the ids of the items whose OUTPUT (a decision, an API, a schema, code that must already exist) this item needs. Touching the SAME file is NOT a dependency: every item runs in its OWN worktree on its OWN branch, and the branches are merged afterwards.
+- Items with no edge run CONCURRENTLY, so keep the graph as wide and as shallow as the work honestly allows — and never invent parallelism the work does not have. When a real edge is in doubt, declare it.
+- prompt is the FULL, self-contained instruction handed VERBATIM to that item's worker: what to change, where, and how to verify it. That text plus the shared goal is all the worker ever sees — none of your reasoning survives.
+- If the work genuinely does not decompose, return exactly ONE item covering all of it. That is a normal, cheap answer — never manufacture items to look parallel.
+- At most 8 items.
+
+Return items = [ { id, title, prompt, dependsOn } ]: ids are short, unique, kebab tokens, and every dependsOn entry must be one of those ids.
+
+THE WORK TO DECOMPOSE (this phase's goal, verbatim):
+${goal}`,
+      { label: 'plan:Work', phase: 'Work',
+        model: 'opus', effort: 'high',
+        schema: { type: 'object', additionalProperties: false, required: ["items"], properties: {"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","title","prompt","dependsOn"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"dependsOn":{"type":"array","items":{"type":"string"}}}}},"summary":{"type":"string"}} } },
+    )
+    items = planItems(planned, 'work', goal)
+    results.workPlan = { items }
+    await checkpoint('Work')
+  }
+  if (items.length === 1) {
+    log('Work: the plan holds ONE item — running it as a single worker in the run worktree')
+    results.work = await agent(
+      `${inWorktree('work')}
+
+${items[0].prompt}`,
+      { label: 'work', phase: 'Work', model: 'sonnet',
+        schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
+    )
+  } else {
+    const levels = planLevels(items)
+    const itemResults = []
+    log('Work: ' + items.length + ' planned item(s) across ' + levels.length + ' dependency level(s)')
+    for (let li = 0; li < levels.length; li++) {
+      const level = levels[li]
+      const itemLines = level.map((it) => `setup_item "${WORKTREE}--${it.slug}" "${BRANCH}--${it.slug}"`).join('\n')
+      const itemBranches = level.map((it) => `${BRANCH}--${it.slug}`).join(', ')
+      const itemWorktrees = level.map((it) => `${WORKTREE}--${it.slug}`).join(', ')
+      const levelSetup = await agent(
+        `Create ONE isolated git worktree PER independent work item, each on its OWN branch off ${BRANCH}, so the parallel workers never share a working tree or index. Run from the MAIN repo (do NOT cd into ${WORKTREE}) and create them SEQUENTIALLY — concurrent worktree adds contend on .git locks. Run idempotently:
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not a git repo"; exit 1; }
+ROOT="$(git rev-parse --show-toplevel)"
+setup_item() {
+  WT="$1"; BR="$2"
+  if git worktree list --porcelain | grep -q "/$WT$"; then
+    echo "$WT exists — reusing"
+  elif git show-ref --verify --quiet "refs/heads/$BR"; then
+    git worktree add "$WT" "$BR"
+  else
+    # Every item branches off the SAME base: the run branch tip ${BRANCH}.
+    git worktree add "$WT" -b "$BR" "${BRANCH}"
+  fi
+  [ -e "$WT/node_modules" ] || [ ! -d "$ROOT/node_modules" ] || ln -s "$ROOT/node_modules" "$WT/node_modules"
+  test -d "$WT" && echo "OK $WT"
+}
+${itemLines}
+
+Return ready=true ONLY if every per-item worktree exists, plus a short summary.`,
+        { label: 'work:setup-l' + (li + 1), phase: 'Work',
+          model: 'haiku',
+          schema: { type: 'object', additionalProperties: false, required: ["ready"], properties: {"ready":{"type":"boolean"},"summary":{"type":"string"}} } },
+      )
+      if (!levelSetup || !levelSetup.ready) throw new Error('Work: per-item worktrees not ready for level ' + (li + 1) + ' — ' + ((levelSetup && levelSetup.summary) || ''))
+      const levelOut = await parallel(level.map((it) => () => agent(
+        `${inItemWorktree(it.slug, WORKTREE + '--' + it.slug, BRANCH + '--' + it.slug)}
+
+CONCURRENCY: sibling workers are executing the OTHER independent work items IN PARALLEL, each in its OWN worktree on its OWN branch — you never share a working tree or index with a sibling, so items may safely touch the same files (an integrate step merges the per-item branches afterwards). Stay strictly inside YOUR OWN worktree: never cd into a sibling's worktree, never rebase, reset, or switch branches, and never run repo-wide destructive git commands — all worktrees share ONE underlying .git, so ref-level operations can still collide (if a git command fails on a transient .git lock, wait a moment and retry; NEVER delete a lock file). Run only your item's targeted checks here, not the full suite — after the integrate step combines the branches, the downstream gates verify the combined result once.
+
+YOUR ITEM (${it.id}) — ${it.title}
+${it.prompt}
+
+SHARED GOAL of this phase, for CONTEXT ONLY — implement YOUR item above and nothing else; a sibling worker owns each of the other items, and items you depend on are already merged into your branch point:
+${goal}`,
+        { label: 'work:' + it.id, phase: 'Work', model: 'sonnet',
+          schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
+      )))
+      levelOut.forEach((r, i) => { itemResults.push({ id: level[i].id, title: level[i].title, summary: (r && r.summary) || '' }) })
+      const levelIntegrate = await agent(
+        `${inWorktree('work-integrate')}
+
+INTEGRATE (combine the parallel fan-out): each independent work item was built on its OWN branch in its OWN worktree. Merge the per-item branches into ${BRANCH} so the downstream gates verify ONE combined diff:
+
+1. In ${WORKTREE} (on ${BRANCH}): confirm a clean tree with 'git status --porcelain'.
+2. Merge the per-item branches SEQUENTIALLY, in this order: ${itemBranches}.
+   For each: git merge --no-ff <branch> -m "integrate: <branch>". A branch already merged (resumed run) is a no-op — continue.
+3. CONFLICT-FIX LOOP: if a merge conflicts, resolve the conflict by hand — the items are independent, so overlaps are mechanical (adjacent edits in the same file, shared import/registration blocks); preserve BOTH sides' intent, then 'git add -A' and commit to complete the merge, and re-run that item's targeted check if one exists. ONLY if a conflict genuinely cannot be resolved without dropping an item's change: 'git merge --abort', record that branch under conflicts, continue with the remaining branches, and return merged=false so the failure is loud instead of an item being silently dropped.
+4. After ALL branches are processed, clean up the per-item trees (from the MAIN repo, not inside ${WORKTREE}): for each of ${itemWorktrees} run 'git worktree remove --force <wt>', and delete each fully-merged item branch with 'git branch -d <br>' — keep any UNMERGED (conflicted) branch so its work is not lost.
+5. Sanity: the working tree is clean and 'git log --oneline -n 20' on ${BRANCH} shows the integrate merges.
+
+Return merged=true ONLY if EVERY per-item branch landed in ${BRANCH}, the list of conflicted branches (empty when clean), and a short summary.`,
+        { label: 'work:integrate-l' + (li + 1), phase: 'Work',
+          model: 'opus', effort: 'high',
+          schema: { type: 'object', additionalProperties: false, required: ["merged"], properties: {"merged":{"type":"boolean"},"conflicts":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
+      )
+      if (!levelIntegrate || !levelIntegrate.merged) throw new Error('Work: level ' + (li + 1) + ' did not integrate into ' + BRANCH + ' — ' + ((levelIntegrate && levelIntegrate.summary) || ''))
+    }
+    results.work = { summary: 'plan fan-out: ' + items.length + ' item(s) across ' + levels.length + ' dependency level(s)', items: itemResults }
+  }
   done.add('Work')
   await checkpoint('Work')
 }

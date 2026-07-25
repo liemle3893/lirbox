@@ -39,6 +39,19 @@ More phases = more subagent round-trips; reserve them for work that warrants the
   before the gates run. Use for wide decomposable tasks (N unrelated bugs/items) so the run doesn't
   pay N× worker spin-up + per-item verification; keep sequential `--phases` for genuinely dependent
   steps. Resume granularity is the whole `Work` phase (a crash mid-fan-out re-runs all items).
+- `--no-plan-fanout` — opt OUT of **in-phase concurrency**. By default every work phase is
+  *decomposed at runtime*: the phase first runs a **planner** worker (`plan:<Phase>`, think-tier)
+  that reads the repo and returns `{ items: [{ id, title, prompt, dependsOn }] }`, and the conductor
+  then dispatches those items **by dependency level** — every item whose `dependsOn` is already
+  satisfied ships in ONE `parallel()` batch, each worker in its **OWN worktree/branch**
+  (`<worktree>--<phase>-<id>`), and each level is integrated back into the run branch before the next
+  level branches off it. So a mixed graph (`w1`,`w2` independent → `w3` depends on both) is
+  expressible **inside one phase**, which `--independent` (all-or-nothing, scaffold-time) cannot do.
+  The plan is checkpointed **before** the first item runs, so a resume reuses the same decomposition
+  the branch's commits already belong to instead of re-planning a different one. A one-item plan
+  degenerates to the single serial worker this phase used to be (cost: one cheap planner round-trip).
+  Pass `--no-plan-fanout` when the phase is small, strictly serial, or you want the byte-minimal
+  script. Ignored under `--independent`, whose items are declared at scaffold time.
 - `--prompts-file <json>` — `{ "<PhaseTitle>": "<prompt text>", … }`; fills each work phase's prompt
   from **data** so you never read back or hand-edit the generated script. A phase with no entry keeps
   a `TODO:` stub (fill it by regenerating, not by editing).

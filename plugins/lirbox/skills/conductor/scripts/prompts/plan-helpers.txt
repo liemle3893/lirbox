@@ -1,0 +1,57 @@
+// --- Runtime plan fan-out: pure JS over a value a PLANNER worker returned ---------------------
+// The phase's unit of concurrency is no longer the phase: a planner that has READ the repo returns
+// the work items, and these two helpers turn that runtime value into dispatchable batches. Both are
+// pure (no fs/git/Date/Math.random) — every side-effect still lives in a worker prompt.
+
+// Normalize the planner's answer into a stable item list: a unique id, a filesystem-safe slug (the
+// item's own worktree/branch suffix), and a dependsOn list filtered to ids that actually exist. A
+// planner that returns nothing usable degenerates to ONE item carrying the phase's own goal — i.e.
+// exactly the single serial worker this phase used to be.
+function planItems(res, prefix, fallback) {
+  const raw = (res && Array.isArray(res.items)) ? res.items : []
+  const items = []
+  const ids = new Set()
+  const slugs = new Set()
+  for (const r of raw) {
+    const prompt = (r && typeof r.prompt === 'string') ? r.prompt.trim() : ''
+    if (!prompt) continue
+    const id = String((r && r.id) || '').trim() || ('item' + (items.length + 1))
+    if (ids.has(id)) continue
+    let slug = (prefix + '-' + id).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 48)
+    if (!slug) slug = prefix + '-item' + (items.length + 1)
+    while (slugs.has(slug)) slug = slug + '-' + (items.length + 1)
+    ids.add(id)
+    slugs.add(slug)
+    items.push({
+      id,
+      slug,
+      title: String((r && r.title) || id),
+      prompt,
+      dependsOn: (r && Array.isArray(r.dependsOn)) ? r.dependsOn.map(String) : [],
+    })
+  }
+  if (!items.length) return [{ id: 'all', slug: prefix + '-all', title: prefix, prompt: fallback, dependsOn: [] }]
+  for (const it of items) it.dependsOn = it.dependsOn.filter((d) => d !== it.id && ids.has(d))
+  return items
+}
+
+// Dependency LEVELS: every item whose dependsOn is already satisfied lands in the same level (one
+// parallel() batch); an item waits until every id it depends on has resolved. A dependency cycle
+// can never stall the run — the remaining items are emitted as one final level, loudly.
+function planLevels(items) {
+  let pending = items.slice()
+  const settled = new Set()
+  const levels = []
+  while (pending.length) {
+    let level = pending.filter((it) => it.dependsOn.every((d) => settled.has(d)))
+    if (!level.length) {
+      log('plan: dependency cycle among [' + pending.map((it) => it.id).join(', ') + '] — dispatching them as ONE level')
+      level = pending
+    }
+    const inLevel = new Set(level)
+    for (const it of level) settled.add(it.id)
+    pending = pending.filter((it) => !inLevel.has(it))
+    levels.push(level)
+  }
+  return levels
+}

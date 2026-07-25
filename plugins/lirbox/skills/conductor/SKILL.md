@@ -180,6 +180,12 @@ carrying a declared dependency edge, ordered after the fan-out. Corollaries: exa
 item → a single plain phase, no fan-out; every item carrying an edge → strictly linear, now
 justified by the table rather than by default.
 
+This table is the **coarse** cut — the items you can name before reading the repo. Each resulting
+work phase is decomposed AGAIN at runtime by its own planner worker (see step 2), so a phase you
+could only write as one line here still fans out inside itself once a worker has read the code.
+Table entries a driver can already see as independent belong in the `--independent` fan-out anyway:
+declaring them costs nothing and skips a planner round-trip.
+
 ### 2. Generate the conductor (pass prompts as data; do NOT hand-edit)
 
 Generate the conductor deterministically from `scripts/scaffold-workflow.cjs` — never copy/author or
@@ -192,6 +198,14 @@ items as `--phases`, and they fan out **concurrently** in one `Work` phase via `
 of N sequential phases — each worker in its OWN worktree/branch off the run branch, merged back by
 an integrate step — with the gates verifying the combined diff once. Items carrying a declared
 dependency edge stay sequential `--phases`, ordered after the fan-out.
+
+**Work inside a phase is no longer serial.** By default each work phase first runs a **planner**
+worker (`plan:<Phase>`) that reads the repo and returns its items plus each item's `dependsOn`; the
+conductor then dispatches them **by dependency level** — every ready item in ONE `parallel()` batch,
+each worker in its own worktree/branch, each level integrated back into the run branch before the
+next. Phase ORDER is untouched. The plan is checkpointed before the first item runs, so a resume
+reuses that decomposition instead of re-planning a different one, and a one-item plan is just
+today's single worker. Pass `--no-plan-fanout` to turn a phase back into one serial worker.
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
