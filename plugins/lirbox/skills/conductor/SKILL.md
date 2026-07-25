@@ -52,7 +52,7 @@ the main session, so read state directly (`Read .workflows/state/<name>.json`):
 | a state file, `running`/`failed` | **resume** → step 4; regenerate (`--force`) only to change phase structure |
 | a state file, `complete` | say so (offer `workflow-report.cjs <name>`); fresh run only if they meant one |
 | a tracker ticket (Jira key, Jira/Linear URL) | ticket run: set `args.ticket`, `<name>` from the key, phase 1 fetches the goal ([`delivery-phases.md`](references/delivery-phases.md) §A) → 1b |
-| anything else — a goal | fresh run: kebab `<name>`, tell the user → 1b → 1c → 1d → 2 → 3 |
+| anything else — a goal | fresh run: kebab `<name>`, tell the user → 1b → 1c → 2 → 3 |
 
 `<name>` keys the state file, branch and worktree; goal and `ticket` live in `state.json`, so resume
 needs only the name plus `args = { phasesDone, results }`
@@ -89,24 +89,6 @@ prose-lint criterion. Confirm ONCE (`AskUserQuestion`: accept / edit), then free
 require it (`--no-dod` opts out). **DoDGate** verifies every criterion at run end (fix-loop ≤3, then
 hard-fail). Probes, formats, precedence → [`run-planning.md`](references/run-planning.md) §2.
 
-### 1d. Decompose — work items and dependency edges (REQUIRED)
-
-Do this **before** generating; step 2 reads the fan-out decision off the table:
-
-| id | work item | depends on |
-|----|-----------|------------|
-| w1 | migrate `/users` handler | none |
-| w2 | migrate `/orders` handler | none |
-| w3 | delete the legacy adapter | w1, w2 |
-
-`depends on` is a comma-list of ids or the literal `none` — never blank, never prose; an edge means
-needing another item's **output** first (the same file is not an edge).
-
-**Hard rule:** every item whose `depends on` is `none` MUST be emitted in ONE `--independent` fan-out
-(one `Work` phase, one worker per item); sequential `--phases` is reserved for declared-edge items,
-ordered after the fan-out. Coarse cut only — each phase is decomposed again at runtime (step 2).
-Corollaries, worked example → [`run-planning.md`](references/run-planning.md) §3.
-
 ### 2. Generate the conductor (prompts as data)
 
 Always generate from `scripts/scaffold-workflow.cjs` — never author or hand-edit the `.js` (drift);
@@ -114,12 +96,16 @@ re-run with `--force` to change structure. Prompts travel as **DATA** (`--prompt
 `--prompts-file`). Size to the triage tier (`--profile lite` / `--profile delivery`) — never default
 to the full profile.
 
-`--independent` is **read off step 1d's table, not re-judged here**: ≥2 items declared `depends on:
-none` → pass `--independent` with exactly those items as `--phases` (one `Work` phase, concurrent
-per-worker worktrees, integrate step, gates seeing the combined diff once); declared-edge items stay
-sequential after it. Work inside a phase is **not serial either** — a **planner** worker decomposes
-it at runtime and the conductor dispatches by dependency level (`--no-plan-fanout` restores one
-serial worker). Both fan-outs → [§3a–§3b](references/run-planning.md).
+**The human declares the goal + DoD; the LOOP decides the decomposition — never author a work-item
+or dependency table here.** Nothing has read the code yet, so any split you write down is a guess,
+and a wrong edge is silent. Splitting happens **at runtime**: each work phase first runs a
+**planner** worker that reads the repo and returns that phase's items plus each item's dependency
+edges, then the conductor dispatches them by dependency **level** — every ready item in ONE
+`parallel()` batch, each worker in its own worktree/branch off the level's integrated base, so an
+item always sees the output it depends on. `--phases` declares human-visible **stages** (each gets
+its own planner), not items; `--no-plan-fanout` is the single escape hatch (one serial worker per
+phase). Want specific items? State them in the phase prompt — the planner returns them. Detail →
+[§3](references/run-planning.md).
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
@@ -187,7 +173,7 @@ Full list → [`references/workflow-runtime.md`](references/workflow-runtime.md)
 - `scripts/` — `scaffold-workflow.cjs` (step 2) · `list-workflows.cjs` (step 1; `--all` includes
   completed) · `workflow-report.cjs` (step 5; rates via `RATES_JSON`) · `test-scaffold.cjs`
   (generator regression net).
-- `references/` — `run-planning.md` (steps 1b–1d, 5) · `generator-flags.md` (step 2) ·
+- `references/` — `run-planning.md` (steps 1b–1c, 5; runtime decomposition) · `generator-flags.md` (step 2) ·
   `delivery-phases.md` (`--ticket` / `--pr` / writeup phases) · `workflow-runtime.md` (layers,
   state schema, resume, gotchas).
 </resources>
