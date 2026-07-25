@@ -95,7 +95,7 @@ node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${
 node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
 
 Return whether the file was written and parses.`,
-    { label: `checkpoint:${phaseTitle}`, phase: phaseTitle,
+    { label: `checkpoint:${phaseTitle}`, phase: phaseTitle, model: 'haiku',
       schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
   )
 }
@@ -132,7 +132,7 @@ else
 fi
 [ -e "${WORKTREE}/node_modules" ] || [ ! -d "$ROOT/node_modules" ] || ln -s "$ROOT/node_modules" "${WORKTREE}/node_modules"
 test -d "${WORKTREE}" && echo OK`,
-    { label: 'setup:worktree', phase: 'Setup',
+    { label: 'setup:worktree', phase: 'Setup', model: 'haiku',
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
@@ -147,7 +147,8 @@ if (done.has('Work')) {
     `${inWorktree('Work')}
 
 Apply the change described in the run brief.`,
-    { label: 'work', phase: 'Work', schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
+    { label: 'work', phase: 'Work', model: 'sonnet',
+      schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
   )
   done.add('Work')
   await checkpoint('Work')
@@ -162,7 +163,7 @@ if (done.has('CodeGate')) {
     `${inWorktree('codegate-guard', { notes: false })}
 
 Inspect the diff of ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WORKTREE}). Is this a CODE change (source/test code — not solely docs, config, comments, or generated artifacts)? Return isCode and a one-line reason. Do NOT edit anything.`,
-    { label: 'codegate:guard', phase: 'CodeGate',
+    { label: 'codegate:guard', phase: 'CodeGate', model: 'haiku',
       schema: { type: 'object', additionalProperties: false, required: ["isCode"], properties: {"isCode":{"type":"boolean"},"reason":{"type":"string"}} } },
   )
   if (!guard || !guard.isCode) {
@@ -176,7 +177,7 @@ Inspect the diff of ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WOR
 READ-ONLY panel review of the changes on ${BRANCH} vs ${BASE || 'the base branch'} (git diff in ${WORKTREE}) — do NOT edit or fix anything; you only report findings.
 DIMENSION — ${d.focus}
 Return findings with exact repo-relative file + line + severity (Critical|High|Medium|Low) + title + detail. No findings is a valid answer.`,
-      { label: 'codegate:' + d.key, phase: 'CodeGate',
+      { label: 'codegate:' + d.key, phase: 'CodeGate', model: 'opus', effort: 'high',
         schema: { type: 'object', additionalProperties: false, required: ["findings"], properties: {"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["file","line","severity","title"],"properties":{"file":{"type":"string"},"line":{"type":"number"},"severity":{"type":"string","enum":["Critical","High","Medium","Low"]},"title":{"type":"string"},"detail":{"type":"string"}}}}} } },
     )))
     const all = rawResults.filter(Boolean).flatMap((r) => r.findings || [])
@@ -199,7 +200,7 @@ Score 0-100 how confident you are the finding is REAL and WORTH FIXING:
 - 100: Absolutely certain. Double-checked, definitely real, will happen frequently; evidence directly confirms it.
 Automatic false positives (score 0): pre-existing issues; linter/typechecker/compiler-catchable; pedantic nitpicks; issues on lines the diff did not modify; intentional changes related to the goal.
 Return the score and a one-line reason.`,
-      { label: 'codegate:score-' + i, phase: 'CodeGate',
+      { label: 'codegate:score-' + i, phase: 'CodeGate', model: 'haiku',
         schema: { type: 'object', additionalProperties: false, required: ["score"], properties: {"score":{"type":"number"},"reason":{"type":"string"}} } },
     ).then((v) => ({ ...f, confidence: v ? v.score : 0 })))) : []
     const confirmed = scored.filter(Boolean).filter((f) => f.confidence >= 80)
@@ -219,7 +220,7 @@ OUTPUT CONTRACT: return gatePassed=true ONLY if every Critical and High finding 
 EVIDENCE: report the exact build/lint command you ran as buildCmd and its numeric exit code as buildExit; if the project has no build/lint, run the closest verification command (e.g. the test suite) and report that instead. The gate rejects gatePassed=true unless buildExit is 0.
 
 FINDINGS (JSON): ${JSON.stringify(confirmed)}` + dod + carry,
-          { label: `codegate:lead-r${round}`, phase: 'CodeGate', agentType: 'lirbox:lirbox-code-reviewer',
+          { label: `codegate:lead-r${round}`, phase: 'CodeGate', agentType: 'lirbox:lirbox-code-reviewer', model: 'opus', effort: 'high',
             schema: { type: 'object', additionalProperties: false, required: ["gatePassed","critical","high","buildCmd","buildExit","skippedFindings","knownOpen"], properties: {"gatePassed":{"type":"boolean"},"critical":{"type":"number"},"high":{"type":"number"},"summary":{"type":"string"},"buildCmd":{"type":"string"},"buildExit":{"type":"number"},"skippedFindings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["title","reason"],"properties":{"title":{"type":"string"},"reason":{"type":"string"}}}},"knownOpen":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["file","line","severity","title"],"properties":{"file":{"type":"string"},"line":{"type":"number"},"severity":{"type":"string"},"title":{"type":"string"}}}}} } },
         )
         passed = last && last.gatePassed && last.buildExit === 0

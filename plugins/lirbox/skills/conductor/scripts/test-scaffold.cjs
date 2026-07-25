@@ -67,7 +67,10 @@ const MATRIX = [
   ['profile-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]],
   ['combo-all', ['--phases', 'A,B', '--ticket', '--pr', '--enforce-code', '--enforce-tests']],
   // model-mode + writeup combos — keep them inside the syntax/phase-order net too.
+  // (`auto` is the DEFAULT, so every other entry above already exercises it; these pin the
+  // explicit-flag spelling and the opt-in `inherit` mode.)
   ['auto-bare', ['--phases', 'Work', '--model-mode', 'auto']],
+  ['inherit', ['--phases', 'Work', '--model-mode', 'inherit']],
   ['auto-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--model-mode', 'auto', '--dod-file', dodFile]],
   ['no-writeup', ['--phases', 'Work', '--pr', '--no-writeup']],
   ['writeup-only', ['--phases', 'Work', '--writeup']],
@@ -177,9 +180,18 @@ function genFails(extra) {
 }
 
 try {
-  // 1. default mode emits NO model: opt at all (byte-cost-free; the backward-compat invariant).
-  check(!/model:\s*'/.test(gen('default', ['--phases', 'Work', '--pr', '--enforce-docs'])),
-    "default mode emits no model: opt");
+  // 1. `inherit` mode emits NO model:/effort: opt at all (byte-cost-free; the backward-compat
+  //    invariant). Retargeted from the old `default` mode when auto became the default: the
+  //    byte-cost-free path still has to exist and still has to be byte-cost-free — it is just
+  //    opted into by name now.
+  const inheritSrc = gen('inherit', ['--phases', 'Work', '--pr', '--enforce-docs', '--model-mode', 'inherit']);
+  check(!/model:\s*'/.test(inheritSrc), "inherit mode emits no model: opt");
+  check(!/effort:\s*'/.test(inheritSrc), "inherit mode emits no effort: opt");
+
+  // 1b. With NO --model-mode flag the default is `auto`, so the tiered opts ARE emitted.
+  const defaultSrc = gen('default', ['--phases', 'Work', '--pr', '--enforce-docs']);
+  check(/phase: 'Setup', model: 'haiku'/.test(defaultSrc), "no --model-mode flag: auto is the default (Setup → haiku)");
+  check(/phase: 'Work', model: 'sonnet'/.test(defaultSrc), "no --model-mode flag: work phase → sonnet");
 
   // 2. auto mode tiers each phase class: haiku (mechanical), opus (think), sonnet (work).
   // Opts are emitted as `phase: 'X', [agentType: '...',] model: 'Y',` on one line.
@@ -226,6 +238,7 @@ try {
 
   // 7. invalid flag values are rejected.
   check(genFails(['--phases', 'Work', '--model-mode', 'bogus']), "invalid --model-mode rejected");
+  check(genFails(['--phases', 'Work', '--model-mode', 'default']), "legacy --model-mode default rejected (auto is the default; use inherit)");
   check(genFails(['--phases', 'Work', '--model-mode', 'auto', '--model-think', 'gpt']), "invalid --model-think rejected");
   check(genFails(['--phases', 'Work', '--frontend', 'desktop']), "invalid --frontend rejected");
 
@@ -318,7 +331,10 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..');
 
 // Canonical combo set (label → generator args). Every run is
 //   node scaffold-workflow.cjs --name snap --out <tmp>/<label>.js --force <args>
-// with cwd = repo root. Keep in lockstep with evals/checks/scaffold-golden-snapshots.check.mjs.
+// with cwd = repo root. The first six labels are the PINNED contract of
+// evals/checks/scaffold-golden-snapshots.check.mjs — keep them in lockstep (that check requires
+// `default.js` by name, so the label stays even though the no-flag default is now `auto`).
+// `inherit` is an extra local combo pinning the opt-in byte-cost-free mode.
 const SNAP_COMBOS = [
   ['default',    ['--phases', 'Work', '--prompts-file', SNAP_PROMPTS]],
   ['lite',       ['--phases', 'Work', '--profile', 'lite', '--dod-file', SNAP_DOD, '--prompts-file', SNAP_PROMPTS]],
@@ -326,6 +342,7 @@ const SNAP_COMBOS = [
   ['cycle',      ['--phases', 'Implement', '--cycle', '--prompts-file', SNAP_PROMPTS]],
   ['panel',      ['--phases', 'Work', '--enforce-code', '--review-panel', '--prompts-file', SNAP_PROMPTS]],
   ['model-auto', ['--phases', 'Work', '--model-mode', 'auto', '--prompts-file', SNAP_PROMPTS]],
+  ['model-inherit', ['--phases', 'Work', '--model-mode', 'inherit', '--prompts-file', SNAP_PROMPTS]],
 ];
 
 if (!fs.existsSync(SNAP_PROMPTS) || !fs.existsSync(SNAP_DOD)) {

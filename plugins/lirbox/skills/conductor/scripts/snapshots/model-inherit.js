@@ -94,7 +94,7 @@ node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${
 node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
 
 Return whether the file was written and parses.`,
-    { label: `checkpoint:${phaseTitle}`, phase: phaseTitle, model: 'haiku',
+    { label: `checkpoint:${phaseTitle}`, phase: phaseTitle,
       schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
   )
 }
@@ -131,7 +131,7 @@ else
 fi
 [ -e "${WORKTREE}/node_modules" ] || [ ! -d "$ROOT/node_modules" ] || ln -s "$ROOT/node_modules" "${WORKTREE}/node_modules"
 test -d "${WORKTREE}" && echo OK`,
-    { label: 'setup:worktree', phase: 'Setup', model: 'haiku',
+    { label: 'setup:worktree', phase: 'Setup',
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
@@ -146,8 +146,7 @@ if (done.has('Work')) {
     `${inWorktree('Work')}
 
 Apply the change described in the run brief.`,
-    { label: 'work', phase: 'Work', model: 'sonnet',
-      schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
+    { label: 'work', phase: 'Work', schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
   )
   done.add('Work')
   await checkpoint('Work')

@@ -158,17 +158,40 @@ At the end of the run the **DoDGate** verifies every criterion (fix-loop ≤3, t
 PR body and run report carry the scorecard, and a criterion already met at baseline is flagged
 as non-discriminating.
 
+### 1d. Decompose — work items and their dependency edges (REQUIRED, every new run)
+
+Do this **before** generating; step 2 reads the fan-out decision off this table instead of
+re-judging it. Enumerate the work items and declare each one's edges explicitly — item titles here
+become the `--phases` entries and the `--prompts-file` keys:
+
+| id | work item | depends on |
+|----|-----------|------------|
+| w1 | migrate `/users` handler | none |
+| w2 | migrate `/orders` handler | none |
+| w3 | delete the legacy adapter | w1, w2 |
+
+`depends on` is a comma-list of item ids or the literal `none` — never blank, never prose. An edge
+means the item needs another item's **output** to exist first (its decision, API, or code). Touching
+the same file is **NOT** an edge: per-item worktrees + the integrate step handle that.
+
+**Hard rule:** every item whose `depends on` is `none` MUST be emitted in ONE `--independent`
+fan-out (a single `Work` phase, one worker per item). Sequential `--phases` is reserved for items
+carrying a declared dependency edge, ordered after the fan-out. Corollaries: exactly one no-edge
+item → a single plain phase, no fan-out; every item carrying an edge → strictly linear, now
+justified by the table rather than by default.
+
 ### 2. Generate the conductor (pass prompts as data; do NOT hand-edit)
 
 Generate the conductor deterministically from `scripts/scaffold-workflow.cjs` — never copy/author or
 hand-edit it (that reintroduces drift). Pass the work-phase prompts as **DATA** (`--prompt` /
 `--prompts-file`); to change structure or fill an empty prompt, re-run the generator with `--force`.
 Size the workflow to the task's triage tier (bare / `--profile lite` / `--profile delivery`) — do
-NOT default to the full profile. When the work items are **independent** (N unrelated bugs — even
-ones touching the same files), add `--independent`: the items fan out **concurrently** in one
-`Work` phase via `parallel()` instead of N sequential phases — each worker in its OWN
-worktree/branch off the run branch, merged back by an integrate step — and the gates verify the
-combined diff once. Keep sequential `--phases` for genuinely dependent steps.
+NOT default to the full profile. The `--independent` decision is **read off step 1d's table, not
+re-judged here**: ≥2 items declared `depends on: none` → pass `--independent` with exactly those
+items as `--phases`, and they fan out **concurrently** in one `Work` phase via `parallel()` instead
+of N sequential phases — each worker in its OWN worktree/branch off the run branch, merged back by
+an integrate step — with the gates verifying the combined diff once. Items carrying a declared
+dependency edge stay sequential `--phases`, ordered after the fan-out.
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
@@ -178,7 +201,9 @@ node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,I
 
 → **Full flag reference: [`references/generator-flags.md`](references/generator-flags.md)** — read
 before generating. It documents every flag (phase/prompt/spec, the delivery flags, the gates, the
-`--cycle` TDD ordering, the profiles), `--model-mode` model selection, gate-agent swapping, and the
+`--cycle` TDD ordering, the profiles), `--model-mode` model selection (**`auto` per-phase tiering is
+the default — pass `--model-mode inherit` to make every worker inherit the session model instead**),
+gate-agent swapping, and the
 `implementation-notes/` → `docs/changes/` promotion policy.
 
 ### 3. Launch (fresh)

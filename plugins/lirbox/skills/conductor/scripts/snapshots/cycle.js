@@ -99,7 +99,7 @@ node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${
 node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
 
 Return whether the file was written and parses.`,
-    { label: `checkpoint:${phaseTitle}`, phase: phaseTitle,
+    { label: `checkpoint:${phaseTitle}`, phase: phaseTitle, model: 'haiku',
       schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
   )
 }
@@ -136,7 +136,7 @@ else
 fi
 [ -e "${WORKTREE}/node_modules" ] || [ ! -d "$ROOT/node_modules" ] || ln -s "$ROOT/node_modules" "${WORKTREE}/node_modules"
 test -d "${WORKTREE}" && echo OK`,
-    { label: 'setup:worktree', phase: 'Setup',
+    { label: 'setup:worktree', phase: 'Setup', model: 'haiku',
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
@@ -151,7 +151,7 @@ if (done.has('RED')) {
     `${inWorktree('red')}
 
 RED (test-first): from the goal${TICKET ? ' / ticket ' + TICKET : ''} and its acceptance criteria, write the tests BEFORE any implementation. Decide per behavior whether it needs a tryve E2E (tests/e2e/*.yaml) or a Jest unit test, and write them. Run them and CONFIRM THEY FAIL for the right reason — a test that already passes is not exercising the new behavior; fix it until it fails. Commit the failing tests.`,
-    { label: 'red', phase: 'RED', agentType: 'lirbox:lirbox-test-writer',
+    { label: 'red', phase: 'RED', agentType: 'lirbox:lirbox-test-writer', model: 'opus', effort: 'high',
       schema: { type: 'object', additionalProperties: false, required: ["red"], properties: {"red":{"type":"boolean"},"tests":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
   )
   if (!results.red || !results.red.red) throw new Error('RED failed: tests did not establish a failing baseline — ' + (results.red && results.red.summary || ''))
@@ -169,7 +169,8 @@ if (done.has('Implement')) {
 GREEN: implement until the RED tests pass; never weaken or delete tests to go green.
 
 Implement the change described in the run brief.`,
-    { label: 'implement', phase: 'Implement', schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
+    { label: 'implement', phase: 'Implement', model: 'sonnet',
+      schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
   )
   done.add('Implement')
   await checkpoint('Implement')
@@ -183,7 +184,8 @@ if (done.has('Verify')) {
     `${inWorktree('verify')}
 
 VERIFY (GREEN): run the full relevant test suite for the changes on ${BRANCH} vs ${BASE || 'the base branch'} (Jest unit + any tryve E2E from RED). EVERYTHING must pass. If any test fails, the implementation is incomplete — STOP and report which failed; do NOT weaken tests to pass.`,
-    { label: 'verify', phase: 'Verify', schema: { type: 'object', additionalProperties: false, required: ["green"], properties: {"green":{"type":"boolean"},"failing":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
+    { label: 'verify', phase: 'Verify', model: 'haiku',
+      schema: { type: 'object', additionalProperties: false, required: ["green"], properties: {"green":{"type":"boolean"},"failing":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
   )
   if (!results.verify || !results.verify.green) throw new Error('Verify failed: not green — ' + (results.verify && (results.verify.failing || []).join(', ')))
   done.add('Verify')
@@ -206,7 +208,7 @@ PATH-GAP: the ACs do NOT cover every code path. Steps:
 2. For EACH uncovered changed branch, do ONE: (a) add a unit/integration test that meaningfully exercises AND asserts it, or (b) if it is genuinely unreachable/defensive, record an explicit justification in implementation-notes/pathgap.html.
 3. Re-run coverage. There must be NO silent gaps — every uncovered changed branch is either tested or justified.
 Do NOT delete/alter source branches just to raise coverage. Commit new tests + notes.` + carry,
-      { label: `pathgap:r${round}`, phase: 'PathGap',
+      { label: `pathgap:r${round}`, phase: 'PathGap', model: 'opus', effort: 'high',
         schema: { type: 'object', additionalProperties: false, required: ["closed"], properties: {"closed":{"type":"boolean"},"uncovered":{"type":"number"},"tested":{"type":"number"},"justified":{"type":"number"},"summary":{"type":"string"}} } },
     )
     passed = last && last.closed
@@ -231,7 +233,7 @@ if (done.has('CodeGate')) {
 Review AND fix the changes on branch ${BRANCH} relative to ${BASE || 'the base branch'} (run git diff in ${WORKTREE}). Run the project build/lint — it MUST pass. Resolve EVERY Critical and High finding (bugs, security, rule violations, quality). Re-run the build after fixes and commit them.
 OUTPUT CONTRACT: return gatePassed=true ONLY if every Critical and High finding is fixed or skipped-with-explicit-reason AND the build/lint passes; report critical and high as the counts of findings of each severity left UNRESOLVED after your fixes (both 0 when gatePassed=true).
 EVIDENCE: report the exact build/lint command you ran as buildCmd and its numeric exit code as buildExit; if the project has no build/lint, run the closest verification command (e.g. the test suite) and report that instead. The gate rejects gatePassed=true unless buildExit is 0.` + dod + carry,
-      { label: `codegate:r${round}`, phase: 'CodeGate', agentType: 'lirbox:lirbox-code-reviewer',
+      { label: `codegate:r${round}`, phase: 'CodeGate', agentType: 'lirbox:lirbox-code-reviewer', model: 'opus', effort: 'high',
         schema: { type: 'object', additionalProperties: false, required: ["gatePassed","critical","high","buildCmd","buildExit"], properties: {"gatePassed":{"type":"boolean"},"critical":{"type":"number"},"high":{"type":"number"},"summary":{"type":"string"},"buildCmd":{"type":"string"},"buildExit":{"type":"number"}} } },
     )
     passed = last && last.gatePassed && last.buildExit === 0
@@ -250,7 +252,8 @@ if (done.has('ReVerify')) {
     `${inWorktree('reverify')}
 
 RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branch coverage for the changes on ${BRANCH} vs ${BASE || 'the base branch'}. Everything green before must STILL be green and coverage must not have regressed. If a refactor broke anything, STOP and report; do NOT weaken tests.`,
-    { label: 'reverify', phase: 'ReVerify', schema: { type: 'object', additionalProperties: false, required: ["green"], properties: {"green":{"type":"boolean"},"regressions":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
+    { label: 'reverify', phase: 'ReVerify', model: 'haiku',
+      schema: { type: 'object', additionalProperties: false, required: ["green"], properties: {"green":{"type":"boolean"},"regressions":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
   )
   if (!results.reVerify || !results.reVerify.green) throw new Error('ReVerify failed: regression after improve/simplify — ' + (results.reVerify && (results.reVerify.regressions || []).join(', ')))
   done.add('ReVerify')
