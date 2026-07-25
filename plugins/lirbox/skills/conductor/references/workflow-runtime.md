@@ -115,6 +115,9 @@ On (re)entry:
 Always prefer the args path unless a same-session `runId` is available and the script is
 byte-identical.
 
+**Base branch.** The Setup worker branches the worktree fresh from `origin/<default>` unless
+`args.base` / `args.branch` override it — so a resume lands on the same base it started from.
+
 ---
 
 ## 5. Opt-in note

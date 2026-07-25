@@ -16,153 +16,82 @@ $ARGUMENTS
 # Conductor
 
 <purpose>
-The Workflow tool gives deterministic, JS-authored, massively-parallel subagent orchestration — but
-its state is in-memory and resume is **same-session only**. This skill adds the missing half: a
-**durable JSON state file** written by a worker after every phase, and a **resume protocol** that
-restarts an interrupted run from disk across sessions — keeping the tool's determinism while adding
-durable + resumable + inspectable state, in portable JS.
+Workflow gives deterministic, JS-authored subagent orchestration — but in-memory state and
+**same-session-only** resume. This skill adds a **durable JSON state file** plus an args-based
+**resume protocol** that restarts a run from disk.
 </purpose>
 
 <when-to-use>
-Use only when ALL hold: multi-step and dispatches subagents; long/interruptible or may span
-sessions where losing progress is costly; and a durable, inspectable on-disk record is wanted. For a
-quick one-shot fan-out, call the Workflow tool directly — the checkpoint overhead only pays off when
-durability matters.
+Only when ALL hold: multi-step, dispatches subagents; long or interruptible, where losing progress
+is costly; a durable on-disk record is wanted. Otherwise call Workflow directly.
 </when-to-use>
 
-<arguments>
-
-`$ARGUMENTS` (top of this file) is a SINGLE free-text field — no separators, no flags. Resolve it:
-
-1. **empty or `list`** → **list mode**: run `list-workflows.cjs` (`--all` for completed), show the table, launch nothing.
-2. **matches `.workflows/state/<arg>.json`** → **resume** that workflow.
-3. **a tracker ticket** (Jira key `ISS-101`, or Jira/Linear URL) → **ticket-sourced run**: set `args.ticket`, derive `<name>` from the key (`ISS-101` → `iss-101`), first phase fetches the goal (see `references/delivery-phases.md` §A).
-4. **anything else** → a **new goal**: derive a kebab `<name>` slug, tell the user, start fresh.
-
-`<name>` drives everything — state `.workflows/state/<name>.json`, branch `wf/<name>`, worktree
-`.worktrees/<name>`, resume key; the goal (and `ticket`) is saved in `state.json`, so resume needs
-only the name. **Delivery is opt-in** — this harness is generic (no PRs/tickets by default); add the
-PR / ticket-update phases from `references/delivery-phases.md` for a delivery, and never auto-merge.
-On resume the conductor reads `args = { phasesDone, results }`; the worktree branches fresh from
-`origin/<default>` unless `args.base`/`args.branch` override — full protocol in
-[`references/workflow-runtime.md`](references/workflow-runtime.md) §4.
-
-Examples:
-```
-Replace console.log with context.log across src/      → starts; slug e.g. migrate-logging
-migrate-logging                                       → resumes that run
-list                                                  → shows in-progress workflows
-```
-</arguments>
-
 <core-model>
-A Workflow has two layers — confusing them is the #1 source of bugs:
-- **Conductor** = the workflow `.js` script. Restricted: pure JS, **no filesystem**, no git, no
-  `Date.now()` / `Math.random()`; it only computes and dispatches. So durable state is written by a
-  **checkpoint worker**, never by the conductor.
-- **Workers** = the subagents it spawns. Full tools (`Read`/`Write`/`Edit`/`Bash`); they do all
-  side-effects — creating the worktree, editing code, writing `state.json`.
+Two layers — confusing them is the #1 source of bugs:
+- **Conductor** = the workflow `.js`: pure JS, **no filesystem**, no git, no `Date.now()` /
+  `Math.random()` — it only computes and dispatches, so durable state is written by a **checkpoint
+  worker**, never the conductor.
+- **Workers** = the subagents it spawns: full tools, every side-effect.
 
-**Isolation.** All edits happen in ONE shared worktree `.worktrees/<name>` on branch `wf/<name>`
-(the main tree is untouched until the human merges); a **Setup** worker creates/reuses it, and
-`state.json` stays in the **main repo** so it survives worktree removal. Do NOT pass per-agent
-`isolation:'worktree'` to work phases. Two-layer rules, state schema, and shared-worktree details:
-[`references/workflow-runtime.md`](references/workflow-runtime.md) — read before authoring.
+**Isolation.** ONE shared worktree `.worktrees/<name>` on branch `wf/<name>` holds every edit (a
+**Setup** worker creates/reuses it); `state.json` stays in the **main repo**. Do NOT pass per-agent
+`isolation:'worktree'` to work phases. Details →
+[`workflow-runtime.md`](references/workflow-runtime.md) (read before authoring).
 </core-model>
 
 <procedure>
 
-### 1. Resolve `$ARGUMENTS` (list / resume / new)
+### 1. Resolve `$ARGUMENTS`
 
-Apply the Arguments resolution above. This skill runs in the main session, so read state directly
-(`Read .workflows/state/<name>.json`):
-- **empty or `list`** → run `node <skill-dir>/scripts/list-workflows.cjs` (`--all` for completed), show the table, stop.
-- **`running`/`failed`** → **resume**: goal comes from the file; go straight to **step 4**. Don't regenerate the script if unchanged — only re-run the generator (`--force`) to change phase structure.
-- **no file (a goal)** → **fresh run**: derive the kebab `<name>` slug, tell the user, run **triage (step 1b)**; if not declined, step 2 → step 3.
-- **`complete`** → tell the user it's done (offer the report via `workflow-report.cjs <name>`); start fresh only if they meant a new run.
+`$ARGUMENTS` (top of this file) is ONE free-text field — no separators, no flags. This skill runs in
+the main session, so read state directly (`Read .workflows/state/<name>.json`):
 
-### 1b. Triage a new run — size it or decline (new goals only)
+| `$ARGUMENTS` | do |
+|---|---|
+| empty or `list` | `node <skill-dir>/scripts/list-workflows.cjs`, show the table, stop |
+| a state file, `running`/`failed` | **resume** → step 4; regenerate (`--force`) only to change phase structure |
+| a state file, `complete` | say so (offer `workflow-report.cjs <name>`); fresh run only if they meant one |
+| a tracker ticket (Jira key, Jira/Linear URL) | ticket run: set `args.ticket`, `<name>` from the key, phase 1 fetches the goal ([`delivery-phases.md`](references/delivery-phases.md) §A) → 1b |
+| anything else — a goal | fresh run: kebab `<name>`, tell the user → 1b → 1c → 1d → 2 → 3 |
 
-Before generating, classify the goal and pick ONE. Skip this for `list` and for `resume` (a
-resume's profile is already fixed). Bias **down** — do not reach for a bigger profile than the
-work earns:
+`<name>` keys the state file, branch and worktree; goal and `ticket` live in `state.json`, so resume
+needs only the name plus `args = { phasesDone, results }`
+([`workflow-runtime.md`](references/workflow-runtime.md) §4). **Delivery is opt-in** — add PR/ticket
+phases from [`delivery-phases.md`](references/delivery-phases.md), never auto-merge.
 
-- **decline** — trivial / one-shot / single-file; finishes in one pass and won't span sessions.
-  Conductor is overkill: say so, do it inline or call the Workflow tool directly, and **STOP**.
-  This applies **even if conductor was invoked explicitly** (e.g. `/lirbox:conductor <goal>` or
-  by name) — explicit invocation selects the skill, it does not license skipping triage or
-  jumping straight to scaffold/launch. Regardless of how directly conductor was called, when
-  triage lands on decline you must still surface the cost/overkill caveat and offer to do the
-  work inline **before** generating or launching anything.
-- **bare** — multi-step but low-risk, no PR/ticket/gates → generator with just `--phases` (or
-  the default single `Work`).
-- **lite** — routine delivery, small/low-risk PR → `--profile lite`.
-- **delivery** — substantial or risky: broad surface, migration, behavioral change, must not
-  regress → `--profile delivery`.
+### 1b. Triage a new run — size or decline
 
-Signals that push **up** a tier: spans sessions · losing progress is costly · many files
-touched · behavioral/endpoint change · needs review/tests/docs/PR/ticket. With none present,
-pick the lowest tier. When the signals are genuinely ambiguous, ask the user **one**
-`AskUserQuestion` (decline / bare / lite / delivery) rather than guessing big.
+Classify the goal, pick ONE tier, bias **down** (skip for `list`/`resume`):
 
-### 1c. Acquire the DoD — the meter for "was the goal met" (new lite/delivery runs)
+| tier | when | generate with |
+|------|------|---------------|
+| **decline** | trivial / single-file, one pass | nothing — overkill |
+| **bare** | multi-step, low-risk, no gates | `--phases` only |
+| **lite** | routine delivery, small PR | `--profile lite` |
+| **delivery** | broad, risky, must not regress | `--profile delivery` |
 
-Every lite/delivery run carries a **definition of done**: criteria in
-`{ "criteria": [{ "id", "text", "tier": "checkable"|"judged", "check"? }] }` form — `checkable`
-= a frozen command (exit 0 = met, run against the worktree), `judged` = a verdict that must cite
-evidence. Guidance 3–7 criteria, **no hard cap** — never drop ticket-supplied ACs to fit; above
-~10, propose splitting into independently-shippable slices in the SAME confirmation question
-(run 2 starts only after run 1's PR merges — never stack branches; record the deferred slice's
-goal + ACs in run 1's state so they survive scrollback). Source precedence:
+**Decline is a hard STOP**, even when conductor was invoked explicitly (`/lirbox:conductor <goal>`
+or by name): explicit invocation selects the skill, it does not license skipping triage. Surface the
+cost/overkill caveat and offer to do the work inline **before** any scaffold or launch.
 
-1. **Ticket / plan ACs** — fetch them now (main session) and refine into checkable form.
-2. **plan-check report** — if the goal references one, read its
-   `<script type="application/json" id="dod">` block as the seed.
-3. **Bare goal** — derive the criteria yourself.
+No up-signal → lowest tier; genuinely ambiguous → ONE `AskUserQuestion`. Up-signal list →
+[`run-planning.md`](references/run-planning.md) §1.
 
-**Frontend/mobile goals** — when the goal touches UI (web or native mobile), additionally probe
-the machine NOW (main session): a Playwright config (or clean installability), `maestro`/`appium`
-binaries, Xcode simulators (`xcrun simctl`) / `adb`, and browser-MCP reachability. From the probe,
-propose a `frontend` block — per-target engine chain + viewport matrix, e.g.
-`{ "web": ["playwright", "browser-mcp", "os-script"], "mobile": ["maestro"], "viewports":
-["desktop-1440", "iphone-15", "pixel-8"] }` — and fold it into the SAME one-shot DoD
-`AskUserQuestion` below (one question total, not two). On confirm it is frozen into
-`.workflows/<name>.dod.json` alongside the criteria; pass `--frontend web|mobile|both` in step 2
-so the run gets a **FrontendGate**. The chain travels as DATA in the DoD file — the generator
-splices it and never probes the machine.
+### 1c. Acquire the DoD (new lite/delivery runs)
 
-**Content goals** — when the goal is content-shaped (touches `docs/`, `*.md`, or marketing
-copy), additionally probe the repo NOW (main session) for existing prose tooling — `.vale.ini`,
-`cspell.json`, `.markdownlint*`, or a docs-lint npm script — and propose a **checkable
-criterion** in the SAME one-shot DoD `AskUserQuestion`. This is a plain entry appended to
-`criteria[]`, **not** a `dod.json` block: DoDGate reads `criteria[]` and runs each `check` inside
-the worktree, and there is no content phase to consume a block. Repo has its own tooling → propose
-that command (e.g. `check: "npx vale docs/"`). Repo has none → propose the built-in floor
-`prose-lint.mjs` (a zero-dep structural linter: heading skips, dead local links, unbalanced
-fences, placeholder markers, malformed frontmatter). Because DoDGate runs the `check` inside the
-target **worktree** but `prose-lint.mjs` ships in the plugin dir, **copy it into the worktree at
-DoD-acquisition** (e.g. `.workflows/prose-lint.mjs`) and reference that worktree-local path — this
-is resume-proof (survives a mid-run plugin update; no absolute plugin-cache path that can move).
-The frozen criterion:
+Every lite/delivery run carries a **definition of done**: 3–7 criteria (**no hard cap** — never drop
+ticket-supplied ACs), each `checkable` (a frozen command, exit 0 = met) or `judged` (a verdict citing
+evidence); above ~10, propose a **split** into independently-shippable slices. Precedence: ticket /
+plan ACs → a plan-check report's `<script type="application/json" id="dod">` block → your own; UI
+goals also fold in a probed `frontend` block (`--frontend` → **FrontendGate**), content goals a
+prose-lint criterion. Confirm ONCE (`AskUserQuestion`: accept / edit), then freeze
+`.workflows/<name>.dod.json` and pass `--dod-file` in step 2 — bare may skip it, lite/delivery
+require it (`--no-dod` opts out). **DoDGate** verifies every criterion at run end (fix-loop ≤3, then
+hard-fail). Probes, formats, precedence → [`run-planning.md`](references/run-planning.md) §2.
 
-```json
-{ "id": "prose-lint", "tier": "checkable",
-  "text": "docs prose passes the structural lint (headings, local links, fences, no placeholders)",
-  "check": "node .workflows/prose-lint.mjs docs/" }
-```
+### 1d. Decompose — work items and dependency edges (REQUIRED)
 
-Whatever the source, confirm ONCE with the human (one `AskUserQuestion`: accept / edit), then
-freeze: write the JSON to `.workflows/<name>.dod.json` and pass `--dod-file` in step 2. bare-tier
-runs may skip the DoD entirely; lite/delivery require it (`--no-dod` is the explicit opt-out).
-At the end of the run the **DoDGate** verifies every criterion (fix-loop ≤3, then hard-fail), the
-PR body and run report carry the scorecard, and a criterion already met at baseline is flagged
-as non-discriminating.
-
-### 1d. Decompose — work items and their dependency edges (REQUIRED, every new run)
-
-Do this **before** generating; step 2 reads the fan-out decision off this table instead of
-re-judging it. Enumerate the work items and declare each one's edges explicitly — item titles here
-become the `--phases` entries and the `--prompts-file` keys:
+Do this **before** generating; step 2 reads the fan-out decision off the table:
 
 | id | work item | depends on |
 |----|-----------|------------|
@@ -170,42 +99,27 @@ become the `--phases` entries and the `--prompts-file` keys:
 | w2 | migrate `/orders` handler | none |
 | w3 | delete the legacy adapter | w1, w2 |
 
-`depends on` is a comma-list of item ids or the literal `none` — never blank, never prose. An edge
-means the item needs another item's **output** to exist first (its decision, API, or code). Touching
-the same file is **NOT** an edge: per-item worktrees + the integrate step handle that.
+`depends on` is a comma-list of ids or the literal `none` — never blank, never prose; an edge means
+needing another item's **output** first (the same file is not an edge).
 
-**Hard rule:** every item whose `depends on` is `none` MUST be emitted in ONE `--independent`
-fan-out (a single `Work` phase, one worker per item). Sequential `--phases` is reserved for items
-carrying a declared dependency edge, ordered after the fan-out. Corollaries: exactly one no-edge
-item → a single plain phase, no fan-out; every item carrying an edge → strictly linear, now
-justified by the table rather than by default.
+**Hard rule:** every item whose `depends on` is `none` MUST be emitted in ONE `--independent` fan-out
+(one `Work` phase, one worker per item); sequential `--phases` is reserved for declared-edge items,
+ordered after the fan-out. Coarse cut only — each phase is decomposed again at runtime (step 2).
+Corollaries, worked example → [`run-planning.md`](references/run-planning.md) §3.
 
-This table is the **coarse** cut — the items you can name before reading the repo. Each resulting
-work phase is decomposed AGAIN at runtime by its own planner worker (see step 2), so a phase you
-could only write as one line here still fans out inside itself once a worker has read the code.
-Table entries a driver can already see as independent belong in the `--independent` fan-out anyway:
-declaring them costs nothing and skips a planner round-trip.
+### 2. Generate the conductor (prompts as data)
 
-### 2. Generate the conductor (pass prompts as data; do NOT hand-edit)
+Always generate from `scripts/scaffold-workflow.cjs` — never author or hand-edit the `.js` (drift);
+re-run with `--force` to change structure. Prompts travel as **DATA** (`--prompt` /
+`--prompts-file`). Size to the triage tier (`--profile lite` / `--profile delivery`) — never default
+to the full profile.
 
-Generate the conductor deterministically from `scripts/scaffold-workflow.cjs` — never copy/author or
-hand-edit it (that reintroduces drift). Pass the work-phase prompts as **DATA** (`--prompt` /
-`--prompts-file`); to change structure or fill an empty prompt, re-run the generator with `--force`.
-Size the workflow to the task's triage tier (bare / `--profile lite` / `--profile delivery`) — do
-NOT default to the full profile. The `--independent` decision is **read off step 1d's table, not
-re-judged here**: ≥2 items declared `depends on: none` → pass `--independent` with exactly those
-items as `--phases`, and they fan out **concurrently** in one `Work` phase via `parallel()` instead
-of N sequential phases — each worker in its OWN worktree/branch off the run branch, merged back by
-an integrate step — with the gates verifying the combined diff once. Items carrying a declared
-dependency edge stay sequential `--phases`, ordered after the fan-out.
-
-**Work inside a phase is no longer serial.** By default each work phase first runs a **planner**
-worker (`plan:<Phase>`) that reads the repo and returns its items plus each item's `dependsOn`; the
-conductor then dispatches them **by dependency level** — every ready item in ONE `parallel()` batch,
-each worker in its own worktree/branch, each level integrated back into the run branch before the
-next. Phase ORDER is untouched. The plan is checkpointed before the first item runs, so a resume
-reuses that decomposition instead of re-planning a different one, and a one-item plan is just
-today's single worker. Pass `--no-plan-fanout` to turn a phase back into one serial worker.
+`--independent` is **read off step 1d's table, not re-judged here**: ≥2 items declared `depends on:
+none` → pass `--independent` with exactly those items as `--phases` (one `Work` phase, concurrent
+per-worker worktrees, integrate step, gates seeing the combined diff once); declared-edge items stay
+sequential after it. Work inside a phase is **not serial either** — a **planner** worker decomposes
+it at runtime and the conductor dispatches by dependency level (`--no-plan-fanout` restores one
+serial worker). Both fan-outs → [§3a–§3b](references/run-planning.md).
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
@@ -214,36 +128,28 @@ node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,I
 ```
 
 → **Full flag reference: [`references/generator-flags.md`](references/generator-flags.md)** — read
-before generating. It documents every flag (phase/prompt/spec, the delivery flags, the gates, the
-`--cycle` TDD ordering, the profiles), `--model-mode` model selection (**`auto` per-phase tiering is
-the default — pass `--model-mode inherit` to make every worker inherit the session model instead**),
-gate-agent swapping, and the
-`implementation-notes/` → `docs/changes/` promotion policy.
+before generating: every phase/prompt/delivery/gate flag, `--cycle` ordering, the profiles,
+`--model-mode` (**`auto` per-phase tiering is the default; `inherit` gives workers the session
+model**), agent swapping, `implementation-notes/` → `docs/changes/` promotion.
 
 ### 3. Launch (fresh)
 
-First stamp `startedAt` at launch (so duration is true wall-clock; checkpoints preserve it):
+Stamp `startedAt` first (true wall-clock duration), then launch:
 
 ```
 node -e "const fs=require('fs');fs.mkdirSync('.workflows/state',{recursive:true});const f='.workflows/state/<name>.json';if(!fs.existsSync(f))fs.writeFileSync(f,JSON.stringify({workflow:'<name>',status:'running',startedAt:new Date().toISOString()},null,2))"
 ```
 
-Then launch:
-
 ```
 Workflow({ scriptPath: ".workflows/<name>.js" })
 ```
 
-**Headless / non-interactive sessions (`claude -p`): launch the Workflow in the FOREGROUND —
-`run_in_background: false` — and do NOT end your turn while the workflow is still running.**
-The foreground `Workflow(...)` tool call itself BLOCKS until the workflow completes — the
-blocking call IS the wait. Never launch it backgrounded and then narrate "holding my turn open /
-waiting for completion": saying you are waiting does not make it so, and ending the turn exits
-the `-p` process and orphans the run (the background task is killed; the `wf/` branch is left
-with zero commits). After the `Workflow(...)` call returns, VERIFY the run actually finished
-before finalizing: re-read `.workflows/state/<name>.json` and confirm its `status` is no longer
-`running` (i.e. the workflow is complete/finished). Only then finalize (step 5). This applies
-equally to resume launches (step 4).
+**Headless / non-interactive (`claude -p`): launch in the FOREGROUND — `run_in_background: false` —
+and do NOT end your turn while the workflow runs.** The foreground call itself BLOCKS until the
+workflow completes: the blocking call IS the wait, so never background it and narrate "waiting" —
+saying so does not make it so, and ending the turn kills the run (`wf/` branch, zero commits). After
+it returns, VERIFY: re-read `.workflows/state/<name>.json` and confirm its `status` is no longer
+`running`. Only then finalize (step 5); same for resume (step 4).
 
 Each phase merges `state.json` via its checkpoint worker (preserving `startedAt`).
 
@@ -256,53 +162,32 @@ Workflow({ scriptPath: ".workflows/<name>.js",
            args: { phasesDone: <from state.json>, results: <from state.json> } })
 ```
 
-Optimization: same-session, unchanged script, known prior `runId` → `Workflow({ scriptPath,
-resumeFromRunId })` (replays cached results); otherwise always use the `args` path (works across
-sessions and after edits to later phases).
+Same session + unchanged script + known prior `runId` → `Workflow({ scriptPath, resumeFromRunId })`
+replays cached results; otherwise always the `args` path.
 
 ### 5. Finalize
 
-When the Workflow returns, stamp `status` + `finishedAt` (the conductor cannot — main session does
-it). **If the Workflow threw** (a hard-fail gate), set `status: "failed"` not `complete` — the last
-checkpoint's state is preserved, so a later `resume` re-runs only the failed gate onward:
-
-```
-# success
-node -e "const f='.workflows/state/<name>.json';const s=JSON.parse(require('fs').readFileSync(f,'utf8'));s.status='complete';s.finishedAt=new Date().toISOString();require('fs').writeFileSync(f,JSON.stringify(s,null,2))"
-# on Workflow error → status:failed (then report the throwing gate's message to the user)
-node -e "const f='.workflows/state/<name>.json';const s=JSON.parse(require('fs').readFileSync(f,'utf8'));s.status='failed';s.finishedAt=new Date().toISOString();require('fs').writeFileSync(f,JSON.stringify(s,null,2))"
-```
-
-Then generate the run report (duration/tokens/cost):
-
-```
-node <skill-dir>/scripts/workflow-report.cjs <name>
-```
-
-Report to the user: the report summary (`.workflows/reports/<name>.md`), the final `results`, and
-the **branch** (`wf/<name>`) + **worktree** (`.worktrees/<name>`) holding the committed work, to
-review and merge. **Do NOT auto-merge or auto-remove the worktree** — the human's call
-(non-destructive default; clean up after merge with `git worktree remove`). The state file + report
-are the audit trail.
+When the Workflow returns, stamp `status` + `finishedAt` (the conductor cannot) — `failed`, not
+`complete`, if it threw, so a later `resume` re-runs only the failed gate. Then run
+`workflow-report.cjs <name>` and hand the user the report, the `results`, and the run's **branch +
+worktree**. **Never auto-merge** or auto-remove the worktree — that is the human's call. Commands →
+[`run-planning.md`](references/run-planning.md) §4.
 </procedure>
 
 <gotchas>
-- Every phase needs a skip-if-done guard, or resume re-runs completed work; phases are
-  **at-least-once** and must be **idempotent**.
+- Phases are **at-least-once**: each needs a skip-if-done guard and must be **idempotent**.
 - `.filter(Boolean)` after `parallel()` — dead agents return `null`.
-- Durable ≠ **unattended** — the Workflow tool needs a live session; it can't run headless/cron.
+- Durable ≠ **unattended** — Workflow needs a live session; no headless/cron.
 
-Full gotcha list (the `phasesDone` **contiguous**-prefix guard, checkpoint/isolation traps,
-unattended-runner note) → [`references/workflow-runtime.md`](references/workflow-runtime.md) §6–§7.
+Full list → [`references/workflow-runtime.md`](references/workflow-runtime.md) §6–§7.
 </gotchas>
 
 <resources>
 
-- `scripts/scaffold-workflow.cjs` — **generates** the conductor from params (SoT for boilerplate). Step 2.
-- `references/generator-flags.md` — full generator flag reference (step 2): every flag, `--model-mode`, agent-swapping, notes policy.
-- `references/delivery-phases.md` — the optional `--ticket` / `--pr` phases and how to customize them (Jira/Linear/PR).
-- `references/workflow-runtime.md` — conductor constraints, subagent capabilities, state schema, resume protocol, gotchas. Load before authoring.
-- `scripts/list-workflows.cjs` — list workflows from `.workflows/state/` (`--all` includes completed). Step 1.
-- `scripts/workflow-report.cjs` — duration/tokens/cost for one run → `.workflows/reports/<name>.md` (step 5; rates via `RATES_JSON`).
-- `scripts/test-scaffold.cjs` — regression net: `node --check`s a flag/profile matrix, asserts emitted `phase()` order. Run after editing the generator.
+- `scripts/` — `scaffold-workflow.cjs` (step 2) · `list-workflows.cjs` (step 1; `--all` includes
+  completed) · `workflow-report.cjs` (step 5; rates via `RATES_JSON`) · `test-scaffold.cjs`
+  (generator regression net).
+- `references/` — `run-planning.md` (steps 1b–1d, 5) · `generator-flags.md` (step 2) ·
+  `delivery-phases.md` (`--ticket` / `--pr` / writeup phases) · `workflow-runtime.md` (layers,
+  state schema, resume, gotchas).
 </resources>
