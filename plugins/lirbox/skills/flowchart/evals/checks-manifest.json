@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Expectation manifest for this skill's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern / in-flight item). MUST exit 0 or 1;",
+    "                 >=2 is harness rot (it failed to RUN). A red check that turns GREEN does NOT",
+    "                 fail the gate -- it prints a promote-me notice; move it to green when its fix lands.",
+    "",
+    "A check file missing from this manifest FAILS the gate: an unlisted check is an unguarded check.",
+    "LOCKED (evals/**): improvement loops may never edit this file -- otherwise a loop could flip a",
+    "regressing check to \"red\" and escape its own fence."
+  ],
+  "checks": {
+    "node-nonascii": {
+      "expect": "green"
+    },
+    "pan-zoom-fullscreen": {
+      "expect": "green"
+    }
+  }
+}
