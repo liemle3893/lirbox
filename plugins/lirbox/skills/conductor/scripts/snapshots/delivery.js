@@ -92,11 +92,11 @@ function inWorktree(slot, opts) {
     `no-decision work, SKIP the file — do not create empty or boilerplate notes.`
 }
 
-// Per-item variant for the --independent fan-out: each parallel worker OWNS one worktree/branch
-// (branched off the run branch), so siblings never share a working tree or index — N independent
-// items may touch the SAME file without colliding on it or on .git/index.lock. Same judgment-gated
-// notes contract as inWorktree; notes land in the ITEM worktree and ride its branch through the
-// integrate merge.
+// Per-item variant for the planner fan-out: each worker in a dependency level OWNS one
+// worktree/branch (branched off the level's integrated base), so siblings never share a working
+// tree or index — items dispatched in the SAME parallel() batch may touch the SAME file without
+// colliding on it or on .git/index.lock. Same judgment-gated notes contract as inWorktree; notes
+// land in the ITEM worktree and ride its branch through the level's integrate merge.
 function inItemWorktree(slot, wt, br) {
   return `Work ONLY inside YOUR OWN git worktree at ${wt} (run \`cd ${wt}\` first; it is on ` +
     `branch ${br}, branched off ${BRANCH}). Do NOT edit any file outside ${wt} — sibling workers ` +
