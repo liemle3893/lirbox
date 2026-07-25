@@ -108,6 +108,30 @@ git config user.email "33980597+liemle3893@users.noreply.github.com"
 `.githooks/pre-commit` blocks any commit whose author is the work account
 (`liemlhd_msn` / crownx / masangroup) or isn't the expected personal identity.
 
+## `main` is pull-request-only
+
+Nothing lands on `main` by direct push — not even from an admin. The GitHub
+ruleset **"main: pull requests only"** requires a PR, requires both `evals`
+jobs (`floors + frozen checks`, `generator regression nets`) to be green, and
+forbids force-push and deletion of `main`. Its bypass list is **empty**, so
+there is no admin escape hatch; loosening it is a deliberate, visible edit to
+the ruleset.
+
+Reviews are *not* required (0 approvals) — a sole maintainer cannot approve
+their own PR, so CI is the gate, not a rubber-stamp.
+
+```bash
+git switch -c <type>/<slug>     # e.g. chore/protect-main-pr-only
+git push -u origin HEAD
+gh pr create --fill
+```
+
+`.githooks/pre-push` refuses the same push locally, before the network call.
+`--no-verify` skips the hook but not the ruleset — the server still rejects it.
+
+Run branches from the loop skills (`improve/*`, `opt/*`, `wf/*`, `evals/*`) are
+unrestricted; they already finish by opening a PR.
+
 ## Testing
 
 Always validate and smoke-test before pushing:
