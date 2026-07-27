@@ -3618,7 +3618,10 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
   const skill = fs.readFileSync(skillPath, 'utf8');
 
   test('frontmatter has name and a trigger description', () => {
-    assert.ok(/^---\n[\s\S]*?\nname: loom\n/.test(skill));
+    // `^name: loom$` with /m — NOT `\nname:`, which requires a blank line after the
+    // opening `---` and so fails against correct frontmatter. Verified both ways.
+    assert.ok(/^---\n/.test(skill), 'file must open with frontmatter');
+    assert.ok(/^name: loom$/m.test(skill));
     assert.ok(/\ndescription: /.test(skill));
     const desc = /\ndescription: ["']?([^\n]+)/.exec(skill)[1];
     assert.ok(desc.length > 120, 'the description is the TRIGGER — make it specific');
@@ -3752,8 +3755,8 @@ Run Setup + the bootstrap planner first, so the human reviews a graph grounded i
 node <skill-dir>/scripts/graph-server.mjs --name <name> --root . --port 0
 ```
 
-Read `LOOM_SERVER_PORT=<port>` from stdout, record it in `state.json`, and give the user
-`http://127.0.0.1:<port>`. Set `status: "awaiting-approval"`.
+Read `LOOM_SERVER_PORT=<port>` from stdout, record it in `.loom/state/<name>.json`, and give
+the user `http://127.0.0.1:<port>`. Set `status: "awaiting-approval"`.
 
 Then poll `.loom/<name>.action.json`:
 - `replan` → run a replan worker over `(graph, comments)`, write the new graph, keep polling
@@ -3781,13 +3784,18 @@ Workflow({ scriptPath: ".loom/<name>.js", args: {
   graph, visits, results, carry, trace, cursor } })
 ```
 
-taken from `state.json`. **`args.graph` MUST be the persisted patched graph, not the seed.**
-Resume restores *structure*, not just progress — replaying the approved topology silently
-discards every runtime patch, and nothing will tell you it happened.
+taken from `.loom/state/<name>.json` — that exact path, never `.loom/<name>.graph.json`,
+which is the *approved* graph and is stale the moment the first patch lands.
+
+**`args.graph` MUST be the persisted patched graph, not the seed.** Resume restores
+*structure*, not just progress — replaying the approved topology silently discards every
+runtime patch, and nothing will tell you it happened. `loom-report.cjs` prints this same
+warning at the top of its RESUME block; the two must not drift.
 
 ### 6. Finalize
 
-Stamp `status` + `finishedAt` (the conductor cannot), `failed` if it threw. Kill the editor
+Stamp `status` + `finishedAt` in `.loom/state/<name>.json` (the conductor cannot — it has no
+`fs` and no clock), `failed` if it threw. Kill the editor
 server. Run `loom-report.cjs <name>` and hand over the report, the branch and the worktree.
 **Never auto-merge and never auto-remove the worktree** — that is the human's call.
 </procedure>
@@ -3817,7 +3825,13 @@ Create `plugins/lirbox/skills/loom/references/graph-spec.md` documenting every f
 
 Create `plugins/lirbox/skills/loom/references/invariants.md` containing the dominance argument in prose: what dominance means, why deletion-reachability computes it, why the structural check from `start` is insufficient alone once back-edges exist, the worked `start → DoDGate → Implement → terminal` counter-example, and the accept/reject table from Task 3's fixtures.
 
+You do not have Task 3's brief. Read the fixtures out of the shipped code instead: the graph fixtures and their expected verdicts are in `scripts/test-loom.cjs` (the `validateGraph` sections), and the rules themselves are in `validateGraph` / `dominates` in `scripts/graph-core.mjs`. Build the table from what the code actually does — if the code and this description disagree, the code wins and you must say so in your report rather than documenting the description.
+
 - [ ] **Step 5: Wire the marketplace and gitignore**
+
+**Do NOT touch `.claude-plugin/marketplace.json`.** Skills are auto-discovered from
+`plugins/lirbox/skills/` and are not listed there (see CLAUDE.md). Despite this step's name,
+the only wiring loom needs is the `.gitignore` entry and the README catalog row.
 
 Append to `.gitignore`, next to the other runtime-artifact entries:
 
@@ -3836,6 +3850,11 @@ claude plugin validate .
 ```
 
 Expected: `all green`, and the plugin validates.
+
+If `claude plugin validate` is unavailable in your environment (CLI missing, auth prompt,
+non-zero for an unrelated reason), report that plainly as "not run, because X". Do not
+report the step as passed, and do not work around it — a validation nobody ran is worse
+than a validation that is openly missing.
 
 - [ ] **Step 7: Confirm the other skills are untouched**
 
