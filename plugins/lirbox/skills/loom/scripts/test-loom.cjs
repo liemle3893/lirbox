@@ -130,6 +130,87 @@ async function main() {
     assert.strictEqual(core.dominates(G, 'PR', 'PR', 'Setup'), true);
   });
 
+  section('matches');
+
+  test('"always" matches any result', () => {
+    assert.strictEqual(core.matches('always', { passed: false }), true);
+    assert.strictEqual(core.matches('always', null), true);
+  });
+
+  test('a missing predicate is treated as always', () => {
+    assert.strictEqual(core.matches(undefined, {}), true);
+  });
+
+  test('eq compares strictly', () => {
+    assert.strictEqual(core.matches({ field: 'passed', eq: true }, { passed: true }), true);
+    assert.strictEqual(core.matches({ field: 'passed', eq: true }, { passed: 1 }), false);
+  });
+
+  test('neq, gt and exists behave', () => {
+    assert.strictEqual(core.matches({ field: 'n', neq: 0 }, { n: 2 }), true);
+    assert.strictEqual(core.matches({ field: 'n', gt: 1 }, { n: 2 }), true);
+    assert.strictEqual(core.matches({ field: 'n', gt: 1 }, { n: '9' }), false);
+    assert.strictEqual(core.matches({ field: 'x', exists: false }, {}), true);
+  });
+
+  test('a null result does not throw', () => {
+    assert.strictEqual(core.matches({ field: 'passed', eq: true }, null), false);
+  });
+
+  test('an unknown operator fails closed', () => {
+    assert.strictEqual(core.matches({ field: 'passed', wat: 1 }, { passed: true }), false);
+  });
+
+  section('pickEdge');
+
+  test('a failing gate takes the back-edge', () => {
+    assert.strictEqual(core.pickEdge(G, 'DoDGate', { passed: false }).to, 'Implement');
+  });
+
+  test('a passing gate advances to the terminal', () => {
+    assert.strictEqual(core.pickEdge(G, 'DoDGate', { passed: true }).to, 'PR');
+  });
+
+  test('the FIRST matching edge wins', () => {
+    const g = { ...G, edges: [
+      { from: 'A', to: 'first', when: 'always' },
+      { from: 'A', to: 'second', when: 'always' },
+    ] };
+    assert.strictEqual(core.pickEdge(g, 'A', {}).to, 'first');
+  });
+
+  test('no matching edge returns null', () => {
+    assert.strictEqual(core.pickEdge(G, 'DoDGate', { passed: 'maybe' }), null);
+  });
+
+  section('capFor / carryFor');
+
+  test('per-node cap wins over the wildcard', () => {
+    const g = { ...G, invariants: { visitCaps: { '*': 3, Implement: 5 } } };
+    assert.strictEqual(core.capFor(g, 'Implement'), 5);
+    assert.strictEqual(core.capFor(g, 'Review'), 3);
+  });
+
+  test('cap defaults to 3 with no invariants at all', () => {
+    assert.strictEqual(core.capFor({ nodes: [], edges: [] }, 'Anything'), 3);
+  });
+
+  test('a zero cap is honoured, not treated as absent', () => {
+    const g = { ...G, invariants: { visitCaps: { '*': 3, Review: 0 } } };
+    assert.strictEqual(core.capFor(g, 'Review'), 0);
+  });
+
+  test('carryFor lifts only the declared fields', () => {
+    const e = { from: 'DoDGate', to: 'Implement', carry: ['unmetCriteria'] };
+    assert.deepStrictEqual(
+      core.carryFor(e, { unmetCriteria: ['c3'], noise: 'drop me' }),
+      { unmetCriteria: ['c3'] });
+  });
+
+  test('carryFor with no carry list yields an empty object', () => {
+    assert.deepStrictEqual(core.carryFor({ from: 'A', to: 'B' }, { x: 1 }), {});
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }

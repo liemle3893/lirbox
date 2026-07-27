@@ -48,4 +48,45 @@ function dominates(graph, gate, target, from) {
   return !reachable(graph, from, [gate]).has(target);
 }
 
-export { outEdges, reachable, dominates };
+// Declarative edge predicates. NEVER code strings — these travel through JSON,
+// are edited in the browser, and are evaluated inside the restricted conductor
+// layer, so `eval`/`new Function` are out of the question.
+// Unknown shapes fail CLOSED: an unrecognised operator must not silently open a path.
+function matches(pred, result) {
+  if (pred === 'always' || pred === undefined || pred === null) return true;
+  if (typeof pred !== 'object') return false;
+  const v = result ? result[pred.field] : undefined;
+  if ('eq' in pred) return v === pred.eq;
+  if ('neq' in pred) return v !== pred.neq;
+  if ('gt' in pred) return typeof v === 'number' && v > pred.gt;
+  if ('lt' in pred) return typeof v === 'number' && v < pred.lt;
+  if ('exists' in pred) return (v !== undefined && v !== null) === pred.exists;
+  return false;
+}
+
+// First matching out-edge wins; declaration order IS the priority order.
+function pickEdge(graph, from, result) {
+  for (const e of outEdges(graph, from)) if (matches(e.when, result)) return e;
+  return null;
+}
+
+// Visit caps live ONLY in invariants.visitCaps so the validator has one source
+// to check. Per-node override, else the "*" default, else 3.
+function capFor(graph, id) {
+  const caps = (graph.invariants && graph.invariants.visitCaps) || {};
+  if (Object.prototype.hasOwnProperty.call(caps, id)) return caps[id];
+  if (Object.prototype.hasOwnProperty.call(caps, '*')) return caps['*'];
+  return 3;
+}
+
+// Lift exactly the fields an edge declares — a back-edge feeds the failing gate's
+// findings forward so the retry CONVERGES instead of restarting blind.
+function carryFor(edge, result) {
+  const out = {};
+  for (const k of (edge && edge.carry) || []) {
+    if (result && result[k] !== undefined) out[k] = result[k];
+  }
+  return out;
+}
+
+export { outEdges, reachable, dominates, matches, pickEdge, capFor, carryFor };
