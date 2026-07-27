@@ -2537,6 +2537,25 @@ The server spawned in Task 6's section is still needed here, so **first move the
     assert.ok(/readOnly|readonly/.test(editorJs));
   });
 
+  test('every dynamic value in renderPanel is escaped before innerHTML', () => {
+    // Node ids and kinds come from a planner worker's graphPatch — LLM-generated text.
+    // Unescaped, an id containing markup executes inside the page that IS the human
+    // approval gate, with access to the loopback server. Escaping only `prompt` (an
+    // earlier revision) left id and kind raw.
+    const panel = editorJs.slice(editorJs.indexOf('function renderPanel'));
+    const body = panel.slice(0, panel.indexOf('`;') + 2);
+    const raw = [...body.matchAll(/\$\{([^}]+)\}/g)]
+      .map((m) => m[1].trim())
+      // A ternary emitting only fixed literals is not a dynamic value.
+      .filter((e) => !/^locked \?/.test(e))
+      .filter((e) => !/^esc\(/.test(e));
+    assert.deepStrictEqual(raw, [],
+      `unescaped interpolation(s) reaching innerHTML: ${JSON.stringify(raw)}`);
+    assert.ok(/const esc = \(v\) =>/.test(editorJs), 'the esc() helper must exist');
+    assert.ok(/replace\(\/&\/g, '&amp;'\)/.test(editorJs),
+      'esc must escape & first, or the other replacements double-encode');
+  });
+
   test('writes per-node visit caps into invariants, not onto the node', () => {
     assert.ok(/invariants\.visitCaps|visitCaps\[/.test(editorJs),
       'visit caps have exactly one home: invariants.visitCaps');
@@ -2773,17 +2792,30 @@ function App() {
   }, h(RF.Background, null), h(RF.Controls, null));
 }
 
+// Escape EVERY dynamic value before it reaches innerHTML.
+//
+// Node ids and kinds are not trusted input. They arrive from a planner worker's
+// graphPatch — LLM-generated text — so an id like
+//   <img src=x onerror="fetch('/action',{method:'POST',body:'{\"action\":\"approve\"}'})">
+// would execute inside the page that IS the human approval gate, with access to the
+// loopback server. That converts a weird or prompt-injected planner output into
+// "approve the graph without a human", defeating the control point the whole design
+// rests on. Escaping only `prompt` (as an earlier revision did) is not enough.
+const esc = (v) => String(v == null ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 function renderPanel() {
   if (!selected) return;
   const n = selected;
   const cap = capFor(graph, n.id);
   const locked = !!n.locked;
   $('detail').innerHTML = `
-    <h3>${n.id} <small>${n.kind || 'work'}${locked ? ' 🔒 locked' : ''}</small></h3>
-    <label>Visit cap<br><input id="cap" type="number" min="0" value="${cap}"
+    <h3>${esc(n.id)} <small>${esc(n.kind || 'work')}${locked ? ' 🔒 locked' : ''}</small></h3>
+    <label>Visit cap<br><input id="cap" type="number" min="0" value="${esc(cap)}"
       ${locked ? 'disabled' : ''}></label>
     <label>Prompt<br><textarea id="prompt" ${locked ? 'disabled' : ''}>${
-      (n.prompt || '').replace(/</g, '&lt;')}</textarea></label>
+      esc(n.prompt)}</textarea></label>
     <label>Comment for the replanner<br><textarea id="comment"
       placeholder="e.g. this needs a schema migration before it runs"></textarea></label>
     <button id="addComment">Add comment</button>
