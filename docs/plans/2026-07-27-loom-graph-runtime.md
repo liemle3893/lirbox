@@ -1,0 +1,2809 @@
+# loom — Graph Runtime Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build `loom`, a new lirbox skill whose conductor interprets a node/edge **graph** instead of a fixed phase list — so a gate failure is an edge back to `Implement`, the graph can rewrite itself under invariants that keep every gate un-bypassable, and a human shapes it in a React Flow editor before launch.
+
+**Architecture:** One pure-JS module (`graph-core.mjs`) holds all graph math — reachability, dominance, edge selection, patch validation. It is **imported** by the server and browser editor, and **inlined as source** into the generated conductor (which forbids `require`/`import`). A generator (`scaffold-loom.cjs`) emits a conductor that is a ~60-line interpreter loop over a graph spliced in as DATA. A zero-dep loopback HTTP server serves the editor and mediates the pre-flight comment→replan→approve loop.
+
+**Tech Stack:** Node ≥18 (ESM + CJS, zero runtime deps), the Workflow tool, React Flow via CDN in the editor only.
+
+**Spec:** `docs/specs/2026-07-27-loom-graph-runtime-design.md`
+
+## Global Constraints
+
+- **The generated conductor is a restricted layer: NO `fs`, `git`, `require(`, `import`, `Date.now()`, `Math.random()`, `crypto`.** Every side effect lives in an `agent()` worker prompt. `test-loom.cjs` enforces this with a string scan copied from `plugins/lirbox/skills/conductor/scripts/test-scaffold.cjs:109`.
+- **Never hand-edit a generated loop script.** All changes go through `scaffold-loom.cjs` and are regenerated with `--force`.
+- **`graph-core.mjs` is the single source of graph math.** The generator inlines it; the test net asserts the inlined copy is byte-identical to the module minus its final `export {...}` line. No second implementation may exist.
+- **Zero runtime npm dependencies.** Node built-ins only (`http`, `fs`, `path`, `crypto` — the last only in server/worker code, never in the conductor).
+- Runtime artifacts live in `.loom/` and are **gitignored**. Delivery artifacts under `docs/changes/**` remain the only committed exception.
+- `graph.invariants.lockedHash` uses pure-JS FNV-1a — a **drift detector**, not a cryptographic guarantee. DoD `checkSha` uses real `sha256` computed by a worker.
+- Every task ends with a green `node plugins/lirbox/skills/loom/scripts/test-loom.cjs`.
+
+---
+
+## File Structure
+
+```
+plugins/lirbox/skills/loom/
+  SKILL.md                       Task 9   skill entry: triage, DoD, pre-flight, resume, finalize
+  scripts/
+    graph-core.mjs               Tasks 1-3  ALL graph math; inlined into the conductor
+    scaffold-loom.cjs            Task 4   generator: graph JSON + inlined core -> .loom/<name>.js
+    seeds/lite.json              Task 5   seed graph for the lite profile
+    seeds/delivery.json          Task 5   seed graph for the delivery profile
+    graph-server.mjs             Task 6   loopback HTTP: /graph /state /action
+    editor/index.html            Task 7   React Flow editor shell
+    editor/editor.js             Task 7   editor logic; imports graph-core.mjs
+    prompts/*.txt                Task 4/8 worker prompt templates (data, never code)
+    test-loom.cjs                Tasks 1-10  the regression net; grows every task
+  references/
+    graph-spec.md                Task 9   graph.json field reference
+    invariants.md                Task 9   the dominance argument, written out
+```
+
+**Responsibility boundaries.** `graph-core.mjs` is pure and dependency-free so it can run in three hosts. `scaffold-loom.cjs` only emits text. `graph-server.mjs` only reads/writes files and validates. The editor only renders and posts. No file reaches into another's job.
+
+---
+
+### Task 1: Graph reachability and dominance
+
+The safety heart of the design. Everything else depends on these two functions being right.
+
+**Files:**
+- Create: `plugins/lirbox/skills/loom/scripts/graph-core.mjs`
+- Create: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+  - `outEdges(graph, from) -> Edge[]` — edges leaving `from`, in declaration order
+  - `reachable(graph, from, skip) -> Set<string>` — node ids reachable from `from`, treating every id in the `skip` array as deleted
+  - `dominates(graph, gate, target, from) -> boolean` — true when every path `from → target` crosses `gate`
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `plugins/lirbox/skills/loom/scripts/test-loom.cjs`:
+
+```js
+#!/usr/bin/env node
+/*
+ * Regression safety net for the loom skill.
+ *
+ * Agent-free by construction: every assertion here is pure graph math, generator
+ * output, or file I/O. Nothing in this file spawns a subagent.
+ *
+ *   node test-loom.cjs
+ */
+const assert = require('assert');
+const path = require('path');
+
+let failures = 0;
+function test(name, fn) {
+  try { fn(); process.stdout.write(`  ok  ${name}\n`); }
+  catch (e) { failures++; process.stdout.write(`  FAIL ${name}\n       ${e.message}\n`); }
+}
+function section(name) { process.stdout.write(`\n${name}\n`); }
+
+// graph-core is ESM; this net is CJS. Load it via dynamic import and run everything
+// inside main() so the whole suite stays a single `node test-loom.cjs` invocation.
+async function main() {
+  const core = await import(
+    'file://' + path.join(__dirname, 'graph-core.mjs')
+  );
+
+  // A linear graph with one back-edge — the shape loom exists to support.
+  //   Setup -> Implement -> Review -> DoDGate -> PR
+  //                  ^________|          |
+  //                  |____________________|
+  const G = {
+    start: 'Setup', terminal: 'PR',
+    nodes: [
+      { id: 'Setup', kind: 'work' }, { id: 'Implement', kind: 'work' },
+      { id: 'Review', kind: 'gate' }, { id: 'DoDGate', kind: 'gate' },
+      { id: 'PR', kind: 'terminal' },
+    ],
+    edges: [
+      { from: 'Setup', to: 'Implement', when: 'always' },
+      { from: 'Implement', to: 'Review', when: 'always' },
+      { from: 'Review', to: 'Implement', when: { field: 'passed', eq: false } },
+      { from: 'Review', to: 'DoDGate', when: { field: 'passed', eq: true } },
+      { from: 'DoDGate', to: 'Implement', when: { field: 'passed', eq: false } },
+      { from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: true } },
+    ],
+  };
+
+  section('reachable');
+
+  test('reaches every node from start', () => {
+    const r = core.reachable(G, 'Setup', []);
+    assert.deepStrictEqual([...r].sort(),
+      ['DoDGate', 'Implement', 'PR', 'Review', 'Setup']);
+  });
+
+  test('terminates on a cycle instead of hanging', () => {
+    const r = core.reachable(G, 'Implement', []);
+    assert.ok(r.has('Implement'), 'cycle should revisit its entry node');
+  });
+
+  test('skip removes a node and everything only it reached', () => {
+    const r = core.reachable(G, 'Setup', ['DoDGate']);
+    assert.ok(!r.has('PR'), 'PR is only reachable through DoDGate');
+    assert.ok(r.has('Review'), 'Review is upstream of the skipped node');
+  });
+
+  test('skipping the origin yields the empty set', () => {
+    assert.strictEqual(core.reachable(G, 'Setup', ['Setup']).size, 0);
+  });
+
+  section('dominates');
+
+  test('DoDGate dominates PR', () => {
+    assert.strictEqual(core.dominates(G, 'DoDGate', 'PR', 'Setup'), true);
+  });
+
+  test('a bypass edge destroys dominance', () => {
+    const bypassed = { ...G, edges: [...G.edges, { from: 'Implement', to: 'PR', when: 'always' }] };
+    assert.strictEqual(core.dominates(bypassed, 'DoDGate', 'PR', 'Setup'), false);
+  });
+
+  test('Implement does not dominate PR when Setup can skip it', () => {
+    const skippable = { ...G, edges: [...G.edges, { from: 'Setup', to: 'Review', when: 'always' }] };
+    assert.strictEqual(core.dominates(skippable, 'Implement', 'PR', 'Setup'), false);
+  });
+
+  test('positional: from Implement, DoDGate still dominates PR', () => {
+    assert.strictEqual(core.dominates(G, 'DoDGate', 'PR', 'Implement'), true);
+  });
+
+  test('positional: a gate already behind the cursor no longer dominates', () => {
+    // Cursor sits at Implement having arrived via DoDGate:fail. Review is upstream
+    // of the cursor, so the remaining path need not cross it — this is exactly the
+    // case structural dominance alone gets wrong.
+    assert.strictEqual(core.dominates(G, 'Review', 'PR', 'Implement'), false);
+  });
+
+  test('a gate dominates itself', () => {
+    assert.strictEqual(core.dominates(G, 'PR', 'PR', 'Setup'), true);
+  });
+
+  process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
+  process.exit(failures ? 1 : 0);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `Cannot find module .../graph-core.mjs`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+Create `plugins/lirbox/skills/loom/scripts/graph-core.mjs`:
+
+```js
+/*
+ * loom graph math — the SINGLE source of truth, with THREE consumers:
+ *   1. the generated conductor  (INLINED as source: that layer forbids require/import)
+ *   2. graph-server.mjs         (import)
+ *   3. the browser editor       (import)
+ *
+ * Therefore this file must stay pure: no imports, no Node built-ins, no Date.now(),
+ * no Math.random(), no crypto. Only function declarations, then a single trailing
+ * `export { ... }` line — the generator strips exactly that last line when inlining,
+ * and test-loom.cjs asserts the inlined copy matches byte-for-byte.
+ */
+
+function outEdges(graph, from) {
+  const out = [];
+  for (const e of graph.edges) if (e.from === from) out.push(e);
+  return out;
+}
+
+// Node ids reachable from `from`, treating every id in `skip` as deleted.
+// Iterative + visited-set, so cycles terminate rather than recurse forever.
+function reachable(graph, from, skip) {
+  const skipSet = new Set(skip || []);
+  const seen = new Set();
+  if (skipSet.has(from)) return seen;
+  const stack = [from];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (seen.has(cur) || skipSet.has(cur)) continue;
+    seen.add(cur);
+    for (const e of outEdges(graph, cur)) if (!skipSet.has(e.to)) stack.push(e.to);
+  }
+  return seen;
+}
+
+// True when EVERY path from `from` to `target` crosses `gate`.
+// Proof by deletion: remove the gate; if the target is still reachable, some path
+// avoided it. O(V+E) per gate.
+function dominates(graph, gate, target, from) {
+  if (gate === target) return true;
+  return !reachable(graph, from, [gate]).has(target);
+}
+
+export { outEdges, reachable, dominates };
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — 9 `ok` lines, `all green`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/graph-core.mjs \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): graph reachability and gate dominance"
+```
+
+---
+
+### Task 2: Edge selection, visit caps, carry
+
+Turns a node's result into the next node. Pure data predicates — never `eval`.
+
+**Files:**
+- Modify: `plugins/lirbox/skills/loom/scripts/graph-core.mjs`
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: `outEdges` (Task 1).
+- Produces:
+  - `matches(pred, result) -> boolean` — evaluates one declarative edge predicate
+  - `pickEdge(graph, from, result) -> Edge|null` — first matching out-edge, declaration order
+  - `capFor(graph, id) -> number` — visit cap: per-node override, else `"*"`, else `3`
+  - `carryFor(edge, result) -> object` — the `carry` fields lifted out of a result
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs`, immediately before the `process.stdout.write(\`\n${failures ...` line:
+
+```js
+  section('matches');
+
+  test('"always" matches any result', () => {
+    assert.strictEqual(core.matches('always', { passed: false }), true);
+    assert.strictEqual(core.matches('always', null), true);
+  });
+
+  test('a missing predicate is treated as always', () => {
+    assert.strictEqual(core.matches(undefined, {}), true);
+  });
+
+  test('eq compares strictly', () => {
+    assert.strictEqual(core.matches({ field: 'passed', eq: true }, { passed: true }), true);
+    assert.strictEqual(core.matches({ field: 'passed', eq: true }, { passed: 1 }), false);
+  });
+
+  test('neq, gt and exists behave', () => {
+    assert.strictEqual(core.matches({ field: 'n', neq: 0 }, { n: 2 }), true);
+    assert.strictEqual(core.matches({ field: 'n', gt: 1 }, { n: 2 }), true);
+    assert.strictEqual(core.matches({ field: 'n', gt: 1 }, { n: '9' }), false);
+    assert.strictEqual(core.matches({ field: 'x', exists: false }, {}), true);
+  });
+
+  test('a null result does not throw', () => {
+    assert.strictEqual(core.matches({ field: 'passed', eq: true }, null), false);
+  });
+
+  test('an unknown operator fails closed', () => {
+    assert.strictEqual(core.matches({ field: 'passed', wat: 1 }, { passed: true }), false);
+  });
+
+  section('pickEdge');
+
+  test('a failing gate takes the back-edge', () => {
+    assert.strictEqual(core.pickEdge(G, 'DoDGate', { passed: false }).to, 'Implement');
+  });
+
+  test('a passing gate advances to the terminal', () => {
+    assert.strictEqual(core.pickEdge(G, 'DoDGate', { passed: true }).to, 'PR');
+  });
+
+  test('the FIRST matching edge wins', () => {
+    const g = { ...G, edges: [
+      { from: 'A', to: 'first', when: 'always' },
+      { from: 'A', to: 'second', when: 'always' },
+    ] };
+    assert.strictEqual(core.pickEdge(g, 'A', {}).to, 'first');
+  });
+
+  test('no matching edge returns null', () => {
+    assert.strictEqual(core.pickEdge(G, 'DoDGate', { passed: 'maybe' }), null);
+  });
+
+  section('capFor / carryFor');
+
+  test('per-node cap wins over the wildcard', () => {
+    const g = { ...G, invariants: { visitCaps: { '*': 3, Implement: 5 } } };
+    assert.strictEqual(core.capFor(g, 'Implement'), 5);
+    assert.strictEqual(core.capFor(g, 'Review'), 3);
+  });
+
+  test('cap defaults to 3 with no invariants at all', () => {
+    assert.strictEqual(core.capFor({ nodes: [], edges: [] }, 'Anything'), 3);
+  });
+
+  test('a zero cap is honoured, not treated as absent', () => {
+    const g = { ...G, invariants: { visitCaps: { '*': 3, Review: 0 } } };
+    assert.strictEqual(core.capFor(g, 'Review'), 0);
+  });
+
+  test('carryFor lifts only the declared fields', () => {
+    const e = { from: 'DoDGate', to: 'Implement', carry: ['unmetCriteria'] };
+    assert.deepStrictEqual(
+      core.carryFor(e, { unmetCriteria: ['c3'], noise: 'drop me' }),
+      { unmetCriteria: ['c3'] });
+  });
+
+  test('carryFor with no carry list yields an empty object', () => {
+    assert.deepStrictEqual(core.carryFor({ from: 'A', to: 'B' }, { x: 1 }), {});
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `core.matches is not a function`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+In `graph-core.mjs`, add above the `export` line:
+
+```js
+// Declarative edge predicates. NEVER code strings — these travel through JSON,
+// are edited in the browser, and are evaluated inside the restricted conductor
+// layer, so `eval`/`new Function` are out of the question.
+// Unknown shapes fail CLOSED: an unrecognised operator must not silently open a path.
+function matches(pred, result) {
+  if (pred === 'always' || pred === undefined || pred === null) return true;
+  if (typeof pred !== 'object') return false;
+  const v = result ? result[pred.field] : undefined;
+  if ('eq' in pred) return v === pred.eq;
+  if ('neq' in pred) return v !== pred.neq;
+  if ('gt' in pred) return typeof v === 'number' && v > pred.gt;
+  if ('lt' in pred) return typeof v === 'number' && v < pred.lt;
+  if ('exists' in pred) return (v !== undefined && v !== null) === pred.exists;
+  return false;
+}
+
+// First matching out-edge wins; declaration order IS the priority order.
+function pickEdge(graph, from, result) {
+  for (const e of outEdges(graph, from)) if (matches(e.when, result)) return e;
+  return null;
+}
+
+// Visit caps live ONLY in invariants.visitCaps so the validator has one source
+// to check. Per-node override, else the "*" default, else 3.
+function capFor(graph, id) {
+  const caps = (graph.invariants && graph.invariants.visitCaps) || {};
+  if (Object.prototype.hasOwnProperty.call(caps, id)) return caps[id];
+  if (Object.prototype.hasOwnProperty.call(caps, '*')) return caps['*'];
+  return 3;
+}
+
+// Lift exactly the fields an edge declares — a back-edge feeds the failing gate's
+// findings forward so the retry CONVERGES instead of restarting blind.
+function carryFor(edge, result) {
+  const out = {};
+  for (const k of (edge && edge.carry) || []) {
+    if (result && result[k] !== undefined) out[k] = result[k];
+  }
+  return out;
+}
+```
+
+Replace the export line with:
+
+```js
+export { outEdges, reachable, dominates, matches, pickEdge, capFor, carryFor };
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — 23 `ok` lines, `all green`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/graph-core.mjs \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): declarative edge predicates, visit caps, carry"
+```
+
+---
+
+### Task 3: Patch application and validation
+
+The rule that makes self-rewrite safe. A patch that would let the run reach the terminal without crossing a gate must be rejected.
+
+**Files:**
+- Modify: `plugins/lirbox/skills/loom/scripts/graph-core.mjs`
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: `reachable`, `dominates`, `capFor` (Tasks 1–2).
+- Produces:
+  - `stableStringify(value) -> string` — key-sorted JSON, so hashing is order-independent
+  - `fnv1a(str) -> string` — 8-hex-char pure-JS digest
+  - `lockedFingerprint(graph) -> string` — `"fnv1a:xxxxxxxx"` over the locked subgraph
+  - `applyPatchTo(graph, patch) -> Graph` — pure; returns a NEW graph, never mutates
+  - `validateGraph(next, prev, cursor) -> string[]` — violation messages; `[]` means valid
+
+Patch shape: `{ addNodes?, removeNodes?, updateNodes?, addEdges?, removeEdges? }`.
+Cursor shape: `{ node: string, unsatisfiedGates: string[] }` or `null` for pre-flight.
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs` before the final `process.stdout.write` line:
+
+```js
+  section('stableStringify / fingerprint');
+
+  test('key order does not change the string', () => {
+    assert.strictEqual(core.stableStringify({ b: 1, a: 2 }), core.stableStringify({ a: 2, b: 1 }));
+  });
+
+  test('nested objects and arrays are stable', () => {
+    assert.strictEqual(
+      core.stableStringify({ x: [{ q: 1, p: 2 }] }),
+      core.stableStringify({ x: [{ p: 2, q: 1 }] }));
+  });
+
+  test('fingerprint ignores unlocked churn', () => {
+    const locked = { ...G, nodes: G.nodes.map(n =>
+      n.id === 'DoDGate' ? { ...n, locked: true } : n) };
+    const churned = { ...locked, nodes: [...locked.nodes, { id: 'Spike', kind: 'work' }] };
+    assert.strictEqual(core.lockedFingerprint(locked), core.lockedFingerprint(churned));
+  });
+
+  test('fingerprint changes when a locked node is mutated', () => {
+    const locked = { ...G, nodes: G.nodes.map(n =>
+      n.id === 'DoDGate' ? { ...n, locked: true, prompt: 'original' } : n) };
+    const tampered = { ...locked, nodes: locked.nodes.map(n =>
+      n.id === 'DoDGate' ? { ...n, prompt: 'weakened' } : n) };
+    assert.notStrictEqual(core.lockedFingerprint(locked), core.lockedFingerprint(tampered));
+  });
+
+  section('applyPatchTo');
+
+  test('adds a node and an edge without mutating the input', () => {
+    const before = JSON.stringify(G);
+    const next = core.applyPatchTo(G, {
+      addNodes: [{ id: 'Spike', kind: 'work' }],
+      addEdges: [{ from: 'DoDGate', to: 'Spike', when: { field: 'passed', eq: false } }],
+    });
+    assert.ok(next.nodes.some(n => n.id === 'Spike'));
+    assert.strictEqual(JSON.stringify(G), before, 'input graph must not be mutated');
+  });
+
+  test('removing a node also removes its dangling edges', () => {
+    const next = core.applyPatchTo(G, { removeNodes: ['Review'] });
+    assert.ok(!next.nodes.some(n => n.id === 'Review'));
+    assert.ok(!next.edges.some(e => e.from === 'Review' || e.to === 'Review'));
+  });
+
+  test('updateNodes merges fields onto the existing node', () => {
+    const next = core.applyPatchTo(G, { updateNodes: [{ id: 'Implement', model: 'think' }] });
+    const n = next.nodes.find(x => x.id === 'Implement');
+    assert.strictEqual(n.model, 'think');
+    assert.strictEqual(n.kind, 'work', 'unrelated fields must survive the merge');
+  });
+
+  section('validateGraph — malicious patch fixtures');
+
+  // The approved baseline: DoDGate and Review are locked and must dominate PR.
+  const LOCKED = (() => {
+    const g = JSON.parse(JSON.stringify(G));
+    for (const n of g.nodes) if (n.id === 'DoDGate' || n.id === 'Review') n.locked = true;
+    for (const e of g.edges) if (e.from === 'DoDGate') e.locked = true;
+    g.invariants = {
+      mustCross: ['Review', 'DoDGate'],
+      visitCaps: { '*': 3, Implement: 4 },
+      nodeBudget: 10,
+    };
+    g.invariants.lockedHash = core.lockedFingerprint(g);
+    return g;
+  })();
+
+  test('the approved graph validates against itself', () => {
+    assert.deepStrictEqual(core.validateGraph(LOCKED, LOCKED, null), []);
+  });
+
+  test('REJECT: removing the gate that is failing', () => {
+    const next = core.applyPatchTo(LOCKED, { removeNodes: ['DoDGate'] });
+    const v = core.validateGraph(next, LOCKED, null);
+    assert.ok(v.some(m => /DoDGate/.test(m)), `expected a DoDGate violation, got ${JSON.stringify(v)}`);
+  });
+
+  test('REJECT: a bypass edge around the gate', () => {
+    const next = core.applyPatchTo(LOCKED, {
+      addEdges: [{ from: 'Implement', to: 'PR', when: 'always' }] });
+    const v = core.validateGraph(next, LOCKED, null);
+    assert.ok(v.some(m => /DoDGate no longer dominates PR/.test(m)),
+      `expected a dominance violation, got ${JSON.stringify(v)}`);
+  });
+
+  test('REJECT: weakening a locked node prompt', () => {
+    const next = core.applyPatchTo(LOCKED, {
+      updateNodes: [{ id: 'DoDGate', prompt: 'just say it passed' }] });
+    const v = core.validateGraph(next, LOCKED, null);
+    assert.ok(v.some(m => /locked/.test(m)), `expected a lock violation, got ${JSON.stringify(v)}`);
+  });
+
+  test('REJECT: deleting a locked edge', () => {
+    const next = core.applyPatchTo(LOCKED, {
+      removeEdges: [{ from: 'DoDGate', to: 'Implement' }] });
+    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /locked/.test(m)));
+  });
+
+  test('REJECT: orphaning the terminal', () => {
+    const next = core.applyPatchTo(LOCKED, {
+      removeEdges: [{ from: 'DoDGate', to: 'PR' }] });
+    const v = core.validateGraph(next, LOCKED, null);
+    assert.ok(v.some(m => /unreachable|locked/.test(m)));
+  });
+
+  test('REJECT: an orphaned added node', () => {
+    const next = core.applyPatchTo(LOCKED, { addNodes: [{ id: 'Island', kind: 'work' }] });
+    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /orphan/.test(m)));
+  });
+
+  test('REJECT: exceeding the node budget', () => {
+    const many = [];
+    for (let i = 0; i < 12; i++) many.push({ id: `N${i}`, kind: 'work' });
+    const next = core.applyPatchTo(LOCKED, { addNodes: many });
+    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /budget/.test(m)));
+  });
+
+  test('REJECT: a duplicate node id', () => {
+    const next = core.applyPatchTo(LOCKED, { addNodes: [{ id: 'Implement', kind: 'work' }] });
+    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /duplicate/.test(m)));
+  });
+
+  test('REJECT: an edge pointing at an unknown node', () => {
+    const next = core.applyPatchTo(LOCKED, {
+      addEdges: [{ from: 'Implement', to: 'Nowhere', when: 'always' }] });
+    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /unknown node/.test(m)));
+  });
+
+  test('ACCEPT: inserting a spike on the failure path', () => {
+    const next = core.applyPatchTo(LOCKED, {
+      addNodes: [{ id: 'Spike', kind: 'work' }],
+      addEdges: [{ from: 'Spike', to: 'Implement', when: 'always' }],
+      updateNodes: [],
+    });
+    // Route Implement -> Spike so the new node is not orphaned.
+    next.edges.unshift({ from: 'Implement', to: 'Spike', when: { field: 'needsSpike', eq: true } });
+    assert.deepStrictEqual(core.validateGraph(next, LOCKED, null), []);
+  });
+
+  section('validateGraph — positional dominance');
+
+  test('REJECT: cursor past an unsatisfied gate with no way back to it', () => {
+    // Cursor at Implement, arrived via DoDGate:fail, so DoDGate is unsatisfied.
+    // A patch routing Implement -> PR directly must be caught even though the
+    // structural check from `start` might still pass in a richer graph.
+    const next = core.applyPatchTo(LOCKED, {
+      addEdges: [{ from: 'Implement', to: 'PR', when: 'always' }] });
+    const v = core.validateGraph(next, LOCKED,
+      { node: 'Implement', unsatisfiedGates: ['DoDGate'] });
+    assert.ok(v.length > 0, 'positional check must reject the shortcut');
+  });
+
+  test('ACCEPT: a gate already satisfied need not dominate from the cursor', () => {
+    // Review passed; the cursor is downstream of it. Review no longer dominating
+    // PR *from the cursor* is expected and must not be reported.
+    const v = core.validateGraph(LOCKED, LOCKED,
+      { node: 'DoDGate', unsatisfiedGates: [] });
+    assert.deepStrictEqual(v, []);
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `core.stableStringify is not a function`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+In `graph-core.mjs`, add above the `export` line:
+
+```js
+// Key-sorted JSON so a fingerprint depends on CONTENT, not on property order.
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  return '{' + Object.keys(v).sort()
+    .map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+}
+
+// FNV-1a, 32-bit. Pure JS because the conductor layer has no `crypto`.
+// This is a DRIFT DETECTOR, not a security boundary: it catches a replanner
+// quietly rewriting a locked gate, not an adversary hunting collisions.
+// (DoD check files use real sha256 — computed by a worker, which has full tools.)
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return ('00000000' + h.toString(16)).slice(-8);
+}
+
+function lockedFingerprint(graph) {
+  const nodes = graph.nodes.filter((n) => n.locked)
+    .slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const edges = graph.edges.filter((e) => e.locked).slice()
+    .sort((a, b) => {
+      const x = stableStringify(a), y = stableStringify(b);
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+  return 'fnv1a:' + fnv1a(stableStringify({ nodes, edges }));
+}
+
+// PURE: deep-clones, applies, returns a new graph. Order matters —
+// removals first, then updates, then additions, so a patch can replace a node
+// id in one step without colliding with itself.
+function applyPatchTo(graph, patch) {
+  const g = JSON.parse(JSON.stringify(graph));
+  const p = patch || {};
+
+  const rmN = new Set(p.removeNodes || []);
+  if (rmN.size) {
+    g.nodes = g.nodes.filter((n) => !rmN.has(n.id));
+    g.edges = g.edges.filter((e) => !rmN.has(e.from) && !rmN.has(e.to));
+  }
+  const rmE = new Set((p.removeEdges || []).map((e) => e.from + ' ' + e.to));
+  if (rmE.size) g.edges = g.edges.filter((e) => !rmE.has(e.from + ' ' + e.to));
+
+  for (const u of p.updateNodes || []) {
+    const i = g.nodes.findIndex((n) => n.id === u.id);
+    if (i >= 0) g.nodes[i] = Object.assign({}, g.nodes[i], u);
+  }
+  for (const n of p.addNodes || []) g.nodes.push(JSON.parse(JSON.stringify(n)));
+  for (const e of p.addEdges || []) g.edges.push(JSON.parse(JSON.stringify(e)));
+  return g;
+}
+
+// Returns violation messages; [] means the graph is acceptable.
+// `prev` supplies the frozen lockedHash (null pre-approval).
+// `cursor` = { node, unsatisfiedGates } during a run, null pre-flight.
+function validateGraph(next, prev, cursor) {
+  const v = [];
+  const ids = next.nodes.map((n) => n.id);
+  const idSet = new Set(ids);
+
+  const dup = ids.filter((id, i) => ids.indexOf(id) !== i);
+  if (dup.length) v.push('duplicate node id: ' + [...new Set(dup)].join(', '));
+
+  for (const e of next.edges) {
+    if (!idSet.has(e.from)) v.push('edge from unknown node: ' + e.from);
+    if (!idSet.has(e.to)) v.push('edge to unknown node: ' + e.to);
+  }
+
+  if (!idSet.has(next.start)) v.push('start node missing: ' + next.start);
+  if (!idSet.has(next.terminal)) v.push('terminal node missing: ' + next.terminal);
+
+  const inv = next.invariants || {};
+  if (inv.nodeBudget && ids.length > inv.nodeBudget) {
+    v.push('node budget exceeded: ' + ids.length + ' > ' + inv.nodeBudget);
+  }
+
+  const lockedHash = prev && prev.invariants && prev.invariants.lockedHash;
+  if (lockedHash && lockedFingerprint(next) !== lockedHash) {
+    v.push('locked nodes/edges were modified or removed');
+  }
+
+  // Everything below needs a well-formed skeleton; bail out rather than
+  // pile confusing secondary errors onto a graph that is already broken.
+  if (!idSet.has(next.start) || !idSet.has(next.terminal)) return v;
+
+  const live = reachable(next, next.start, []);
+  if (!live.has(next.terminal)) {
+    v.push('terminal ' + next.terminal + ' unreachable from ' + next.start);
+  }
+  const orphans = ids.filter((id) => !live.has(id));
+  if (orphans.length) v.push('orphaned node(s): ' + orphans.join(', '));
+
+  // Structural dominance — from `start`, over EVERY declared gate. Position-independent,
+  // so it holds for the whole run and cannot be invalidated by later progress.
+  for (const gate of inv.mustCross || []) {
+    if (!idSet.has(gate)) { v.push('mustCross node missing: ' + gate); continue; }
+    if (!dominates(next, gate, next.terminal, next.start)) {
+      v.push(gate + ' no longer dominates ' + next.terminal);
+    }
+  }
+
+  // Positional dominance — from the CURSOR, over gates not yet satisfied.
+  // Required because a back-edge admits start -> DoDGate -> Implement -> terminal:
+  // structurally dominated, yet the remaining path never re-crosses the failed gate.
+  if (cursor && cursor.node && idSet.has(cursor.node)) {
+    for (const gate of cursor.unsatisfiedGates || []) {
+      if (!idSet.has(gate)) continue;
+      if (!dominates(next, gate, next.terminal, cursor.node)) {
+        v.push(gate + ' is unsatisfied but no longer dominates ' + next.terminal
+          + ' from ' + cursor.node);
+      }
+    }
+  }
+  return v;
+}
+```
+
+Replace the export line with:
+
+```js
+export { outEdges, reachable, dominates, matches, pickEdge, capFor, carryFor, stableStringify, fnv1a, lockedFingerprint, applyPatchTo, validateGraph };
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — 42 `ok` lines, `all green`. Every malicious fixture rejected, both ACCEPT fixtures clean.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/graph-core.mjs \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): patch application and invariant validation"
+```
+
+---
+
+### Task 4: The generator and the interpreter
+
+Emits `.loom/<name>.js` — a Workflow script that is a graph interpreter with `graph-core` inlined.
+
+**Files:**
+- Create: `plugins/lirbox/skills/loom/scripts/scaffold-loom.cjs`
+- Create: `plugins/lirbox/skills/loom/scripts/prompts/checkpoint.txt`
+- Create: `plugins/lirbox/skills/loom/scripts/prompts/node-lead.txt`
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: `graph-core.mjs` (read as text and inlined; not imported).
+- Produces:
+  - CLI: `node scaffold-loom.cjs --name <n> --graph <graph.json> [--out <path>] [--force]`
+  - `inlineCore(srcText) -> string` — strips the trailing `export {...}` line
+  - Emitted file at `.loom/<name>.js`
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs` before the final `process.stdout.write` line:
+
+```js
+  section('generator');
+
+  const { execFileSync } = require('child_process');
+  const fs = require('fs');
+  const os = require('os');
+  const GEN = path.join(__dirname, 'scaffold-loom.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-loom-'));
+  const graphFile = path.join(tmp, 'graph.json');
+  fs.writeFileSync(graphFile, JSON.stringify({ ...LOCKED, name: 'demo', goal: 'demo goal' }));
+  const outFile = path.join(tmp, 'demo.js');
+  execFileSync('node', [GEN, '--name', 'demo', '--graph', graphFile, '--out', outFile]);
+  const emitted = fs.readFileSync(outFile, 'utf8');
+
+  test('emitted script parses', () => {
+    execFileSync('node', ['--check', outFile]);
+  });
+
+  // The restricted-layer scan, mirroring conductor's test-scaffold.cjs:109.
+  const FORBIDDEN = [
+    ['require(', /\brequire\s*\(/],
+    ['import', /^\s*import\s/m],
+    ['Date.now', /\bDate\.now\s*\(/],
+    ['Math.random', /\bMath\.random\s*\(/],
+    ['fs.', /\bfs\s*\./],
+    ['child_process', /child_process/],
+  ];
+  for (const [name, re] of FORBIDDEN) {
+    test(`emitted script contains no ${name}`, () => {
+      assert.ok(!re.test(emitted), `forbidden ${name} found in the generated conductor`);
+    });
+  }
+
+  test('meta is a literal and never read at runtime', () => {
+    assert.ok(/^export const meta = \{/m.test(emitted));
+    const body = emitted.slice(emitted.indexOf('\n}\n') + 3);
+    assert.ok(!/\bmeta\s*\./.test(body), 'meta is metadata, not a runtime binding');
+  });
+
+  test('inlined graph-core matches the module byte-for-byte', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'graph-core.mjs'), 'utf8');
+    const expected = src.replace(/^export \{[^}]*\};?\s*$/m, '').trimEnd();
+    assert.ok(emitted.includes(expected),
+      'the generator must inline graph-core.mjs verbatim — no second implementation');
+  });
+
+  test('the graph is spliced in as DATA', () => {
+    assert.ok(/const GRAPH_V0 = \{/.test(emitted));
+    assert.ok(emitted.includes('"DoDGate"') || emitted.includes('DoDGate'));
+  });
+
+  test('meta.phases lists the approved node ids', () => {
+    for (const id of ['Setup', 'Implement', 'Review', 'DoDGate']) {
+      assert.ok(emitted.includes(`title: '${id}'`), `meta.phases missing ${id}`);
+    }
+  });
+
+  test('the interpreter enforces the visit cap', () => {
+    assert.ok(/visit cap exceeded/.test(emitted));
+  });
+
+  test('a rejected patch is logged and does not mutate the graph', () => {
+    assert.ok(/patch REJECTED/.test(emitted));
+  });
+
+  test('--force is required to overwrite', () => {
+    let threw = false;
+    try { execFileSync('node', [GEN, '--name', 'demo', '--graph', graphFile, '--out', outFile],
+      { stdio: 'pipe' }); } catch (e) { threw = true; }
+    assert.ok(threw, 'overwriting without --force must fail');
+    execFileSync('node', [GEN, '--name', 'demo', '--graph', graphFile, '--out', outFile, '--force']);
+  });
+
+  test('an invalid graph is rejected at generation time', () => {
+    const badFile = path.join(tmp, 'bad.json');
+    const bad = core.applyPatchTo(LOCKED, { addEdges: [{ from: 'Implement', to: 'PR', when: 'always' }] });
+    fs.writeFileSync(badFile, JSON.stringify({ ...bad, name: 'bad' }));
+    let threw = false;
+    try { execFileSync('node', [GEN, '--name', 'bad', '--graph', badFile,
+      '--out', path.join(tmp, 'bad.js')], { stdio: 'pipe' }); } catch (e) { threw = true; }
+    assert.ok(threw, 'the generator must refuse a graph that violates its own invariants');
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `Cannot find module .../scaffold-loom.cjs`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+Create `plugins/lirbox/skills/loom/scripts/prompts/node-lead.txt`:
+
+```
+You are working inside the shared worktree ${WORKTREE} on branch ${BRANCH}.
+Do every edit there. Never touch the main checkout.
+
+NODE: ${nodeId}   (visit ${visit} of at most ${cap})
+${carryText}
+
+${nodePrompt}
+
+If — and only if — the work you just did proves this graph's shape is wrong, you MAY
+return a "graphPatch" alongside your result:
+  { addNodes, removeNodes, updateNodes, addEdges, removeEdges }
+Locked nodes and edges cannot be changed, and no patch may let any path reach
+${terminal} without crossing every gate. An invalid patch is rejected and logged;
+it does not fail the run. Do not propose one merely to skip work you find hard.
+```
+
+Create `plugins/lirbox/skills/loom/scripts/prompts/checkpoint.txt`:
+
+```
+Persist loom run state so a future session can resume this run exactly.
+
+Write this JSON to .loom/state/${name}.json in the MAIN repo checkout (not the
+worktree), creating directories as needed. MERGE with any existing file, preserving
+"startedAt". Write the whole object — the "graph" field is the PATCHED graph, and a
+resume that replays the original topology is the worst failure this system has.
+
+${payload}
+```
+
+Create `plugins/lirbox/skills/loom/scripts/scaffold-loom.cjs`:
+
+```js
+#!/usr/bin/env node
+/*
+ * Generator for loom conductors.
+ *
+ *   node scaffold-loom.cjs --name <name> --graph <graph.json> [--out <path>] [--force]
+ *
+ * Emits a Workflow script that is a GRAPH INTERPRETER: the graph travels as DATA and
+ * graph-core.mjs is INLINED as source, because the generated conductor is a restricted
+ * layer with no module loader and no fs/git/crypto/clock. Never hand-edit the output —
+ * change this generator and regenerate with --force.
+ */
+const fs = require('fs');
+const path = require('path');
+
+function arg(name, dflt) {
+  const i = process.argv.indexOf('--' + name);
+  if (i < 0) return dflt;
+  const next = process.argv[i + 1];
+  return (next === undefined || next.startsWith('--')) ? true : next;
+}
+function die(msg) { console.error('ERROR: ' + msg); process.exit(1); }
+
+const name = arg('name', '');
+const graphPath = arg('graph', '');
+const force = arg('force', false) === true;
+if (!name || name === true) die('--name is required');
+if (!graphPath || graphPath === true) die('--graph <graph.json> is required');
+const outPath = arg('out', path.join('.loom', name + '.js'));
+
+let graph;
+try { graph = JSON.parse(fs.readFileSync(graphPath, 'utf8')); }
+catch (e) { die('--graph not readable or not valid JSON: ' + e.message); }
+
+// Strip the single trailing `export { ... };` line. The test net asserts the
+// remainder appears verbatim in the emitted file, so there is exactly one
+// implementation of the graph math in the repo.
+function inlineCore(srcText) {
+  return srcText.replace(/^export \{[^}]*\};?\s*$/m, '').trimEnd();
+}
+const corePath = path.join(__dirname, 'graph-core.mjs');
+const coreSrc = inlineCore(fs.readFileSync(corePath, 'utf8'));
+
+// Validate the graph with the same code the conductor will use, so a graph that
+// violates its own invariants can never reach a run.
+(async () => {
+  const core = await import('file://' + corePath);
+  const violations = core.validateGraph(graph, graph, null);
+  if (violations.length) {
+    die('graph violates its own invariants:\n  - ' + violations.join('\n  - '));
+  }
+
+  if (fs.existsSync(outPath) && !force) {
+    die(outPath + ' exists — pass --force to overwrite (never hand-edit generated scripts)');
+  }
+
+  const tpl = (f) => fs.readFileSync(path.join(__dirname, 'prompts', f), 'utf8');
+  const esc = (s) => s.replace(/\\/g, '\\\\').replace(/`/g, '\\`');
+
+  // meta MUST be a pure literal. It lists the APPROVED nodes; nodes added by a
+  // runtime patch simply get their own progress group from the Workflow engine.
+  const phaseLines = graph.nodes
+    .filter((n) => n.id !== graph.terminal)
+    .map((n) => `    { title: '${n.id}', detail: '${(n.kind || 'work')} node' },`)
+    .join('\n');
+
+  const src = `export const meta = {
+  name: ${JSON.stringify('loom-' + name)},
+  description: ${JSON.stringify((graph.goal || name).slice(0, 160))},
+  phases: [
+${phaseLines}
+  ],
+}
+
+// ============================ graph-core (INLINED) ============================
+// Source of truth: plugins/lirbox/skills/loom/scripts/graph-core.mjs
+// Inlined because this layer has no module loader. test-loom.cjs asserts this
+// block matches the module byte-for-byte — edit the module, regenerate, never
+// patch it here.
+${coreSrc}
+// ========================== end graph-core (INLINED) ==========================
+
+const NAME = ${JSON.stringify(name)}
+const WORKTREE = ${JSON.stringify('.worktrees/' + name)}
+const BRANCH = ${JSON.stringify('wf/' + name)}
+const GRAPH_V0 = ${JSON.stringify(graph, null, 2).replace(/\n/g, '\n')}
+
+// Resume restores STRUCTURE (the patched graph), not just progress.
+let graph   = (args && args.graph)   ? args.graph   : GRAPH_V0
+let visits  = (args && args.visits)  ? args.visits  : {}
+let results = (args && args.results) ? args.results : {}
+let carry   = (args && args.carry)   ? args.carry   : {}
+let trace   = (args && args.trace)   ? args.trace   : []
+let node    = (args && args.cursor)  ? args.cursor  : graph.start
+
+// A gate is "satisfied" once its most recent visit returned passed === true.
+function unsatisfiedGates() {
+  const out = []
+  for (const g of (graph.invariants && graph.invariants.mustCross) || []) {
+    let last = null
+    for (const t of trace) if (t.node === g && t.verdict !== undefined) last = t.verdict
+    if (last !== true) out.push(g)
+  }
+  return out
+}
+
+async function checkpoint(cursor) {
+  const payload = JSON.stringify({
+    workflow: NAME, status: 'running', graphVersion: graph.version || 0,
+    graph, cursor, visits, results, carry, trace,
+  }, null, 2)
+  await agent(
+    \`${esc(tpl('checkpoint.txt'))}\`
+      .replace('\${name}', NAME).replace('\${payload}', payload),
+    { label: 'checkpoint:' + cursor, phase: 'Checkpoint' },
+  )
+}
+
+while (node && node !== graph.terminal) {
+  const n = graph.nodes.find((x) => x.id === node)
+  if (!n) throw new Error('unknown node: ' + node)
+
+  const visit = (visits[node] || 0) + 1
+  const cap = capFor(graph, node)
+  if (visit > cap) {
+    throw new Error('visit cap exceeded at ' + node + ' (' + visit + ' > ' + cap + ')')
+  }
+  visits[node] = visit
+
+  phase(node)
+  const key = node + '#' + visit
+  let r
+  if (results[key] !== undefined) {
+    log(key + ' already complete (resumed)')
+    r = results[key]
+  } else {
+    const carryIn = carry[node] || {}
+    const carryText = Object.keys(carryIn).length
+      ? 'CARRIED FORWARD from the edge that sent you here:\\n' + JSON.stringify(carryIn, null, 2)
+      : ''
+    const prompt = \`${esc(tpl('node-lead.txt'))}\`
+      .replace('\${WORKTREE}', WORKTREE).replace('\${BRANCH}', BRANCH)
+      .replace('\${nodeId}', node).replace('\${visit}', String(visit))
+      .replace('\${cap}', String(cap)).replace('\${carryText}', carryText)
+      .replace('\${nodePrompt}', n.prompt || '').replace('\${terminal}', graph.terminal)
+    r = await agent(prompt, {
+      label: key, phase: node,
+      ...(n.agentType ? { agentType: n.agentType } : {}),
+      ...(n.model ? { model: n.model } : {}),
+      ...(n.schema ? { schema: n.schema } : {}),
+    })
+    results[key] = r
+  }
+
+  if (r && r.graphPatch) {
+    const next = applyPatchTo(graph, r.graphPatch)
+    const viol = validateGraph(next, graph, { node, unsatisfiedGates: unsatisfiedGates() })
+    if (viol.length) {
+      log('patch REJECTED at ' + node + ': ' + viol.join('; '))
+      trace.push({ node, visit, patch: 'rejected', violations: viol })
+    } else {
+      graph = next
+      graph.version = (graph.version || 0) + 1
+      log('patch accepted at ' + node + ' -> graph v' + graph.version)
+      trace.push({ node, visit, patch: 'accepted', version: graph.version })
+    }
+  }
+
+  const edge = pickEdge(graph, node, r)
+  const nextNode = edge ? edge.to : graph.terminal
+  if (edge) carry[nextNode] = carryFor(edge, r)
+  trace.push({ node, visit, verdict: r ? r.passed : undefined, to: nextNode })
+
+  await checkpoint(nextNode)
+  node = nextNode
+}
+
+return { graph, visits, results, carry, trace, cursor: graph.terminal }
+`;
+
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, src);
+  process.stdout.write(`Wrote ${outPath}\n`);
+  process.stdout.write(`Nodes: ${graph.nodes.map((n) => n.id).join(' -> ')}\n`);
+})();
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — all prior tests plus 14 generator tests, `all green`. In particular `node --check` succeeds and every `FORBIDDEN` pattern is absent.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/scaffold-loom.cjs \
+        plugins/lirbox/skills/loom/scripts/prompts/ \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): generator emitting a graph interpreter with inlined core"
+```
+
+---
+
+### Task 5: Seed graphs for the lite and delivery profiles
+
+What the human sees before the bootstrap planner has touched anything.
+
+**Files:**
+- Create: `plugins/lirbox/skills/loom/scripts/seeds/lite.json`
+- Create: `plugins/lirbox/skills/loom/scripts/seeds/delivery.json`
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: the graph schema (Task 3), `validateGraph`.
+- Produces: two seed graphs, each valid against `validateGraph(seed, seed, null)`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs` before the final `process.stdout.write` line:
+
+```js
+  section('seed graphs');
+
+  for (const profile of ['lite', 'delivery']) {
+    const seed = JSON.parse(fs.readFileSync(
+      path.join(__dirname, 'seeds', `${profile}.json`), 'utf8'));
+
+    test(`${profile}: validates against itself`, () => {
+      assert.deepStrictEqual(core.validateGraph(seed, seed, null), []);
+    });
+
+    test(`${profile}: every mustCross gate is locked`, () => {
+      for (const g of seed.invariants.mustCross) {
+        const n = seed.nodes.find((x) => x.id === g);
+        assert.ok(n, `${g} missing from nodes`);
+        assert.ok(n.locked, `${g} is a mustCross gate but is not locked`);
+      }
+    });
+
+    test(`${profile}: lockedHash is present and correct`, () => {
+      assert.strictEqual(seed.invariants.lockedHash, core.lockedFingerprint(seed));
+    });
+
+    test(`${profile}: has a failure back-edge into a work node`, () => {
+      const back = seed.edges.filter((e) => {
+        const to = seed.nodes.find((n) => n.id === e.to);
+        return to && to.kind === 'work' && e.when && e.when.eq === false;
+      });
+      assert.ok(back.length > 0, 'a seed with no back-edge defeats the purpose of loom');
+    });
+
+    test(`${profile}: generates a valid conductor`, () => {
+      const f = path.join(tmp, `${profile}.json`);
+      fs.writeFileSync(f, JSON.stringify({ ...seed, name: profile, goal: 'seed check' }));
+      const o = path.join(tmp, `${profile}.js`);
+      execFileSync('node', [GEN, '--name', profile, '--graph', f, '--out', o, '--force']);
+      execFileSync('node', ['--check', o]);
+    });
+  }
+
+  test('delivery carries a DoDGate and lite does not require one', () => {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    assert.ok(d.invariants.mustCross.includes('DoDGate'));
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `ENOENT: .../seeds/lite.json`.
+
+- [ ] **Step 3: Write the seeds**
+
+Create `plugins/lirbox/skills/loom/scripts/seeds/lite.json`:
+
+```json
+{
+  "version": 0,
+  "start": "Setup",
+  "terminal": "Done",
+  "nodes": [
+    { "id": "Setup", "kind": "work",
+      "prompt": "Create or reuse the git worktree and branch for this run. Report the paths.",
+      "model": "haiku",
+      "schema": { "type": "object", "additionalProperties": false,
+        "required": ["worktree", "branch"],
+        "properties": { "worktree": { "type": "string" }, "branch": { "type": "string" } } } },
+
+    { "id": "Plan", "kind": "plan",
+      "prompt": "Read the repository and decide this run's decomposition. Return a graphPatch that adds the work nodes you need between Plan and Review, with their dependency edges.",
+      "schema": { "type": "object", "required": ["summary"],
+        "properties": { "summary": { "type": "string" }, "graphPatch": { "type": "object" } } } },
+
+    { "id": "Implement", "kind": "work",
+      "prompt": "Implement the goal in the worktree. Commit your work on the branch.",
+      "schema": { "type": "object", "additionalProperties": false,
+        "required": ["summary"], "properties": { "summary": { "type": "string" },
+          "files": { "type": "array", "items": { "type": "string" } } } } },
+
+    { "id": "Review", "kind": "gate", "locked": true,
+      "prompt": "Review the diff on this branch for correctness, security and convention violations. Fix every Critical and High finding, keep the build green, and commit. Report passed=true only when nothing Critical or High is left UNRESOLVED, and only after actually running the build.",
+      "schema": { "type": "object", "additionalProperties": false,
+        "required": ["passed", "buildExit"],
+        "properties": { "passed": { "type": "boolean" }, "buildExit": { "type": "number" },
+          "findings": { "type": "array", "items": { "type": "string" } } } } },
+
+    { "id": "Done", "kind": "terminal" }
+  ],
+  "edges": [
+    { "from": "Setup", "to": "Plan", "when": "always" },
+    { "from": "Plan", "to": "Implement", "when": "always" },
+    { "from": "Implement", "to": "Review", "when": "always" },
+    { "from": "Review", "to": "Implement", "when": { "field": "passed", "eq": false },
+      "carry": ["findings"] },
+    { "from": "Review", "to": "Done", "when": { "field": "passed", "eq": true },
+      "locked": true }
+  ],
+  "invariants": {
+    "mustCross": ["Review"],
+    "visitCaps": { "*": 3, "Implement": 4 },
+    "nodeBudget": 20,
+    "lockedHash": "REPLACE_ME"
+  }
+}
+```
+
+Create `plugins/lirbox/skills/loom/scripts/seeds/delivery.json` — the same shape plus DoD and PR:
+
+```json
+{
+  "version": 0,
+  "start": "Setup",
+  "terminal": "Done",
+  "nodes": [
+    { "id": "Setup", "kind": "work",
+      "prompt": "Create or reuse the git worktree and branch for this run. Report the paths.",
+      "model": "haiku",
+      "schema": { "type": "object", "additionalProperties": false,
+        "required": ["worktree", "branch"],
+        "properties": { "worktree": { "type": "string" }, "branch": { "type": "string" } } } },
+
+    { "id": "DoDBaseline", "kind": "work",
+      "prompt": "Run every checkable DoD criterion's check FILE against the worktree BEFORE any work, and record met/unmet/error per criterion. Measure only — fix nothing.",
+      "model": "haiku",
+      "schema": { "type": "object", "additionalProperties": false, "required": ["baselines"],
+        "properties": { "baselines": { "type": "array", "items": { "type": "object",
+          "additionalProperties": false, "required": ["id", "status"],
+          "properties": { "id": { "type": "string" },
+            "status": { "type": "string", "enum": ["met", "unmet", "error"] } } } } } } },
+
+    { "id": "Plan", "kind": "plan",
+      "prompt": "Read the repository and decide this run's decomposition. Return a graphPatch that adds the work nodes you need between Plan and Review, with their dependency edges.",
+      "schema": { "type": "object", "required": ["summary"],
+        "properties": { "summary": { "type": "string" }, "graphPatch": { "type": "object" } } } },
+
+    { "id": "Implement", "kind": "work",
+      "prompt": "Implement the goal in the worktree. Commit your work on the branch.",
+      "schema": { "type": "object", "additionalProperties": false, "required": ["summary"],
+        "properties": { "summary": { "type": "string" },
+          "files": { "type": "array", "items": { "type": "string" } } } } },
+
+    { "id": "Review", "kind": "gate", "locked": true,
+      "prompt": "Review the diff on this branch for correctness, security and convention violations. Fix every Critical and High finding, keep the build green, and commit. Report passed=true only when nothing Critical or High is left UNRESOLVED, and only after actually running the build.",
+      "schema": { "type": "object", "additionalProperties": false,
+        "required": ["passed", "buildExit"],
+        "properties": { "passed": { "type": "boolean" }, "buildExit": { "type": "number" },
+          "findings": { "type": "array", "items": { "type": "string" } } } } },
+
+    { "id": "DoDGate", "kind": "gate", "locked": true,
+      "prompt": "Adjudicate EVERY definition-of-done criterion against the work on this branch. MEASURE ONLY — do not fix. For tier checkable: verify the check file's sha256 matches the frozen checkSha, then run it; exit 0 is MET, non-zero UNMET, a hash mismatch is a hard failure. For tier judged: cite artifact evidence (file:line, command output, test result) from the actual diff; worker reports are untrusted claims and can never satisfy a criterion alone. A deferral without a recorded human decision is UNMET.",
+      "schema": { "type": "object", "additionalProperties": false,
+        "required": ["passed", "criteria"],
+        "properties": { "passed": { "type": "boolean" },
+          "unmetCriteria": { "type": "array", "items": { "type": "string" } },
+          "criteria": { "type": "array", "items": { "type": "object",
+            "additionalProperties": false, "required": ["id", "verdict"],
+            "properties": { "id": { "type": "string" },
+              "verdict": { "type": "string", "enum": ["MET", "UNMET", "PARTIAL"] },
+              "evidence": { "type": "string" } } } } } } },
+
+    { "id": "PR", "kind": "work",
+      "prompt": "Push the branch and open a pull request with the GitHub CLI. Never merge. If a PR already exists for this branch, return its URL.",
+      "schema": { "type": "object", "additionalProperties": false, "required": ["prUrl"],
+        "properties": { "prUrl": { "type": "string" } } } },
+
+    { "id": "Done", "kind": "terminal" }
+  ],
+  "edges": [
+    { "from": "Setup", "to": "DoDBaseline", "when": "always" },
+    { "from": "DoDBaseline", "to": "Plan", "when": "always" },
+    { "from": "Plan", "to": "Implement", "when": "always" },
+    { "from": "Implement", "to": "Review", "when": "always" },
+    { "from": "Review", "to": "Implement", "when": { "field": "passed", "eq": false },
+      "carry": ["findings"] },
+    { "from": "Review", "to": "DoDGate", "when": { "field": "passed", "eq": true } },
+    { "from": "DoDGate", "to": "Implement", "when": { "field": "passed", "eq": false },
+      "carry": ["unmetCriteria"], "locked": true },
+    { "from": "DoDGate", "to": "PR", "when": { "field": "passed", "eq": true },
+      "locked": true },
+    { "from": "PR", "to": "Done", "when": "always" }
+  ],
+  "invariants": {
+    "mustCross": ["Review", "DoDGate"],
+    "visitCaps": { "*": 3, "Implement": 4 },
+    "nodeBudget": 40,
+    "lockedHash": "REPLACE_ME"
+  }
+}
+```
+
+- [ ] **Step 4: Stamp the real lockedHash into both seeds**
+
+The `REPLACE_ME` placeholders must be replaced with the computed fingerprint. Run:
+
+```bash
+cd plugins/lirbox/skills/loom/scripts && node -e "
+const fs=require('fs');
+(async()=>{
+  const core=await import('./graph-core.mjs');
+  for (const p of ['seeds/lite.json','seeds/delivery.json']) {
+    const g=JSON.parse(fs.readFileSync(p,'utf8'));
+    g.invariants.lockedHash=core.lockedFingerprint(g);
+    fs.writeFileSync(p, JSON.stringify(g,null,2)+'\n');
+    console.log(p, g.invariants.lockedHash);
+  }
+})()"
+```
+
+Expected: two lines printing `fnv1a:` hashes. No `REPLACE_ME` remains:
+
+```bash
+grep -r REPLACE_ME plugins/lirbox/skills/loom/scripts/seeds/ ; echo "exit=$?"
+```
+
+Expected: no output, `exit=1`.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — 11 new seed tests, `all green`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/seeds/ \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): lite and delivery seed graphs with locked gates"
+```
+
+---
+
+### Task 6: The loopback graph server
+
+**Files:**
+- Create: `plugins/lirbox/skills/loom/scripts/graph-server.mjs`
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: `graph-core.mjs` (`validateGraph`, `lockedFingerprint`).
+- Produces:
+  - CLI: `node graph-server.mjs --name <n> --root <repoRoot> [--port 0]`
+  - prints `LOOM_SERVER_PORT=<port>` on stdout once listening
+  - routes: `GET /`, `GET /graph`, `POST /graph`, `GET /state`, `POST /action`
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs` before the final `process.stdout.write` line. Note these are `async` and use `await`, which `main()` already permits:
+
+```js
+  section('graph server');
+
+  const { spawn } = require('child_process');
+  const SERVER = path.join(__dirname, 'graph-server.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-root-'));
+  fs.mkdirSync(path.join(root, '.loom', 'state'), { recursive: true });
+  const seedGraph = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+  fs.writeFileSync(path.join(root, '.loom', 'srv.graph.json'), JSON.stringify(seedGraph));
+  fs.writeFileSync(path.join(root, '.loom', 'state', 'srv.json'),
+    JSON.stringify({ workflow: 'srv', status: 'running', cursor: 'Implement', visits: { Implement: 2 } }));
+
+  const proc = spawn('node', [SERVER, '--name', 'srv', '--root', root, '--port', '0']);
+  const port = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('server did not start in 5s')), 5000);
+    proc.stdout.on('data', (b) => {
+      const m = /LOOM_SERVER_PORT=(\d+)/.exec(b.toString());
+      if (m) { clearTimeout(t); resolve(Number(m[1])); }
+    });
+    proc.stderr.on('data', (b) => process.stderr.write(b));
+  });
+  const base = `http://127.0.0.1:${port}`;
+  const get = async (p) => { const r = await fetch(base + p); return { status: r.status, body: await r.json() }; };
+  const post = async (p, o) => {
+    const r = await fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(o) });
+    return { status: r.status, body: await r.json() };
+  };
+
+  const rGraph = await get('/graph');
+  test('GET /graph returns the current graph', () => {
+    assert.strictEqual(rGraph.status, 200);
+    assert.strictEqual(rGraph.body.terminal, 'Done');
+  });
+
+  const rState = await get('/state');
+  test('GET /state returns run state', () => {
+    assert.strictEqual(rState.status, 200);
+    assert.strictEqual(rState.body.cursor, 'Implement');
+  });
+
+  const rIndex = await fetch(base + '/');
+  test('GET / serves the editor HTML', async () => {
+    assert.strictEqual(rIndex.status, 200);
+    assert.ok(/text\/html/.test(rIndex.headers.get('content-type')));
+  });
+
+  const bypass = core.applyPatchTo(seedGraph, {
+    addEdges: [{ from: 'Implement', to: 'Done', when: 'always' }] });
+  const rBad = await post('/graph', bypass);
+  test('POST /graph rejects a gate bypass with 422 and reasons', () => {
+    assert.strictEqual(rBad.status, 422);
+    assert.ok(Array.isArray(rBad.body.violations) && rBad.body.violations.length);
+    assert.ok(rBad.body.violations.some((m) => /dominates/.test(m)));
+  });
+
+  test('a rejected POST does not touch the stored graph', () => {
+    const onDisk = JSON.parse(fs.readFileSync(path.join(root, '.loom', 'srv.graph.json'), 'utf8'));
+    assert.ok(!onDisk.edges.some((e) => e.from === 'Implement' && e.to === 'Done'));
+  });
+
+  const okGraph = core.applyPatchTo(seedGraph, {
+    addNodes: [{ id: 'Migrate', kind: 'work', prompt: 'run the migration' }],
+    addEdges: [{ from: 'Migrate', to: 'Implement', when: 'always' }] });
+  okGraph.edges.unshift({ from: 'Plan', to: 'Migrate', when: 'always' });
+  const rOk = await post('/graph', okGraph);
+  test('POST /graph accepts a valid graph and bumps the version', () => {
+    assert.strictEqual(rOk.status, 200);
+    assert.strictEqual(rOk.body.version, (seedGraph.version || 0) + 1);
+  });
+
+  const rAction = await post('/action', { action: 'replan', comments: [{ node: 'Implement', text: 'split this' }] });
+  test('POST /action writes the action file', () => {
+    assert.strictEqual(rAction.status, 200);
+    const a = JSON.parse(fs.readFileSync(path.join(root, '.loom', 'srv.action.json'), 'utf8'));
+    assert.strictEqual(a.action, 'replan');
+    assert.strictEqual(a.comments[0].node, 'Implement');
+  });
+
+  test('POST /action rejects an unknown action', async () => {
+    const r = await post('/action', { action: 'rm-rf' });
+    assert.strictEqual(r.status, 400);
+  });
+
+  test('the server binds loopback only', () => {
+    const srcText = fs.readFileSync(SERVER, 'utf8');
+    assert.ok(/'127\.0\.0\.1'|"127\.0\.0\.1"/.test(srcText),
+      'the server must bind 127.0.0.1 explicitly, never 0.0.0.0');
+  });
+
+  proc.kill();
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `server did not start in 5s` (the script does not exist).
+
+- [ ] **Step 3: Write the implementation**
+
+Create `plugins/lirbox/skills/loom/scripts/graph-server.mjs`:
+
+```js
+#!/usr/bin/env node
+/*
+ * loom's pre-flight + live-view server.
+ *
+ *   node graph-server.mjs --name <name> --root <repoRoot> [--port 0]
+ *
+ * Binds 127.0.0.1 ONLY. It has no authentication because it is never reachable off
+ * the loopback interface; do not change the bind address to add convenience.
+ *
+ * It cannot spawn agents — agents exist only inside the Claude session. "Replan" and
+ * "approve" are therefore a handoff: this server writes <name>.action.json and the
+ * skill, polling in the main session, picks it up.
+ */
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { validateGraph } from './graph-core.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const argv = process.argv;
+const arg = (n, d) => {
+  const i = argv.indexOf('--' + n);
+  if (i < 0) return d;
+  const v = argv[i + 1];
+  return (v === undefined || v.startsWith('--')) ? true : v;
+};
+
+const NAME = arg('name', '');
+const ROOT = arg('root', process.cwd());
+const PORT = Number(arg('port', 0));
+if (!NAME || NAME === true) { console.error('ERROR: --name is required'); process.exit(1); }
+
+const graphPath = path.join(ROOT, '.loom', `${NAME}.graph.json`);
+const statePath = path.join(ROOT, '.loom', 'state', `${NAME}.json`);
+const actionPath = path.join(ROOT, '.loom', `${NAME}.action.json`);
+
+const readJson = (p, dflt) => {
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return dflt; }
+};
+const send = (res, code, obj) => {
+  const body = JSON.stringify(obj);
+  res.writeHead(code, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+  res.end(body);
+};
+const readBody = (req) => new Promise((resolve, reject) => {
+  let d = '';
+  req.on('data', (c) => {
+    d += c;
+    if (d.length > 4e6) { reject(new Error('body too large')); req.destroy(); }
+  });
+  req.on('end', () => { try { resolve(JSON.parse(d || '{}')); } catch (e) { reject(e); } });
+});
+
+// Static assets are limited to the editor directory and resolved through a prefix
+// check, so a crafted path cannot escape into the rest of the repo.
+function serveStatic(res, rel) {
+  const dir = path.join(HERE, 'editor');
+  const file = path.resolve(dir, '.' + rel);
+  if (!file.startsWith(dir + path.sep) && file !== path.join(dir, 'index.html')) {
+    return send(res, 403, { error: 'forbidden' });
+  }
+  if (!fs.existsSync(file)) return send(res, 404, { error: 'not found' });
+  const type = file.endsWith('.html') ? 'text/html; charset=utf-8'
+    : file.endsWith('.mjs') || file.endsWith('.js') ? 'text/javascript; charset=utf-8'
+    : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
+  res.writeHead(200, { 'content-type': type });
+  fs.createReadStream(file).pipe(res);
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://127.0.0.1');
+  const p = url.pathname;
+  try {
+    if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
+      return serveStatic(res, '/index.html');
+    }
+    if (req.method === 'GET' && p === '/editor.js') return serveStatic(res, '/editor.js');
+    // The editor imports the SAME validator the conductor inlines.
+    if (req.method === 'GET' && p === '/graph-core.mjs') {
+      res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+      return fs.createReadStream(path.join(HERE, 'graph-core.mjs')).pipe(res);
+    }
+    if (req.method === 'GET' && p === '/graph') {
+      return send(res, 200, readJson(graphPath, { error: 'no graph yet' }));
+    }
+    if (req.method === 'GET' && p === '/state') {
+      return send(res, 200, readJson(statePath, { status: 'not started' }));
+    }
+    if (req.method === 'POST' && p === '/graph') {
+      const next = await readBody(req);
+      const prev = readJson(graphPath, null);
+      // Re-validate server-side ALWAYS. The editor's lock badges are a courtesy;
+      // this is the enforcement.
+      const violations = validateGraph(next, prev, null);
+      if (violations.length) return send(res, 422, { violations });
+      next.version = ((prev && prev.version) || 0) + 1;
+      fs.writeFileSync(graphPath, JSON.stringify(next, null, 2) + '\n');
+      return send(res, 200, { ok: true, version: next.version });
+    }
+    if (req.method === 'POST' && p === '/action') {
+      const body = await readBody(req);
+      if (body.action !== 'replan' && body.action !== 'approve') {
+        return send(res, 400, { error: 'action must be "replan" or "approve"' });
+      }
+      fs.writeFileSync(actionPath, JSON.stringify({
+        action: body.action, comments: body.comments || [],
+      }, null, 2) + '\n');
+      return send(res, 200, { ok: true, action: body.action });
+    }
+    return send(res, 404, { error: 'not found' });
+  } catch (e) {
+    return send(res, 400, { error: String(e && e.message) });
+  }
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  process.stdout.write(`LOOM_SERVER_PORT=${server.address().port}\n`);
+});
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — 10 new server tests, `all green`. (`GET /` fails until Task 7 creates `editor/index.html`; create a one-line placeholder now — `<!doctype html><title>loom</title>` — and Task 7 replaces it.)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/graph-server.mjs \
+        plugins/lirbox/skills/loom/scripts/editor/ \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): loopback graph server with server-side validation"
+```
+
+---
+
+### Task 7: The React Flow editor
+
+**Files:**
+- Create/replace: `plugins/lirbox/skills/loom/scripts/editor/index.html`
+- Create: `plugins/lirbox/skills/loom/scripts/editor/editor.js`
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: `GET /graph`, `POST /graph`, `GET /state`, `POST /action` (Task 6); `graph-core.mjs` served at `/graph-core.mjs`.
+- Produces: a browser UI. Assertions here are structural (the DOM/JS contract), since there is no headless browser in this net.
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs` before the final `process.stdout.write` line:
+
+```js
+  section('editor');
+
+  const editorHtml = fs.readFileSync(path.join(__dirname, 'editor', 'index.html'), 'utf8');
+  const editorJs = fs.readFileSync(path.join(__dirname, 'editor', 'editor.js'), 'utf8');
+
+  test('loads React Flow from CDN', () => {
+    assert.ok(/reactflow/i.test(editorHtml), 'React Flow must be loaded');
+  });
+
+  test('every external subresource is pinned with SRI', () => {
+    // A CDN that serves different bytes tomorrow would be executing arbitrary code
+    // against the repo the editor is about to modify. Pin them.
+    const external = [...editorHtml.matchAll(/<(script|link)\b[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((tag) => /https?:\/\//.test(tag));
+    assert.ok(external.length >= 4, 'expected React, ReactDOM, React Flow and its stylesheet');
+    for (const tag of external) {
+      assert.ok(/integrity="sha384-[A-Za-z0-9+/=]+"/.test(tag),
+        `missing SRI integrity: ${tag}`);
+      assert.ok(/crossorigin="anonymous"/.test(tag), `missing crossorigin: ${tag}`);
+    }
+  });
+
+  test('external URLs are version-pinned, never a floating major', () => {
+    for (const m of editorHtml.matchAll(/https:\/\/unpkg\.com\/([^"'\s]+)/g)) {
+      assert.ok(/@\d+\.\d+\.\d+/.test(m[1]),
+        `pin an exact version, got ${m[1]} — SRI on a floating range breaks on every release`);
+    }
+  });
+
+  test('imports the shared validator rather than reimplementing it', () => {
+    assert.ok(/from ['"]\.\/graph-core\.mjs['"]/.test(editorJs),
+      'the editor must import graph-core.mjs — no second validator');
+    assert.ok(/validateGraph/.test(editorJs));
+  });
+
+  test('posts to every server route it needs', () => {
+    for (const route of ['/graph', '/state', '/action']) {
+      assert.ok(editorJs.includes(route), `editor never calls ${route}`);
+    }
+  });
+
+  test('renders 422 violations back to the user', () => {
+    assert.ok(/422/.test(editorJs) && /violations/.test(editorJs),
+      'a rejected save must show its reasons, not fail silently');
+  });
+
+  test('refuses to edit locked nodes', () => {
+    assert.ok(/locked/.test(editorJs));
+  });
+
+  test('polls state for live mode and goes read-only during a run', () => {
+    assert.ok(/setInterval/.test(editorJs));
+    assert.ok(/readOnly|readonly/.test(editorJs));
+  });
+
+  test('writes per-node visit caps into invariants, not onto the node', () => {
+    assert.ok(/invariants\.visitCaps|visitCaps\[/.test(editorJs),
+      'visit caps have exactly one home: invariants.visitCaps');
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `ENOENT: .../editor/editor.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+Replace `plugins/lirbox/skills/loom/scripts/editor/index.html`:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>loom — graph editor</title>
+<!-- Exact versions + SRI. This page is served next to a repo it is about to edit;
+     a CDN serving different bytes tomorrow would be arbitrary code execution.
+     Regenerate these four tags with the command in Step 3b after any version bump. -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+        integrity="REPLACE_WITH_SRI" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
+        integrity="REPLACE_WITH_SRI" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/reactflow@11.11.4/dist/umd/index.js"
+        integrity="REPLACE_WITH_SRI" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://unpkg.com/reactflow@11.11.4/dist/style.css"
+      integrity="REPLACE_WITH_SRI" crossorigin="anonymous">
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  #app { display: flex; height: 100vh; }
+  #canvas { flex: 1; }
+  #panel { width: 320px; border-left: 1px solid #8884; padding: 12px; overflow-y: auto; }
+  #bar { position: absolute; z-index: 10; top: 12px; left: 12px; display: flex; gap: 8px; }
+  button { padding: 6px 12px; border-radius: 6px; border: 1px solid #8886; background: #8881; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #violations { color: #c33; white-space: pre-wrap; margin-top: 8px; }
+  #violations:empty { display: none; }
+  textarea { width: 100%; min-height: 120px; font: 12px ui-monospace, monospace; }
+  .node-gate { border-color: #c93 !important; }
+  .node-work { border-color: #39c !important; }
+  .locked::after { content: " 🔒"; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="canvas"><div id="bar">
+    <button id="save">Save</button>
+    <button id="replan">Replan from comments</button>
+    <button id="approve">Approve &amp; run</button>
+    <span id="status"></span>
+  </div></div>
+  <div id="panel">
+    <div id="detail">Select a node.</div>
+    <div id="violations"></div>
+  </div>
+</div>
+<script type="module" src="./editor.js"></script>
+</body>
+</html>
+```
+
+Create `plugins/lirbox/skills/loom/scripts/editor/editor.js`:
+
+```js
+// loom graph editor.
+//
+// Validation here is a COURTESY — the server re-validates every POST and its answer
+// is final. Importing the same graph-core the conductor inlines guarantees the
+// message you see in the browser is the message the run would produce.
+import { validateGraph, capFor } from './graph-core.mjs';
+
+const { useState, useEffect, useCallback, createElement: h } = React;
+const RF = window.ReactFlow;
+
+let graph = null;
+let readOnly = false;
+let selected = null;
+const comments = [];
+
+const $ = (id) => document.getElementById(id);
+const setStatus = (t) => { $('status').textContent = t; };
+const showViolations = (list) => {
+  $('violations').textContent = list && list.length
+    ? 'Rejected:\n  - ' + list.join('\n  - ') : '';
+};
+
+// ---- graph <-> React Flow ------------------------------------------------
+
+function toFlow(g) {
+  const nodes = g.nodes.map((n, i) => ({
+    id: n.id,
+    position: n.pos || { x: 60, y: 40 + i * 90 },
+    data: { label: n.id + (n.locked ? ' 🔒' : '') },
+    className: (n.kind === 'gate' ? 'node-gate' : 'node-work') + (n.locked ? ' locked' : ''),
+    draggable: !readOnly,
+    deletable: !readOnly && !n.locked,
+  }));
+  const edges = g.edges.map((e, i) => ({
+    id: `e${i}:${e.from}->${e.to}`,
+    source: e.from, target: e.to,
+    label: e.when === 'always' ? '' : `${e.when.field}=${JSON.stringify(e.when.eq ?? e.when.neq)}`,
+    animated: !!e.carry,
+    deletable: !readOnly && !e.locked,
+  }));
+  return { nodes, edges };
+}
+
+function fromFlow(flowNodes, flowEdges) {
+  const next = JSON.parse(JSON.stringify(graph));
+  // Persist layout so the graph reopens the way you left it.
+  for (const fn of flowNodes) {
+    const n = next.nodes.find((x) => x.id === fn.id);
+    if (n) n.pos = fn.position;
+  }
+  const keep = new Set(flowNodes.map((n) => n.id));
+  next.nodes = next.nodes.filter((n) => keep.has(n.id));
+  next.edges = flowEdges.map((fe) => {
+    const prior = graph.edges.find((e) => e.from === fe.source && e.to === fe.target);
+    return prior || { from: fe.source, to: fe.target, when: 'always' };
+  });
+  return next;
+}
+
+// ---- server I/O ---------------------------------------------------------
+
+async function loadGraph() {
+  graph = await (await fetch('/graph')).json();
+  return graph;
+}
+
+async function save(next) {
+  // Local pre-check first: identical rules, instant feedback, no round trip.
+  const local = validateGraph(next, graph, null);
+  if (local.length) { showViolations(local); return false; }
+
+  const res = await fetch('/graph', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(next),
+  });
+  if (res.status === 422) {
+    const { violations } = await res.json();
+    showViolations(violations);
+    return false;
+  }
+  const body = await res.json();
+  showViolations([]);
+  graph = next;
+  graph.version = body.version;
+  setStatus(`saved v${body.version}`);
+  return true;
+}
+
+async function action(kind) {
+  const res = await fetch('/action', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: kind, comments }),
+  });
+  setStatus(res.ok ? `${kind} requested — return to the terminal` : `${kind} failed`);
+}
+
+// ---- live mode ----------------------------------------------------------
+
+// The run is unattended by design: once it starts the editor is a viewer.
+// Comments typed during a run are filed to the whetstone backlog, not applied here.
+function startPolling(rerender) {
+  setInterval(async () => {
+    const st = await (await fetch('/state')).json();
+    const running = st.status === 'running';
+    if (running !== readOnly) { readOnly = running; }
+    if (running) {
+      setStatus(`running — at ${st.cursor} · visits ${JSON.stringify(st.visits || {})}`);
+      const live = await (await fetch('/graph')).json();
+      if (live.version !== (graph && graph.version)) { graph = live; rerender(); }
+    }
+  }, 2000);
+}
+
+// ---- app ----------------------------------------------------------------
+
+function App() {
+  const [flow, setFlow] = useState({ nodes: [], edges: [] });
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => { loadGraph().then((g) => setFlow(toFlow(g))); }, [tick]);
+  useEffect(() => { startPolling(() => setTick((t) => t + 1)); }, []);
+
+  const onSelect = useCallback((_, node) => {
+    selected = graph.nodes.find((n) => n.id === node.id);
+    renderPanel();
+  }, []);
+
+  useEffect(() => {
+    $('save').onclick = async () => {
+      if (readOnly) return setStatus('run in progress — editor is read-only');
+      await save(fromFlow(flow.nodes, flow.edges));
+    };
+    $('replan').onclick = () => action('replan');
+    $('approve').onclick = async () => {
+      if (await save(fromFlow(flow.nodes, flow.edges))) action('approve');
+    };
+  }, [flow]);
+
+  return h(RF.ReactFlow, {
+    nodes: flow.nodes, edges: flow.edges,
+    onNodesChange: (c) => setFlow((f) => ({ ...f, nodes: RF.applyNodeChanges(c, f.nodes) })),
+    onEdgesChange: (c) => setFlow((f) => ({ ...f, edges: RF.applyEdgeChanges(c, f.edges) })),
+    onConnect: (p) => setFlow((f) => ({ ...f, edges: RF.addEdge(p, f.edges) })),
+    onNodeClick: onSelect,
+    fitView: true,
+  }, h(RF.Background, null), h(RF.Controls, null));
+}
+
+function renderPanel() {
+  if (!selected) return;
+  const n = selected;
+  const cap = capFor(graph, n.id);
+  const locked = !!n.locked;
+  $('detail').innerHTML = `
+    <h3>${n.id} <small>${n.kind || 'work'}${locked ? ' 🔒 locked' : ''}</small></h3>
+    <label>Visit cap<br><input id="cap" type="number" min="0" value="${cap}"
+      ${locked ? 'disabled' : ''}></label>
+    <label>Prompt<br><textarea id="prompt" ${locked ? 'disabled' : ''}>${
+      (n.prompt || '').replace(/</g, '&lt;')}</textarea></label>
+    <label>Comment for the replanner<br><textarea id="comment"
+      placeholder="e.g. this needs a schema migration before it runs"></textarea></label>
+    <button id="addComment">Add comment</button>
+    ${locked ? '<p><em>Locked at approval — gates cannot be edited or removed.</em></p>' : ''}`;
+
+  if (!locked) {
+    $('cap').onchange = (e) => {
+      // Visit caps have exactly ONE home so the validator has a single source.
+      graph.invariants = graph.invariants || {};
+      graph.invariants.visitCaps = graph.invariants.visitCaps || {};
+      graph.invariants.visitCaps[n.id] = Number(e.target.value);
+    };
+    $('prompt').onchange = (e) => { n.prompt = e.target.value; };
+  }
+  $('addComment').onclick = () => {
+    const text = $('comment').value.trim();
+    if (!text) return;
+    comments.push({ node: n.id, text });
+    $('comment').value = '';
+    setStatus(`${comments.length} comment(s) queued — press Replan`);
+  };
+}
+
+ReactDOM.createRoot($('canvas')).render(h(App));
+```
+
+- [ ] **Step 3b: Compute the real SRI hashes**
+
+The four `REPLACE_WITH_SRI` values must become real digests. Fetch each pinned URL and hash it:
+
+```bash
+cd plugins/lirbox/skills/loom/scripts/editor && for u in \
+  "https://unpkg.com/react@18.3.1/umd/react.production.min.js" \
+  "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" \
+  "https://unpkg.com/reactflow@11.11.4/dist/umd/index.js" \
+  "https://unpkg.com/reactflow@11.11.4/dist/style.css" ; do
+  h=$(curl -fsSL "$u" | openssl dgst -sha384 -binary | openssl base64 -A)
+  echo "$u  sha384-$h"
+done
+```
+
+Paste each `sha384-…` into the matching tag's `integrity` attribute, replacing `REPLACE_WITH_SRI`. Verify none remain:
+
+```bash
+grep -c REPLACE_WITH_SRI plugins/lirbox/skills/loom/scripts/editor/index.html
+```
+
+Expected: `0`.
+
+**If the CDN is unreachable or you want the editor to work offline**, take the spec's documented fallback instead: `curl` the four files into `editor/vendor/`, commit them, and point the tags at `./vendor/…` with no `integrity`/`crossorigin` attributes (same-origin needs neither). Update the two SRI tests above to skip when no external URL is present. Vendoring is strictly safer; it costs ~500 KB of committed third-party code.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — 9 new editor tests, `all green`.
+
+- [ ] **Step 5: Manual smoke test**
+
+```bash
+mkdir -p /tmp/loom-smoke/.loom/state
+cp plugins/lirbox/skills/loom/scripts/seeds/delivery.json /tmp/loom-smoke/.loom/smoke.graph.json
+node plugins/lirbox/skills/loom/scripts/graph-server.mjs --name smoke --root /tmp/loom-smoke --port 7391
+```
+
+Open `http://127.0.0.1:7391`. Confirm: the delivery graph renders; `DoDGate` and `Review` show 🔒 and refuse edits; drawing `Implement → Done` and pressing Save shows *"DoDGate no longer dominates Done"*; deleting that edge and saving succeeds with a version bump. Then `Ctrl-C`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/editor/ \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): React Flow editor with shared validation and live mode"
+```
+
+---
+
+### Task 8: DoD checks as hash-locked files
+
+**Files:**
+- Create: `plugins/lirbox/skills/loom/scripts/dod-freeze.mjs`
+- Modify: `plugins/lirbox/skills/loom/scripts/seeds/delivery.json` (DoDBaseline prompt)
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces:
+  - CLI: `node dod-freeze.mjs --dod <dod.json> --checks-dir <dir>` — writes each `checkable` criterion's script to `<dir>/<id>.sh`, computes `sha256`, rewrites `dod.json` with `checkFile`/`checkSha`
+  - `sha256File(p) -> string` — `"sha256:<hex>"`
+  - `verifyChecks(dod, root) -> {id, ok, reason}[]`
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs` before the final `process.stdout.write` line:
+
+```js
+  section('DoD check freezing');
+
+  const FREEZE = path.join(__dirname, 'dod-freeze.mjs');
+  const dodDir = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-dod-'));
+  const dodPath = path.join(dodDir, 'dod.json');
+  const checksDir = path.join(dodDir, 'checks');
+  fs.writeFileSync(dodPath, JSON.stringify({ criteria: [
+    { id: 'c1', text: 'callback rejects mismatched state', tier: 'checkable',
+      script: '#!/usr/bin/env bash\nset -euo pipefail\nnpx vitest run auth/callback\n' },
+    { id: 'c2', text: 'suite still passes', tier: 'checkable', baseline: 'green-ok',
+      script: '#!/usr/bin/env bash\nset -euo pipefail\nnpm test\n' },
+    { id: 'c3', text: 'error copy reads clearly', tier: 'judged' },
+  ] }));
+  execFileSync('node', [FREEZE, '--dod', dodPath, '--checks-dir', checksDir]);
+  const frozen = JSON.parse(fs.readFileSync(dodPath, 'utf8'));
+
+  test('each checkable criterion becomes a file on disk', () => {
+    for (const id of ['c1', 'c2']) {
+      assert.ok(fs.existsSync(path.join(checksDir, `${id}.sh`)), `${id}.sh not written`);
+    }
+  });
+
+  test('check files are executable', () => {
+    const mode = fs.statSync(path.join(checksDir, 'c1.sh')).mode;
+    assert.ok(mode & 0o111, 'check file must be executable');
+  });
+
+  test('checkFile and checkSha replace the inline script', () => {
+    const c1 = frozen.criteria.find((c) => c.id === 'c1');
+    assert.ok(c1.checkFile.endsWith('c1.sh'));
+    assert.ok(/^sha256:[0-9a-f]{64}$/.test(c1.checkSha));
+    assert.strictEqual(c1.script, undefined, 'the inline script must be moved, not duplicated');
+  });
+
+  test('judged criteria are left alone', () => {
+    const c3 = frozen.criteria.find((c) => c.id === 'c3');
+    assert.strictEqual(c3.checkFile, undefined);
+  });
+
+  test('baseline defaults to "red" and green-ok is preserved', () => {
+    assert.strictEqual(frozen.criteria.find((c) => c.id === 'c1').baseline, 'red');
+    assert.strictEqual(frozen.criteria.find((c) => c.id === 'c2').baseline, 'green-ok');
+  });
+
+  test('a checkable criterion with no script is a hard error', () => {
+    const bad = path.join(dodDir, 'bad.json');
+    fs.writeFileSync(bad, JSON.stringify({ criteria: [
+      { id: 'x', text: 'no script', tier: 'checkable' }] }));
+    let threw = false;
+    try { execFileSync('node', [FREEZE, '--dod', bad, '--checks-dir', checksDir],
+      { stdio: 'pipe' }); } catch { threw = true; }
+    assert.ok(threw);
+  });
+
+  section('DoD check verification');
+
+  test('verifyChecks passes on untouched files', async () => {
+    const m = await import('file://' + FREEZE);
+    const r = m.verifyChecks(frozen, dodDir);
+    assert.ok(r.every((x) => x.ok), JSON.stringify(r));
+  });
+
+  test('verifyChecks catches a weakened check', async () => {
+    const m = await import('file://' + FREEZE);
+    fs.writeFileSync(path.join(checksDir, 'c1.sh'), '#!/usr/bin/env bash\nexit 0\n');
+    const r = m.verifyChecks(frozen, dodDir);
+    const c1 = r.find((x) => x.id === 'c1');
+    assert.strictEqual(c1.ok, false);
+    assert.ok(/sha|hash|modified/i.test(c1.reason));
+  });
+
+  test('verifyChecks catches a deleted check', async () => {
+    const m = await import('file://' + FREEZE);
+    fs.unlinkSync(path.join(checksDir, 'c2.sh'));
+    const c2 = m.verifyChecks(frozen, dodDir).find((x) => x.id === 'c2');
+    assert.strictEqual(c2.ok, false);
+    assert.ok(/missing/i.test(c2.reason));
+  });
+
+  section('DoDBaseline discrimination');
+
+  test('the delivery seed hard-fails a baseline-green criterion', () => {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    const n = d.nodes.find((x) => x.id === 'DoDBaseline');
+    assert.ok(/green-ok/.test(n.prompt),
+      'the baseline node must know about the green-ok waiver');
+    assert.ok(/cannot discriminate|hard failure|fail the run/i.test(n.prompt),
+      'a baseline-green criterion without a waiver must be a hard failure, not a note');
+  });
+
+  test('the DoDGate prompt demands a hash check before running a check', () => {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    const n = d.nodes.find((x) => x.id === 'DoDGate');
+    assert.ok(/checkSha|sha256/.test(n.prompt));
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `Cannot find module .../dod-freeze.mjs`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `plugins/lirbox/skills/loom/scripts/dod-freeze.mjs`:
+
+```js
+#!/usr/bin/env node
+/*
+ * Freeze a definition of done into hash-locked check FILES.
+ *
+ *   node dod-freeze.mjs --dod <dod.json> --checks-dir <dir>
+ *
+ * Why files rather than a `check` string in JSON:
+ *   - they ride the PR, so a reviewer can read the check
+ *   - the human can re-run them after merge
+ *   - multi-line scripts survive without shell/JSON quoting mangling
+ *   - the sha256 lock makes a weakened check DETECTED rather than rewarded —
+ *     today, editing the test a check runs is the cheapest route to a green gate
+ *
+ * Real sha256 here (not the conductor's FNV-1a): this runs with full Node, and
+ * this lock is guarding against tampering, not merely drift.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+
+export function sha256File(p) {
+  return 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+}
+
+// Returns one row per checkable criterion: { id, ok, reason }.
+// `root` is the directory the criteria's relative checkFile paths resolve against.
+export function verifyChecks(dod, root) {
+  const out = [];
+  for (const c of dod.criteria || []) {
+    if (c.tier !== 'checkable') continue;
+    const p = path.resolve(root, c.checkFile);
+    if (!fs.existsSync(p)) { out.push({ id: c.id, ok: false, reason: 'check file missing: ' + c.checkFile }); continue; }
+    const actual = sha256File(p);
+    if (actual !== c.checkSha) {
+      out.push({ id: c.id, ok: false, reason: `check file modified — sha mismatch (frozen ${c.checkSha}, found ${actual})` });
+      continue;
+    }
+    out.push({ id: c.id, ok: true, reason: 'sha matches frozen value' });
+  }
+  return out;
+}
+
+function main() {
+  const argv = process.argv;
+  const arg = (n, d) => {
+    const i = argv.indexOf('--' + n);
+    if (i < 0) return d;
+    const v = argv[i + 1];
+    return (v === undefined || v.startsWith('--')) ? true : v;
+  };
+  const dodPath = arg('dod', '');
+  const checksDir = arg('checks-dir', '');
+  if (!dodPath || dodPath === true) { console.error('ERROR: --dod is required'); process.exit(1); }
+  if (!checksDir || checksDir === true) { console.error('ERROR: --checks-dir is required'); process.exit(1); }
+
+  const dod = JSON.parse(fs.readFileSync(dodPath, 'utf8'));
+  fs.mkdirSync(checksDir, { recursive: true });
+  const root = path.dirname(path.resolve(dodPath));
+
+  for (const c of dod.criteria || []) {
+    if (c.tier !== 'checkable') continue;
+    if (typeof c.script !== 'string' || !c.script.trim()) {
+      console.error(`ERROR: checkable criterion '${c.id}' has no "script" to freeze`);
+      process.exit(1);
+    }
+    const file = path.join(checksDir, `${c.id}.sh`);
+    fs.writeFileSync(file, c.script.endsWith('\n') ? c.script : c.script + '\n', { mode: 0o755 });
+    fs.chmodSync(file, 0o755);
+    c.checkFile = path.relative(root, file);
+    c.checkSha = sha256File(file);
+    // A criterion already met at baseline cannot discriminate this run's work.
+    // "red" is the default; "green-ok" is a deliberate, human-confirmed waiver
+    // for genuine regression guards.
+    c.baseline = c.baseline === 'green-ok' ? 'green-ok' : 'red';
+    delete c.script;
+  }
+
+  fs.writeFileSync(dodPath, JSON.stringify(dod, null, 2) + '\n');
+  const n = (dod.criteria || []).filter((c) => c.tier === 'checkable').length;
+  process.stdout.write(`Froze ${n} check file(s) into ${checksDir}\n`);
+}
+
+if (process.argv[1] && process.argv[1].endsWith('dod-freeze.mjs')) main();
+```
+
+- [ ] **Step 4: Update the DoDBaseline prompt in the delivery seed**
+
+In `plugins/lirbox/skills/loom/scripts/seeds/delivery.json`, replace the `DoDBaseline` node's `prompt` with:
+
+```
+Run every checkable DoD criterion's check FILE against the worktree BEFORE any work. For each: verify the file's sha256 matches its frozen checkSha, then run it and record met (exit 0) / unmet (non-zero) / error (could not run). Measure only — fix nothing. A criterion whose baseline is "red" but which is already MET cannot discriminate this run's work: report discriminates=false and FAIL the run, because a check that was green before the work began proves nothing about the work. Criteria explicitly marked baseline "green-ok" are regression guards and are expected to be MET — they never fail the run. A sha mismatch is a hard failure.
+```
+
+Add `"discriminates"` to the node's schema properties as `{ "type": "boolean" }` and to `required`.
+
+Because the seed changed, re-stamp its `lockedHash`:
+
+```bash
+cd plugins/lirbox/skills/loom/scripts && node -e "
+const fs=require('fs');
+(async()=>{
+  const core=await import('./graph-core.mjs');
+  const p='seeds/delivery.json';
+  const g=JSON.parse(fs.readFileSync(p,'utf8'));
+  g.invariants.lockedHash=core.lockedFingerprint(g);
+  fs.writeFileSync(p, JSON.stringify(g,null,2)+'\n');
+  console.log(g.invariants.lockedHash);
+})()"
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — 11 new DoD tests plus the still-green seed tests, `all green`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/dod-freeze.mjs \
+        plugins/lirbox/skills/loom/scripts/seeds/delivery.json \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): DoD checks as sha256-locked files with baseline-RED enforced"
+```
+
+---
+
+### Task 9: Resume protocol and the run report
+
+**Files:**
+- Create: `plugins/lirbox/skills/loom/scripts/loom-report.cjs`
+- Create: `plugins/lirbox/skills/loom/scripts/list-runs.cjs`
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: `state.json` written by the checkpoint worker (Task 4).
+- Produces:
+  - `node loom-report.cjs <name>` — prints the traversal, revisits, rejected patches, gate verdicts
+  - `node list-runs.cjs [--all]` — table of runs with status, cursor, stale server ports
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs` before the final `process.stdout.write` line:
+
+```js
+  section('resume + report');
+
+  const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-run-'));
+  fs.mkdirSync(path.join(runRoot, '.loom', 'state'), { recursive: true });
+  // A run that went Implement -> Review(fail) -> Implement -> Review(pass) -> DoDGate(fail)
+  // -> Implement, applying one accepted patch and rejecting one bypass along the way.
+  const patched = core.applyPatchTo(seedGraph, {
+    addNodes: [{ id: 'Spike', kind: 'work', prompt: 'investigate' }],
+    addEdges: [{ from: 'Spike', to: 'Implement', when: 'always' }] });
+  patched.edges.unshift({ from: 'Plan', to: 'Spike', when: 'always' });
+  patched.version = 1;
+  const runState = {
+    workflow: 'demo', status: 'running', startedAt: '2026-07-27T00:00:00Z',
+    graphVersion: 1, graph: patched, cursor: 'Implement',
+    visits: { Setup: 1, Plan: 1, Spike: 1, Implement: 3, Review: 2, DoDGate: 1 },
+    results: { 'Implement#3': { summary: 'third pass' } },
+    carry: { Implement: { unmetCriteria: ['c3', 'c5'] } },
+    trace: [
+      { node: 'Review', visit: 1, verdict: false, to: 'Implement' },
+      { node: 'Review', visit: 2, verdict: true, to: 'DoDGate' },
+      { node: 'DoDGate', visit: 1, verdict: false, to: 'Implement' },
+      { node: 'DoDGate', visit: 1, patch: 'rejected', violations: ['DoDGate no longer dominates Done'] },
+      { node: 'Plan', visit: 1, patch: 'accepted', version: 1 },
+    ],
+  };
+  fs.writeFileSync(path.join(runRoot, '.loom', 'state', 'demo.json'), JSON.stringify(runState, null, 2));
+
+  const REPORT = path.join(__dirname, 'loom-report.cjs');
+  const reportOut = execFileSync('node', [REPORT, 'demo'], { cwd: runRoot }).toString();
+
+  test('report shows the revisit count', () => {
+    assert.ok(/Implement.*3/.test(reportOut), 'the report must surface repeat visits');
+  });
+
+  test('report surfaces the rejected patch', () => {
+    assert.ok(/rejected/i.test(reportOut) && /dominates/.test(reportOut));
+  });
+
+  test('report shows gate verdicts in order', () => {
+    assert.ok(reportOut.indexOf('Review') < reportOut.indexOf('DoDGate'));
+  });
+
+  test('report shows the carried criteria', () => {
+    assert.ok(/c3/.test(reportOut) && /c5/.test(reportOut));
+  });
+
+  test('resume args carry the PATCHED graph, not the seed', () => {
+    // This is the failure the whole design hinges on: a resume that replays the
+    // approved topology silently discards every runtime patch.
+    const st = JSON.parse(fs.readFileSync(path.join(runRoot, '.loom', 'state', 'demo.json'), 'utf8'));
+    assert.ok(st.graph.nodes.some((n) => n.id === 'Spike'),
+      'state.graph must be the patched graph');
+    assert.strictEqual(st.graph.version, 1);
+  });
+
+  test('the resumed cursor and visits round-trip', () => {
+    const st = JSON.parse(fs.readFileSync(path.join(runRoot, '.loom', 'state', 'demo.json'), 'utf8'));
+    assert.strictEqual(st.cursor, 'Implement');
+    assert.strictEqual(st.visits.Implement, 3);
+    assert.strictEqual(core.capFor(st.graph, 'Implement'), 4,
+      'one visit left before the cap — a resume must not lose that');
+  });
+
+  const LIST = path.join(__dirname, 'list-runs.cjs');
+  const listOut = execFileSync('node', [LIST], { cwd: runRoot }).toString();
+
+  test('list-runs shows the run, status and cursor', () => {
+    assert.ok(/demo/.test(listOut) && /running/.test(listOut) && /Implement/.test(listOut));
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `Cannot find module .../loom-report.cjs`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `plugins/lirbox/skills/loom/scripts/loom-report.cjs`:
+
+```js
+#!/usr/bin/env node
+/*
+ * Render a loom run from its durable state.
+ *
+ *   node loom-report.cjs <name>
+ *
+ * The trace is the point: it shows the PATH actually taken, including revisits and
+ * every patch the validator rejected. A linear phase list cannot show either.
+ */
+const fs = require('fs');
+const path = require('path');
+
+const name = process.argv[2];
+if (!name) { console.error('usage: loom-report.cjs <name>'); process.exit(1); }
+
+const p = path.join(process.cwd(), '.loom', 'state', `${name}.json`);
+if (!fs.existsSync(p)) { console.error(`no such run: ${p}`); process.exit(1); }
+const st = JSON.parse(fs.readFileSync(p, 'utf8'));
+
+const out = [];
+out.push(`loom run: ${st.workflow}`);
+out.push(`status:   ${st.status}${st.finishedAt ? ` (finished ${st.finishedAt})` : ''}`);
+out.push(`started:  ${st.startedAt || 'unknown'}`);
+out.push(`cursor:   ${st.cursor}`);
+out.push(`graph:    v${st.graphVersion || 0}, ${(st.graph && st.graph.nodes || []).length} nodes`);
+out.push('');
+
+out.push('VISITS');
+for (const [node, n] of Object.entries(st.visits || {})) {
+  const cap = ((st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {})[node]
+    ?? ((st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {})['*'] ?? 3;
+  out.push(`  ${node.padEnd(16)} ${n}/${cap}${n > 1 ? '   <- revisited' : ''}`);
+}
+out.push('');
+
+out.push('PATH');
+for (const t of st.trace || []) {
+  if (t.patch === 'rejected') {
+    out.push(`  ${t.node}#${t.visit}  PATCH REJECTED: ${(t.violations || []).join('; ')}`);
+  } else if (t.patch === 'accepted') {
+    out.push(`  ${t.node}#${t.visit}  patch accepted -> graph v${t.version}`);
+  } else {
+    const v = t.verdict === true ? 'pass' : t.verdict === false ? 'FAIL' : '-';
+    out.push(`  ${t.node}#${t.visit}  ${v.padEnd(5)} -> ${t.to}`);
+  }
+}
+out.push('');
+
+const carry = st.carry || {};
+if (Object.keys(carry).length) {
+  out.push('CARRIED FORWARD');
+  for (const [node, c] of Object.entries(carry)) {
+    if (Object.keys(c || {}).length) out.push(`  ${node}: ${JSON.stringify(c)}`);
+  }
+  out.push('');
+}
+
+out.push('RESUME');
+out.push(`  Workflow({ scriptPath: ".loom/${name}.js", args: <the graph/visits/results/carry/trace/cursor`);
+out.push(`             fields of .loom/state/${name}.json — the PATCHED graph, not the seed> })`);
+
+process.stdout.write(out.join('\n') + '\n');
+```
+
+Create `plugins/lirbox/skills/loom/scripts/list-runs.cjs`:
+
+```js
+#!/usr/bin/env node
+/*
+ * Table of loom runs.
+ *
+ *   node list-runs.cjs [--all]
+ *
+ * Also surfaces the recorded server port so a session that died without stopping
+ * its editor server leaves a visible, killable trace rather than an orphan.
+ */
+const fs = require('fs');
+const path = require('path');
+
+const all = process.argv.includes('--all');
+const dir = path.join(process.cwd(), '.loom', 'state');
+if (!fs.existsSync(dir)) { process.stdout.write('no loom runs\n'); process.exit(0); }
+
+const rows = [];
+for (const f of fs.readdirSync(dir)) {
+  if (!f.endsWith('.json')) continue;
+  let st;
+  try { st = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
+  if (!all && st.status === 'complete') continue;
+  rows.push({
+    name: st.workflow || f.replace(/\.json$/, ''),
+    status: st.status || '?',
+    cursor: st.cursor || '-',
+    visits: Object.values(st.visits || {}).reduce((a, b) => a + b, 0),
+    port: st.port || '-',
+  });
+}
+
+if (!rows.length) { process.stdout.write('no loom runs\n'); process.exit(0); }
+const pad = (s, n) => String(s).padEnd(n);
+process.stdout.write(
+  `${pad('NAME', 24)}${pad('STATUS', 20)}${pad('CURSOR', 16)}${pad('STEPS', 7)}PORT\n`);
+for (const r of rows) {
+  process.stdout.write(
+    `${pad(r.name, 24)}${pad(r.status, 20)}${pad(r.cursor, 16)}${pad(r.visits, 7)}${r.port}\n`);
+}
+if (rows.some((r) => r.port !== '-')) {
+  process.stdout.write('\nA PORT on a non-running row is a stale editor server: kill it with\n');
+  process.stdout.write('  lsof -ti tcp:<port> | xargs kill\n');
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: PASS — 7 new report/resume tests, `all green`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/scripts/loom-report.cjs \
+        plugins/lirbox/skills/loom/scripts/list-runs.cjs \
+        plugins/lirbox/skills/loom/scripts/test-loom.cjs
+git commit -m "feat(loom): run report and listing with revisits and rejected patches"
+```
+
+---
+
+### Task 10: SKILL.md, references, and marketplace wiring
+
+**Files:**
+- Create: `plugins/lirbox/skills/loom/SKILL.md`
+- Create: `plugins/lirbox/skills/loom/references/graph-spec.md`
+- Create: `plugins/lirbox/skills/loom/references/invariants.md`
+- Modify: `.gitignore`
+- Modify: `README.md`
+- Modify: `plugins/lirbox/skills/loom/scripts/test-loom.cjs`
+
+**Interfaces:**
+- Consumes: every script from Tasks 1–9.
+- Produces: the skill entry point Claude invokes as `lirbox:loom`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Insert into `test-loom.cjs` before the final `process.stdout.write` line:
+
+```js
+  section('skill packaging');
+
+  const skillPath = path.join(__dirname, '..', 'SKILL.md');
+  const skill = fs.readFileSync(skillPath, 'utf8');
+
+  test('frontmatter has name and a trigger description', () => {
+    assert.ok(/^---\n[\s\S]*?\nname: loom\n/.test(skill));
+    assert.ok(/\ndescription: /.test(skill));
+    const desc = /\ndescription: ["']?([^\n]+)/.exec(skill)[1];
+    assert.ok(desc.length > 120, 'the description is the TRIGGER — make it specific');
+  });
+
+  test('declares the tools it actually uses', () => {
+    for (const t of ['Read', 'Write', 'Bash', 'Workflow', 'AskUserQuestion']) {
+      assert.ok(new RegExp(`- ${t}\\b`).test(skill), `allowed-tools missing ${t}`);
+    }
+  });
+
+  test('documents the resume-restores-structure rule', () => {
+    assert.ok(/patched graph/i.test(skill),
+      'SKILL.md must state that resume restores the patched graph');
+  });
+
+  test('states the never-auto-merge rule', () => {
+    assert.ok(/never auto-?merge/i.test(skill));
+  });
+
+  test('references exist and are linked', () => {
+    for (const f of ['graph-spec.md', 'invariants.md']) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', 'references', f)), `${f} missing`);
+      assert.ok(skill.includes(f), `SKILL.md never links ${f}`);
+    }
+  });
+
+  test('.loom/ is gitignored', () => {
+    const gi = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', '..', '.gitignore'), 'utf8');
+    assert.ok(/^\.loom\/?$/m.test(gi), '.loom/ must be gitignored — it is runtime scratch');
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+```
+
+Expected: FAIL — `ENOENT: .../loom/SKILL.md`.
+
+- [ ] **Step 3: Write SKILL.md**
+
+Create `plugins/lirbox/skills/loom/SKILL.md`:
+
+```markdown
+---
+name: loom
+argument-hint: "[ <goal to start> | <name to resume> | list ]"
+description: "This skill should be used to run a multi-subagent delivery workflow whose SHAPE can change — where a gate failure must send the run back to an earlier stage rather than into a local retry, where the run should be able to add stages once it has read the code, and where a human wants to review and edit that shape in a browser before launch. It drives the Workflow tool with a node/edge graph the conductor interprets, validates every runtime graph patch so no path can reach the terminal without crossing every gate, and persists the patched graph so a resume restores structure, not just progress. Do NOT use for a fixed linear pipeline (use conductor) or a quick one-shot (call Workflow directly)."
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Workflow
+  - AskUserQuestion
+---
+
+$ARGUMENTS
+
+# loom
+
+<purpose>
+`conductor` executes a fixed phase list, so every gate hand-rolls its own retry and a
+failure can only be patched locally. loom makes the **graph** the execution spec: a gate
+failure is an **edge** back to an earlier node, and the graph can rewrite itself at runtime
+under invariants that keep every gate un-bypassable.
+</purpose>
+
+<when-to-use>
+All of: multi-step with subagents; a gate failure should re-enter real work rather than a
+narrow fix worker; the decomposition is not knowable up front. Otherwise use `conductor`
+(fixed pipeline) or call `Workflow` directly (one-shot).
+</when-to-use>
+
+<core-model>
+Three layers — confusing them causes every bug in this system:
+- **Graph** (`.loom/<name>.graph.json`) — nodes, conditional edges, invariants. DATA.
+- **Conductor** (the generated `.js`) — a ~60-line interpreter. **Pure JS: no `fs`, `git`,
+  `require`, `import`, `Date.now()`, `Math.random()`, `crypto`.** `graph-core.mjs` is
+  **inlined** into it, never imported.
+- **Workers** — the subagents it spawns. Full tools. Every side effect.
+
+**One shared worktree** `.worktrees/<name>` on `wf/<name>` holds every edit; `state.json`
+stays in the main repo.
+
+Spec → [`references/graph-spec.md`](references/graph-spec.md).
+The dominance argument → [`references/invariants.md`](references/invariants.md).
+</core-model>
+
+<procedure>
+
+### 1. Resolve `$ARGUMENTS`
+
+| `$ARGUMENTS` | do |
+|---|---|
+| empty or `list` | `node <skill-dir>/scripts/list-runs.cjs`, show the table, stop |
+| a state file, `running`/`failed` | **resume** → step 5 |
+| a state file, `awaiting-approval` | restart the server, reopen the editor → step 3 |
+| a state file, `complete` | say so; offer `loom-report.cjs <name>` |
+| anything else — a goal | fresh run → step 2 |
+
+### 2. Triage, DoD, seed
+
+Same triage tiers as conductor — **bias down, and decline is a hard STOP.** A fixed linear
+pipeline is conductor's job, not loom's; loom earns its cost only when the shape can change.
+
+Acquire the DoD (3–7 criteria, ticket ACs verbatim), then write each `checkable` criterion's
+**script** into the DoD file and freeze it:
+
+```
+node <skill-dir>/scripts/dod-freeze.mjs --dod .loom/<name>.dod.json \
+  --checks-dir .loom/<name>.checks
+```
+
+Every check becomes an executable file with a frozen `sha256`. A criterion defaults to
+`baseline: "red"` — **it must FAIL before the work starts**, or it cannot discriminate this
+run and DoDBaseline fails the run. Use `"green-ok"` only for genuine regression guards, and
+confirm that waiver in the same one-shot `AskUserQuestion` as the criteria.
+
+Copy the seed: `scripts/seeds/lite.json` or `scripts/seeds/delivery.json` →
+`.loom/<name>.graph.json`, setting `name` and `goal`.
+
+### 3. Pre-flight — plan, review, approve
+
+Run Setup + the bootstrap planner first, so the human reviews a graph grounded in the
+**actual repo** rather than a guess. Then serve the editor:
+
+```
+node <skill-dir>/scripts/graph-server.mjs --name <name> --root . --port 0
+```
+
+Read `LOOM_SERVER_PORT=<port>` from stdout, record it in `state.json`, and give the user
+`http://127.0.0.1:<port>`. Set `status: "awaiting-approval"`.
+
+Then poll `.loom/<name>.action.json`:
+- `replan` → run a replan worker over `(graph, comments)`, write the new graph, keep polling
+- `approve` → freeze: set `locked: true` on every `invariants.mustCross` node and its edges,
+  stamp `invariants.lockedHash`, set `approved: true`
+
+### 4. Generate and launch
+
+```
+node <skill-dir>/scripts/scaffold-loom.cjs --name <name> \
+  --graph .loom/<name>.graph.json --force
+Workflow({ scriptPath: ".loom/<name>.js" })
+```
+
+**Never hand-edit the generated script** — change the generator and regenerate.
+
+**Headless (`claude -p`): launch in the FOREGROUND (`run_in_background: false`) and do not
+end your turn while it runs.** The blocking call IS the wait. Afterwards re-read
+`state.json` and confirm `status` is no longer `running`.
+
+### 5. Resume
+
+```
+Workflow({ scriptPath: ".loom/<name>.js", args: {
+  graph, visits, results, carry, trace, cursor } })
+```
+
+taken from `state.json`. **`args.graph` MUST be the persisted patched graph, not the seed.**
+Resume restores *structure*, not just progress — replaying the approved topology silently
+discards every runtime patch, and nothing will tell you it happened.
+
+### 6. Finalize
+
+Stamp `status` + `finishedAt` (the conductor cannot), `failed` if it threw. Kill the editor
+server. Run `loom-report.cjs <name>` and hand over the report, the branch and the worktree.
+**Never auto-merge and never auto-remove the worktree** — that is the human's call.
+</procedure>
+
+<gotchas>
+- Nodes are **at-least-once** and must be **idempotent**; a re-run may return a different
+  verdict and take a different edge. That is accepted.
+- A rejected patch is **logged, not fatal** — check `trace` for `patch: 'rejected'`.
+- `invariants.lockedHash` is FNV-1a: a **drift detector**, not a cryptographic guarantee.
+  DoD `checkSha` is real sha256.
+- Visit caps live only in `invariants.visitCaps`. Never add a `visitCap` field to a node.
+- A dead session orphans the editor server; `list-runs.cjs` shows the stale port.
+</gotchas>
+
+<resources>
+- `scripts/` — `graph-core.mjs` (all graph math; **the one source**) · `scaffold-loom.cjs`
+  (step 4) · `graph-server.mjs` + `editor/` (step 3) · `dod-freeze.mjs` (step 2) ·
+  `loom-report.cjs` / `list-runs.cjs` (steps 1, 6) · `test-loom.cjs` (regression net).
+- `references/` — `graph-spec.md` (field reference) · `invariants.md` (why gates cannot be
+  bypassed).
+</resources>
+```
+
+- [ ] **Step 4: Write the references**
+
+Create `plugins/lirbox/skills/loom/references/graph-spec.md` documenting every field of `graph.json`: `start`, `terminal`, `version`, `approved`; node fields `id`, `kind`, `prompt`, `schema`, `model`, `agentType`, `locked`, `pos`; edge fields `from`, `to`, `when`, `carry`, `locked`; the predicate operators `eq`/`neq`/`gt`/`lt`/`exists` and the `"always"` shorthand with the fail-closed rule; and `invariants` (`mustCross`, `lockedHash`, `visitCaps`, `nodeBudget`). Include the full `delivery.json` seed as the worked example.
+
+Create `plugins/lirbox/skills/loom/references/invariants.md` containing the dominance argument in prose: what dominance means, why deletion-reachability computes it, why the structural check from `start` is insufficient alone once back-edges exist, the worked `start → DoDGate → Implement → terminal` counter-example, and the accept/reject table from Task 3's fixtures.
+
+- [ ] **Step 5: Wire the marketplace and gitignore**
+
+Append to `.gitignore`, next to the other runtime-artifact entries:
+
+```
+# Build-time scratch left by loom (graph, state, checks, editor action files)
+.loom/
+```
+
+Add loom to the skill catalog table in `README.md`, in the orchestration/loop family alongside `conductor`, `prospector`, `whetstone` and `arena`, described as: *graph-shaped delivery — gate failures loop back, the graph rewrites itself under invariants, previewed and edited in the browser before launch.*
+
+- [ ] **Step 6: Run the full net and validate the plugin**
+
+```bash
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs
+claude plugin validate .
+```
+
+Expected: `all green`, and the plugin validates.
+
+- [ ] **Step 7: Confirm the other skills are untouched**
+
+```bash
+node plugins/lirbox/skills/conductor/scripts/test-scaffold.cjs
+node plugins/lirbox/skills/prospector/scripts/test-optimize.cjs
+node plugins/lirbox/skills/whetstone/scripts/test-improve.cjs
+node plugins/lirbox/skills/arena/scripts/test-arena.cjs
+```
+
+Expected: all four green. loom is a parallel skill; if any of these changed, something was edited that should not have been.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/ .gitignore README.md
+git commit -m "feat(loom): skill entry point, references, and marketplace wiring"
+```
+
+---
+
+## Post-Plan: End-to-End Acceptance
+
+Run these against a real repository after Task 10. They are the spec's §10 run-level criteria and none of them is covered by the unit net.
+
+- [ ] **A1 — the back-edge fires.** Start a delivery run whose DoD contains a criterion the first implementation will miss. Confirm `trace` shows `DoDGate#1 FAIL -> Implement`, that `carry.Implement.unmetCriteria` holds the unmet ids, that `Implement` runs a second time, and that the run then reaches PR.
+- [ ] **A2 — resume restores structure.** Kill the session after `trace` records `patch: 'accepted'`. Resume per SKILL.md step 5. Confirm the resumed run's graph still contains the patch-added node and does not re-run completed `<node>#<visit>` keys.
+- [ ] **A3 — the gate cannot be deleted.** Seed a run whose DoDGate fails repeatedly. Confirm at least one `patch: 'rejected'` entry appears in `trace` if a worker attempts removal, and that the run ends by hitting the visit cap rather than by opening a PR.
+- [ ] **A4 — a tampered check is caught.** Mid-run, edit a frozen check file. Confirm DoDGate hard-fails with a sha mismatch rather than reporting the criterion MET.
+- [ ] **A5 — a non-discriminating check is caught.** Freeze a criterion whose check already passes, without `green-ok`. Confirm DoDBaseline fails the run.
+- [ ] **A6 — the editor round-trips.** Pre-flight a run, drag a node, add a comment, press Replan, confirm the graph version bumps and the comment shaped the result; then draw a gate-bypass edge and confirm Save is rejected with a readable reason.
+
+---
+
+## Self-Review Notes
+
+Checked against `docs/specs/2026-07-27-loom-graph-runtime-design.md`:
+
+- **Spec coverage:** §3 graph spec → Task 5 + references. §4 interpreter → Task 4. §5 invariants → Task 3. §6 pre-flight → Tasks 6, 10. §7 server/editor → Tasks 6, 7. §8 state/resume → Tasks 4, 9. §9 DoD checks → Task 8. §10 verification → every task's net plus the acceptance block. §11 out-of-scope respected — no task touches prospector/whetstone/arena, and Task 10 step 7 proves it.
+- **Two spec refinements, both forced by the codebase and both recorded in Global Constraints:** the validator is *inlined*, not imported, because `require(` is banned in the generated conductor (`test-scaffold.cjs:109`); and `lockedHash` uses pure-JS FNV-1a because the conductor has no `crypto`, so it is labeled a drift detector while the DoD `checkSha` uses real sha256 in a worker.
+- **Type consistency:** `validateGraph(next, prev, cursor)`, `applyPatchTo(graph, patch)`, `capFor(graph, id)`, `carryFor(edge, result)` and `lockedFingerprint(graph)` keep the same signatures in Tasks 3, 4, 6 and 7. `passed` is the gate verdict field everywhere; `unmetCriteria` is the DoDGate carry field everywhere.
+- **Known ordering dependency:** Task 6's `GET /` test needs `editor/index.html` to exist, so Task 6 step 4 creates a placeholder that Task 7 replaces. Called out inline.
