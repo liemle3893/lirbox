@@ -185,9 +185,22 @@ while (node && node !== graph.terminal) {
     }
   }
 
+  // NO SILENT FALLBACK TO THE TERMINAL. pickEdge returns null when no declared
+  // predicate matches the result, and predicates compare with ===. Routing to
+  // graph.terminal in that case skips EVERY remaining gate — no patch and no
+  // adversary required, just an agent returning {passed:'true'} instead of
+  // {passed:true}, or omitting the field, or returning null. Six of eight
+  // plausible off-shape results reached the terminal this way. The graph is
+  // un-bypassable by construction (Task 3); the walk of it must be too.
   const edge = pickEdge(graph, node, r)
-  const nextNode = edge ? edge.to : graph.terminal
-  if (edge) carry[nextNode] = carryFor(edge, r)
+  if (!edge) {
+    throw new Error('no edge matched at ' + node + ' for result '
+      + JSON.stringify(r) + ' — refusing to advance. Routing onward from an '
+      + 'unmatched result would skip every remaining gate. Fix the node schema '
+      + 'or add an explicit fallthrough edge (when: "always") to this node.')
+  }
+  const nextNode = edge.to
+  carry[nextNode] = carryFor(edge, r)
   trace.push({ node, visit, verdict: r ? r.passed : undefined, to: nextNode })
 
   await checkpoint(nextNode)

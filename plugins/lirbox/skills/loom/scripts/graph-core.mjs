@@ -209,6 +209,15 @@ function validateGraph(next, prev, cursor) {
   const orphans = ids.filter((id) => !live.has(id));
   if (orphans.length) v.push('orphaned node(s): ' + orphans.join(', '));
 
+  // A reachable non-terminal node with no outgoing edge is a dead end — the interpreter
+  // would arrive there with nowhere legal to go and (correctly) throw at runtime. Catch
+  // it here instead, before a run ever starts.
+  const deadEnds = ids.filter((id) => id !== next.terminal && live.has(id)
+    && outEdges(next, id).length === 0);
+  if (deadEnds.length) {
+    v.push('dead-end node(s) with no outgoing edge: ' + deadEnds.join(', '));
+  }
+
   // Structural dominance — from `start`, over EVERY declared gate. Position-independent,
   // so it holds for the whole run and cannot be invalidated by later progress.
   for (const gate of inv.mustCross || []) {
