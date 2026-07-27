@@ -1443,10 +1443,18 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line. Note t
     assert.strictEqual(rState.body.cursor, 'Implement');
   });
 
-  const rIndex = await fetch(base + '/');
-  test('GET / serves the editor HTML', async () => {
-    assert.strictEqual(rIndex.status, 200);
-    assert.ok(/text\/html/.test(rIndex.headers.get('content-type')));
+  const rCore = await fetch(base + '/graph-core.mjs');
+  test('GET /graph-core.mjs serves the shared validator to the browser', async () => {
+    assert.strictEqual(rCore.status, 200);
+    assert.ok(/javascript/.test(rCore.headers.get('content-type')));
+    assert.ok((await rCore.text()).includes('function validateGraph'),
+      'the editor must receive the same validator the conductor inlines');
+  });
+
+  test('static serving refuses to escape the editor directory', async () => {
+    const r = await fetch(base + '/editor.js/../../../graph-core.mjs');
+    assert.ok(r.status === 403 || r.status === 404,
+      `path traversal must not be served, got ${r.status}`);
   });
 
   const bypass = core.applyPatchTo(seedGraph, {
@@ -1635,13 +1643,14 @@ server.listen(PORT, '127.0.0.1', () => {
 node plugins/lirbox/skills/loom/scripts/test-loom.cjs
 ```
 
-Expected: PASS — 10 new server tests, `all green`. (`GET /` fails until Task 7 creates `editor/index.html`; create a one-line placeholder now — `<!doctype html><title>loom</title>` — and Task 7 replaces it.)
+Expected: PASS — 11 new server tests, `all green`.
+
+Note: this task deliberately does **not** create `editor/index.html`. `GET /` returns 404 until Task 7 writes the real editor, and no test here asserts otherwise — a throwaway placeholder file written only to satisfy a test is exactly the kind of thing the review rubric should reject.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add plugins/lirbox/skills/loom/scripts/graph-server.mjs \
-        plugins/lirbox/skills/loom/scripts/editor/ \
         plugins/lirbox/skills/loom/scripts/test-loom.cjs
 git commit -m "feat(loom): loopback graph server with server-side validation"
 ```
@@ -1661,13 +1670,20 @@ git commit -m "feat(loom): loopback graph server with server-side validation"
 
 - [ ] **Step 1: Write the failing tests**
 
-Insert into `test-loom.cjs` before the final `process.stdout.write` line:
+The server spawned in Task 6's section is still needed here, so **first move the `proc.kill();` line out of the server section and down to the very end of this editor section.** Then insert the following before the final `process.stdout.write` line:
 
 ```js
   section('editor');
 
   const editorHtml = fs.readFileSync(path.join(__dirname, 'editor', 'index.html'), 'utf8');
   const editorJs = fs.readFileSync(path.join(__dirname, 'editor', 'editor.js'), 'utf8');
+
+  test('GET / now serves the editor HTML', async () => {
+    // Deferred from Task 6: the route existed, the file did not.
+    const r = await fetch(base + '/');
+    assert.strictEqual(r.status, 200);
+    assert.ok(/text\/html/.test(r.headers.get('content-type')));
+  });
 
   test('loads React Flow from CDN', () => {
     assert.ok(/reactflow/i.test(editorHtml), 'React Flow must be loaded');
@@ -2009,7 +2025,7 @@ Expected: `0`.
 node plugins/lirbox/skills/loom/scripts/test-loom.cjs
 ```
 
-Expected: PASS — 9 new editor tests, `all green`.
+Expected: PASS — 10 new editor tests, `all green`. Confirm `proc.kill();` now sits at the end of the editor section, not the server section.
 
 - [ ] **Step 5: Manual smoke test**
 
