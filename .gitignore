@@ -39,3 +39,6 @@ implementation-notes/
 # (leaderboard.html, report.md) — tracked so the finalize PR carries a diff.
 !docs/arena/
 !docs/arena/**
+
+# Subagent-driven-development scratch (ledgers, briefs, review packages)
+.superpowers/
