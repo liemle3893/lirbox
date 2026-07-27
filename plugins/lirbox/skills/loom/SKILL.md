@@ -94,9 +94,26 @@ the user `http://127.0.0.1:<port>`. Set `status: "awaiting-approval"`.
 
 Then poll `.loom/<name>.action.json`:
 - `replan` → run a replan worker over `(graph, comments)`, write the new graph, keep polling
-- `approve` → freeze: set `locked: true` on every `invariants.mustCross` node and on **only
-  that gate's PASSING edge** (`when.eq === true`). Then stamp `invariants.lockedHash` and set
-  `approved: true`.
+- `approve` → freeze. State it as a filter, not as prose — the previous wording ("every
+  `mustCross` node **and its edges**") had two readings and BOTH locked every fail edge:
+
+  ```js
+  for (const n of g.nodes)
+    if (g.invariants.mustCross.includes(n.id)) n.locked = true;
+  for (const e of g.edges)
+    if (g.invariants.mustCross.includes(e.from)      // OUT-edges of a gate, only
+        && e.when && e.when.eq === true)             // and only the PASSING one
+      e.locked = true;
+  ```
+
+  Then stamp `invariants.lockedHash` and set `approved: true`.
+
+  **Verification that the freeze is correct: on a stock seed it must change NOTHING.**
+  Both seeds already ship in the frozen shape, so a correct freeze touches 0 nodes and 0
+  edges and `lockedFingerprint` is unchanged (`fnv1a:21e7419e` for lite, `fnv1a:51d7641c`
+  for delivery). **If the hash moves on a stock seed, the freeze is wrong — do not
+  re-stamp it.** A moving hash here is the symptom, and re-stamping is how the symptom
+  gets hidden.
 
   **Never lock a gate's failing edge.** `applyPatchTo` appends and `pickEdge` takes the first
   match, so a locked fail edge permanently shadows anything a later patch splices onto the
