@@ -4295,7 +4295,19 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
 const core = await import(join(SCRIPTS, 'graph-core.mjs'));
 
-// ONE tokenizer — must stay identical to the one in scripts/test-loom.cjs.
+// ONE tokenizer — a VERBATIM COPY of `codeOnly` in scripts/test-loom.cjs.
+//
+// DO NOT hand-write this from the version below or from memory. At implementation time,
+// open scripts/test-loom.cjs, find `const codeOnly = (src) => {`, and copy its body
+// EXACTLY, renaming only the binding to `conductorBody`. The current tokenizer handles
+// REGEX LITERALS and tracks `prev` to tell a regex from a division — an earlier version
+// did neither and had three false negatives. A copy made from an older draft freezes the
+// weaker scan and this check goes green while the real one regresses.
+//
+// The drift assertion at the bottom of this file is what makes that mechanical rather
+// than a promise. It is the point of the copy, not a formality: the identical-copy rule
+// was previously stated in a comment here and the two had ALREADY diverged (4253 chars
+// vs 1304) before anything noticed.
 // Three earlier approaches failed: blank-whole hid interpolations; regex-extract
 // could not tell escaped from live and died on nested braces; whole-blanking plus a
 // separate comment-blind character walk let TWO parsers disagree, so one unpaired
@@ -4393,6 +4405,25 @@ ok(FORBIDDEN.some(([, re]) => re.test(conductorBody(
 // And an escaped placeholder named crypto must NOT false-positive.
 ok(!FORBIDDEN.some(([, re]) => re.test(conductorBody('const p = `\\${crypto}`'))),
   'escaped placeholder named crypto stays clean');
+
+// ---- DRIFT: this file's tokenizer must BE the net's tokenizer, not resemble it ----
+// "Must stay identical" enforced by a comment is enforced by nothing — the Task 8 lesson.
+// Extract both bodies and compare them textually.
+const netSrc = readFileSync(join(SCRIPTS, 'test-loom.cjs'), 'utf8');
+const body = (src, decl) => {
+  const i = src.indexOf(decl);
+  if (i < 0) return null;
+  const j = src.indexOf('return out;', i);
+  return j < 0 ? null : src.slice(i + decl.length, j).replace(/\s+/g, ' ').trim();
+};
+const netTok = body(netSrc, 'const codeOnly = (src) => {');
+const ownTok = body(readFileSync(fileURLToPath(import.meta.url), 'utf8'),
+  'const conductorBody = (src) => {');
+ok(netTok !== null, 'found codeOnly in scripts/test-loom.cjs');
+ok(ownTok !== null, 'found conductorBody in this check');
+ok(netTok !== null && ownTok !== null && netTok === ownTok,
+  'this check\'s tokenizer is textually identical to the net\'s codeOnly '
+  + '(if this fails, one was changed without the other — sync them, do not delete this test)');
 
 if (bad) { console.error(`\npurity-scan-has-teeth: ${bad} failed`); process.exit(1); }
 console.log('purity-scan-has-teeth: ok');
