@@ -1,0 +1,20 @@
+[task]
+name = "lirbox/notes-selective-sync"
+version = "1.0.0"
+description = "conductor arena task notes-selective-sync, ported to the Harbor task format"
+
+[metadata]
+source_suite = "plugins/lirbox/skills/conductor/arena"
+source_sha = "1b0098dd38fd35e8ecf651ceaf110f726e4de3de"
+f2p_criteria = 5
+
+[environment]
+cpus = 2
+memory_mb = 4096
+build_timeout_sec = 1800
+
+[agent]
+timeout_sec = 3600
+
+[verifier]
+timeout_sec = 600

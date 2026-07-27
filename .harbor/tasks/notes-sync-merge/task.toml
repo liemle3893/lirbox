@@ -1,0 +1,20 @@
+[task]
+name = "lirbox/notes-sync-merge"
+version = "1.0.0"
+description = "conductor arena task notes-sync-merge, ported to the Harbor task format"
+
+[metadata]
+source_suite = "plugins/lirbox/skills/conductor/arena"
+source_sha = "b6aaf65c7a7f5bbea4f038af8ac6b935f76c220c"
+f2p_criteria = 4
+
+[environment]
+cpus = 2
+memory_mb = 4096
+build_timeout_sec = 1800
+
+[agent]
+timeout_sec = 3600
+
+[verifier]
+timeout_sec = 600

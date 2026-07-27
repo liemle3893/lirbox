@@ -15,9 +15,11 @@ docs/superpowers/
 .improve/
 .arena/
 
-# Harbor task ports + pruned skill catalog, derived from the arena suite by
-# scripts/harbor-port.mjs. Regenerated on demand; never a source of truth.
-.harbor/
+# Harbor: TASKS ARE TRACKED (.harbor/tasks) — they are first-class content, hand-tunable
+# (resource caps, network policy, artifacts) and reviewed in PRs. Only the injected skill
+# CATALOG is generated: it is a verbatim copy of plugins/lirbox/skills minus eval material,
+# so tracking it would duplicate 1.4M of already-tracked files and drift on every skill edit.
+.harbor/skills/
 
 # Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
 implementation-notes/

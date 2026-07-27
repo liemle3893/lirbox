@@ -16,6 +16,10 @@
     "engagement-measured-not-assumed": {
       "expect": "green",
       "note": "The scoreboard reported engagement it never measured: swe-score's loadCells() hardcoded engaged:true, and swe-run only wrote a .grade file on the engaged path, so non-engagement could not survive a --cells rebuild. Fixed by reading `engaged` off the grade record (absent = UNKNOWN, keeps the † marker) and by writing a record for every cell. Guards both directions: a measured non-engaged cell must count as non-engaged, and a legacy record must never be promoted to measured."
+    },
+    "harbor-tasks-in-sync": {
+      "expect": "green",
+      "note": "Drift gate for .harbor/tasks, which is TRACKED content rather than a build artifact — hand-tunable (resource caps, network policy, artifacts) and reviewed in PRs, with harbor-port.mjs demoted to a migration tool that seeds it. The hazard that creates: an arena task changes and the Harbor task silently grades a stale fixture or grader, and nothing notices. Asserts SEMANTIC agreement only — bundle and every hidden grader byte-identical, instruction.md containing task.md verbatim plus the harness directive (naming the skill, withholding the tier), no orphaned Harbor task. Deliberately does NOT diff task.toml or the Dockerfile: that is where hand-tuning belongs and a byte-diff there would make the tracked copy unmaintainable."
     }
   }
 }
