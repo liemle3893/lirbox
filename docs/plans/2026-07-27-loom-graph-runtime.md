@@ -602,17 +602,29 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     assert.ok(v.some(m => /unreachable|locked/.test(m)));
   });
 
-  test('REJECT: a gate failure edge that leads to the terminal', () => {
-    // Dominance proves the gate is VISITED, not that it PASSED. Without this rule a
-    // failing gate could route straight to the end — a bypass that leaves the gate
-    // on every path, so the dominance check stays silent.
-    const next = core.applyPatchTo(LOCKED, {
-      removeEdges: [{ from: 'DoDGate', to: 'Implement' }],
-      addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: false } }],
-    });
-    const v = core.validateGraph(next, LOCKED, null);
-    assert.ok(v.some((m) => /failure edge/.test(m)),
-      `a failing gate must not reach the terminal, got ${JSON.stringify(v)}`);
+  test('REJECT: any non-passing gate edge that leads onward', () => {
+    // Dominance proves the gate is VISITED, not that it PASSED. Each of these leaves the
+    // gate on every path — so the dominance check stays silent — while letting a run that
+    // did not pass reach the terminal.
+    for (const [label, patch] of [
+      ['failure edge rerouted onward', {
+        removeEdges: [{ from: 'DoDGate', to: 'Implement' }],
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: false } }],
+      }],
+      // An appended `always` edge is the same bypass with a different predicate: pass and
+      // fail still route correctly, but every OFF-SHAPE result falls through to it — which
+      // also defeats Task 4's hard-fail, since pickEdge now finds a match.
+      ['appended always-edge to the terminal', {
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: 'always' }],
+      }],
+      ['appended edge with an unrelated predicate', {
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'n', gt: 0 } }],
+      }],
+    ]) {
+      const v = core.validateGraph(core.applyPatchTo(LOCKED, patch), LOCKED, null);
+      assert.ok(v.some((m) => /non-passing edge/.test(m)),
+        `${label}: expected a non-passing-edge violation, got ${JSON.stringify(v)}`);
+    }
   });
 
   test('ACCEPT: a gate failure edge that loops back through the gate', () => {
@@ -954,30 +966,34 @@ function validateGraph(next, prev, cursor) {
   // Positional dominance — from the CURSOR, over gates not yet satisfied.
   // Required because a back-edge admits start -> DoDGate -> Implement -> terminal:
   // structurally dominated, yet the remaining path never re-crosses the failed gate.
-  // A gate's FAILURE edge must return to the gate.
+  // ONLY a gate's PASSING edge may lead onward. Every other edge out of a gate must
+  // return through that gate.
   //
-  // Structural dominance proves every path VISITS a gate. It does not prove a FAILING
-  // gate cannot carry the run onward: `DoDGate --fail--> Done` visits DoDGate on every
-  // path and still reaches the terminal with the gate unsatisfied. Same for
-  // `--fail--> PR`. That is a bypass, and it is the subtle sibling of deleting the gate.
+  // Structural dominance proves every path VISITS a gate. It does NOT prove a gate was
+  // SATISFIED: `DoDGate --fail--> Done` puts DoDGate on every path and still reaches the
+  // terminal with the gate failing. In `lite` this made the verdict fully inert —
+  // pickEdge returned `Done` for BOTH {passed:true} and {passed:false}.
   //
-  // So for every gate G and every out-edge G->X carrying a failure predicate, require
-  // that G still dominates the terminal FROM X — you cannot get to the end without
-  // coming back through the gate. This permits every legitimate reshaping (splice a
-  // Spike in, loop back to Plan, self-loop bounded by visitCaps) and forbids exactly
-  // the shape where failure leads forward.
+  // The rule must cover EVERY non-passing edge, not just `eq:false` ones. An appended
+  // `when:"always"` edge is the same bypass wearing a different predicate: pickEdge takes
+  // the first match, so pass/fail still route correctly, but every OFF-SHAPE result
+  // ({passed:'yes'}, {}, null) falls through to it — which also defeats Task 4's
+  // hard-fail, because an edge did match and pickEdge never returns null.
   //
-  // This is a VALIDATION rule, not a locking rule. Locking failure edges instead would
+  // Permits all legitimate reshaping (splice a Spike in, loop back to Plan, self-loop
+  // bounded by visitCaps); forbids exactly the shape where not-passing leads forward.
+  //
+  // This is a VALIDATION rule, not a locking rule. Locking these edges instead would
   // silently shadow spliced nodes — applyPatchTo appends and pickEdge takes the first
   // match, so a parallel edge validates and is never selected.
   for (const gate of inv.mustCross || []) {
     if (!idSet.has(gate)) continue;
     for (const e of next.edges) {
       if (e.from !== gate) continue;
-      if (!(e.when && e.when.eq === false)) continue;
+      if (e.when && e.when.eq === true) continue;      // the passing edge may lead onward
       if (!idSet.has(e.to)) continue;
       if (!dominates(next, gate, next.terminal, e.to)) {
-        v.push(gate + ' failure edge -> ' + e.to + ' can reach ' + next.terminal
+        v.push(gate + ' non-passing edge -> ' + e.to + ' can reach ' + next.terminal
           + ' without re-crossing ' + gate);
       }
     }
