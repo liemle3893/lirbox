@@ -1232,6 +1232,24 @@ async function main() {
     assert.ok(/readOnly|readonly/.test(editorJs));
   });
 
+  test('the read-only transition re-renders, not just the version change', () => {
+    // readOnly gates the Save button at click time, so saves are always refused during a
+    // run. But draggable/deletable are computed in toFlow, which only re-runs when `tick`
+    // changes — so rerender() must fire on the running/readOnly TRANSITION. Gating it on a
+    // graph-version diff alone left the canvas looking editable during a run that hadn't
+    // patched the graph yet.
+    assert.ok(/if \(running !== readOnly\) \{ readOnly = running; rerender\(\); \}/.test(editorJs),
+      'the readOnly transition must call rerender(), or the canvas keeps showing editable nodes');
+  });
+
+  test('fromFlow drops edges whose endpoints were deleted', () => {
+    // Do not depend on React Flow cascading edge removal when a node is deleted. It
+    // documents that it does, but nothing here can execute the UI to confirm it, and a
+    // dangling edge would surface to the user as a confusing "edge from unknown node" 422.
+    assert.ok(/\.filter\(\(fe\) => keep\.has\(fe\.source\) && keep\.has\(fe\.target\)\)/.test(editorJs),
+      'fromFlow must filter edges against the surviving node set itself');
+  });
+
   test('every dynamic value in renderPanel is escaped before innerHTML', () => {
     // Node ids and kinds come from a planner worker's graphPatch — LLM-generated text.
     // Unescaped, an id containing markup executes inside the page that IS the human
