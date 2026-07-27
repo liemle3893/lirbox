@@ -602,6 +602,18 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     assert.ok(v.some(m => /unreachable|locked/.test(m)));
   });
 
+  test('REJECT: a dead-end node with no outgoing edge', () => {
+    // Reachable, not the terminal, nowhere to go. The interpreter would throw on arrival;
+    // this catches it before the run starts.
+    const next = core.applyPatchTo(LOCKED, {
+      addNodes: [{ id: 'DeadEnd', kind: 'work' }],
+      addEdges: [{ from: 'Implement', to: 'DeadEnd', when: { field: 'x', eq: 1 } }],
+    });
+    const v = core.validateGraph(next, LOCKED, null);
+    assert.ok(v.some((m) => /dead-end/.test(m)),
+      `expected a dead-end violation, got ${JSON.stringify(v)}`);
+  });
+
   test('REJECT: an orphaned added node', () => {
     const next = core.applyPatchTo(LOCKED, { addNodes: [{ id: 'Island', kind: 'work' }] });
     assert.ok(core.validateGraph(next, LOCKED, null).some(m => /orphan/.test(m)));
@@ -887,6 +899,15 @@ function validateGraph(next, prev, cursor) {
   const orphans = ids.filter((id) => !live.has(id));
   if (orphans.length) v.push('orphaned node(s): ' + orphans.join(', '));
 
+  // A reachable non-terminal node with no outgoing edge is a dead end — the interpreter
+  // would arrive there with nowhere legal to go and (correctly) throw at runtime. Catch
+  // it here instead, before a run ever starts.
+  const deadEnds = ids.filter((id) => id !== next.terminal && live.has(id)
+    && outEdges(next, id).length === 0);
+  if (deadEnds.length) {
+    v.push('dead-end node(s) with no outgoing edge: ' + deadEnds.join(', '));
+  }
+
   // Structural dominance — from `start`, over EVERY declared gate. Position-independent,
   // so it holds for the whole run and cannot be invalidated by later progress.
   for (const gate of inv.mustCross || []) {
@@ -1002,7 +1023,12 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
   const conductorBody = (src) => src
     .replace(/\/\*[\s\S]*?\*\//g, '')        // block comments (graph-core's prose header)
     .replace(/^[ \t]*\/\/.*$/gm, '')         // line comments
-    .replace(/`(?:[^`\\]|\\.)*`/g, '""')     // template literals (worker prompts)
+    // Template literals: blank the TEXT but KEEP the ${...} expressions. A real
+    // interpolation is executing code — blanking it whole would hide a forbidden
+    // primitive inside one, silently disarming the scan for any future generator edit
+    // that introduces a genuine interpolation into the emitted conductor.
+    .replace(/`((?:[^`\\]|\\.)*)`/g, (_m, inner) =>
+      '"" ' + [...inner.matchAll(/\$\{([^{}]*)\}/g)].map((x) => x[1]).join('; '))
     .replace(/'(?:[^'\\]|\\.)*'/g, "''")     // single-quoted strings
     .replace(/"(?:[^"\\]|\\.)*"/g, '""');    // double-quoted strings (GRAPH_V0 node prompts)
 
@@ -1039,6 +1065,25 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
       assert.ok(FORBIDDEN.some(([, re]) => re.test(tampered)),
         `scan failed to catch an injected ${label} — the scoping is too aggressive`);
     }
+  });
+
+  test('the scan sees inside real template-literal interpolations', () => {
+    // Blanking a template literal WHOLE would hide executing code in a ${...}.
+    // Not reachable today (esc() escapes every ${ in prompt data) but it would
+    // silently disarm the scan the first time a genuine interpolation is added.
+    const injected = emitted.replace('const NAME =',
+      'const leak = `prefix ${Date.now()} suffix`\nconst NAME =');
+    assert.ok(FORBIDDEN.some(([, re]) => re.test(conductorBody(injected))),
+      'a forbidden primitive inside a real interpolation was invisible to the scan');
+  });
+
+  test('prose inside a template literal still does not false-positive', () => {
+    // The other direction: blanking must still remove literal TEXT, or the
+    // escaped prompt templates would trip the scan again.
+    const proseOnly = emitted.replace('const NAME =',
+      'const t = `do not call Date.now() or Math.random() here`\nconst NAME =');
+    assert.ok(!FORBIDDEN.some(([, re]) => re.test(conductorBody(proseOnly))),
+      'literal prose inside a template literal must not be scanned as code');
   });
 
   test('meta is a literal and never read at runtime', () => {
@@ -1103,6 +1148,40 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
 
   test('the interpreter enforces the visit cap', () => {
     assert.ok(/visit cap exceeded/.test(emitted));
+  });
+
+  test('the interpreter never falls back to the terminal on an unmatched result', () => {
+    // THE defect this test exists for: `edge ? edge.to : graph.terminal` routed straight
+    // to the terminal whenever no predicate matched, skipping every remaining gate — with
+    // no patch and no adversary, just an agent returning {passed:'true'} or {} or null.
+    assert.ok(!/edge \? edge\.to : graph\.terminal/.test(emitted),
+      'the silent terminal fallback is back — an unmatched result must throw');
+    assert.ok(/no edge matched at/.test(emitted),
+      'the interpreter must hard-fail on an unmatched result');
+  });
+
+  test('unmatched results are a hard failure, verified by executing the logic', () => {
+    // Static greps prove the source shape; this proves the BEHAVIOUR, by running the
+    // same pickEdge the emitted interpreter runs against off-shape agent results.
+    const G = {
+      start: 'Setup', terminal: 'PR',
+      nodes: [{ id: 'Setup' }, { id: 'GateA' }, { id: 'GateB' }, { id: 'PR' }],
+      edges: [
+        { from: 'Setup', to: 'GateA', when: 'always' },
+        { from: 'GateA', to: 'GateB', when: { field: 'passed', eq: true } },
+        { from: 'GateA', to: 'Setup', when: { field: 'passed', eq: false } },
+        { from: 'GateB', to: 'PR', when: { field: 'passed', eq: true } },
+        { from: 'GateB', to: 'Setup', when: { field: 'passed', eq: false } },
+      ],
+    };
+    // Every one of these previously routed GateA -> PR, skipping GateB entirely.
+    for (const bad of [{ passed: 'true' }, { passed: 1 }, {}, { verdict: true }, null, { ok: true }]) {
+      assert.strictEqual(core.pickEdge(G, 'GateA', bad), null,
+        `expected no match for ${JSON.stringify(bad)}`);
+    }
+    // And the well-formed shapes still route correctly.
+    assert.strictEqual(core.pickEdge(G, 'GateA', { passed: true }).to, 'GateB');
+    assert.strictEqual(core.pickEdge(G, 'GateA', { passed: false }).to, 'Setup');
   });
 
   test('a rejected patch is logged and does not mutate the graph', () => {
@@ -1360,9 +1439,22 @@ while (node && node !== graph.terminal) {
     }
   }
 
+  // NO SILENT FALLBACK TO THE TERMINAL. pickEdge returns null when no declared
+  // predicate matches the result, and predicates compare with ===. Routing to
+  // graph.terminal in that case skips EVERY remaining gate — no patch and no
+  // adversary required, just an agent returning {passed:'true'} instead of
+  // {passed:true}, or omitting the field, or returning null. Six of eight
+  // plausible off-shape results reached the terminal this way. The graph is
+  // un-bypassable by construction (Task 3); the walk of it must be too.
   const edge = pickEdge(graph, node, r)
-  const nextNode = edge ? edge.to : graph.terminal
-  if (edge) carry[nextNode] = carryFor(edge, r)
+  if (!edge) {
+    throw new Error('no edge matched at ' + node + ' for result '
+      + JSON.stringify(r) + ' — refusing to advance. Routing onward from an '
+      + 'unmatched result would skip every remaining gate. Fix the node schema '
+      + 'or add an explicit fallthrough edge (when: "always") to this node.')
+  }
+  const nextNode = edge.to
+  carry[nextNode] = carryFor(edge, r)
   trace.push({ node, visit, verdict: r ? r.passed : undefined, to: nextNode })
 
   await checkpoint(nextNode)
