@@ -3335,6 +3335,38 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     assert.ok(/demo/.test(listOut) && /running/.test(listOut) && /Implement/.test(listOut));
   });
 
+  test('the report does not stay silent about states that block a resume', () => {
+    // Every one of these renders "successfully" while withholding the thing an operator
+    // most needs. The report's job is the path actually taken — including the parts that
+    // explain why it stopped.
+    const mk = (state) => {
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-omit-'));
+      fs.mkdirSync(path.join(d, '.loom', 'state'), { recursive: true });
+      fs.writeFileSync(path.join(d, '.loom', 'state', 'p.json'), JSON.stringify(state));
+      return execFileSync('node', [REPORT, 'p'], { cwd: d }).toString();
+    };
+
+    // A run stopped at its cap almost certainly stopped BECAUSE of it. Showing 3/3 and
+    // making the operator notice the numbers match is an omission, not a report.
+    const atCap = mk({ workflow: 'p', status: 'failed', cursor: 'A', visits: { A: 3 },
+      graph: { nodes: [{ id: 'A' }], edges: [], invariants: { visitCaps: { '*': 3 } } }, trace: [] });
+    assert.ok(/AT CAP/.test(atCap), `a run at its visit cap must say so, got:\n${atCap}`);
+
+    // A cursor naming a node the stored graph lacks is NOT resumable — the interpreter
+    // throws "unknown node" on the first step. Rendering it as ordinary sends an operator
+    // to re-run something that cannot start.
+    const ghost = mk({ workflow: 'p', status: 'running', cursor: 'GHOST', visits: { B: 1 },
+      graph: { nodes: [{ id: 'B' }], edges: [], invariants: {} }, trace: [] });
+    assert.ok(/NOT IN THE STORED GRAPH/.test(ghost) && /NOT resumable/.test(ghost),
+      `a cursor outside the graph must be flagged, got:\n${ghost}`);
+
+    // A rejected patch with no recorded reason must not render as a dangling colon.
+    const noWhy = mk({ workflow: 'p', status: 'running', cursor: 'A', visits: { A: 1 },
+      trace: [{ node: 'A', visit: 1, patch: 'rejected' }] });
+    assert.ok(/no reason recorded/.test(noWhy), `expected an explicit placeholder, got:\n${noWhy}`);
+    assert.ok(!/REJECTED: *$/m.test(noWhy), 'must not print a bare trailing colon');
+  });
+
   test('a corrupt state file reports readably, not as a stack trace', () => {
     // An operator hitting this is mid-incident. Compare against the missing-run path,
     // which already says "no such run: <path>" — a raw JSON parser dump is a regression
@@ -3427,7 +3459,15 @@ const out = [];
 out.push(`loom run: ${st.workflow}`);
 out.push(`status:   ${st.status}${st.finishedAt ? ` (finished ${st.finishedAt})` : ''}`);
 out.push(`started:  ${st.startedAt || 'unknown'}`);
-out.push(`cursor:   ${st.cursor}`);
+const nodeIds = new Set(((st.graph && st.graph.nodes) || []).map((n) => n.id));
+const cursorMissing = st.cursor && nodeIds.size > 0 && !nodeIds.has(st.cursor);
+out.push(`cursor:   ${st.cursor}${cursorMissing ? '   *** NOT IN THE STORED GRAPH ***' : ''}`);
+if (cursorMissing) {
+  // This state cannot be resumed — the interpreter throws "unknown node" immediately.
+  // Rendering it as ordinary would send an operator to re-run something that cannot start.
+  out.push('          this run is NOT resumable as stored: the interpreter will throw');
+  out.push('          "unknown node" on the first step. The graph or the cursor is wrong.');
+}
 out.push(`graph:    v${st.graphVersion || 0}, ${(st.graph && st.graph.nodes || []).length} nodes`);
 out.push('');
 
@@ -3435,14 +3475,19 @@ out.push('VISITS');
 for (const [node, n] of Object.entries(st.visits || {})) {
   const cap = ((st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {})[node]
     ?? ((st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {})['*'] ?? 3;
-  out.push(`  ${node.padEnd(16)} ${n}/${cap}${n > 1 ? '   <- revisited' : ''}`);
+  // Flag reaching the cap, not merely being revisited: a run that stopped here almost
+  // certainly stopped BECAUSE of it, and making the operator notice the two numbers match
+  // is exactly the kind of omission that wastes incident time.
+  const mark = n >= cap ? '   <- AT CAP' : n > 1 ? '   <- revisited' : '';
+  out.push(`  ${node.padEnd(16)} ${n}/${cap}${mark}`);
 }
 out.push('');
 
 out.push('PATH');
 for (const t of st.trace || []) {
   if (t.patch === 'rejected') {
-    out.push(`  ${t.node}#${t.visit}  PATCH REJECTED: ${(t.violations || []).join('; ')}`);
+    const why = (t.violations || []).join('; ') || '(no reason recorded in state)';
+    out.push(`  ${t.node}#${t.visit}  PATCH REJECTED: ${why}`);
   } else if (t.patch === 'accepted') {
     out.push(`  ${t.node}#${t.visit}  patch accepted -> graph v${t.version}`);
   } else {
