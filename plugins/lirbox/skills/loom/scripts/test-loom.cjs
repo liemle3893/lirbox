@@ -565,6 +565,24 @@ async function main() {
       // A `/` opens a regex only in expression position; otherwise it is division.
       // The body is DATA (it cannot execute), so it is blanked — the point is only that
       // its contents must not be mistaken for a string, template, or closing brace.
+      //
+      // KNOWN LIMITATION, deliberately not fixed. The expression-position test keys off
+      // PUNCTUATION in `prev`, not keywords. So `return /foo+/;` reads the `/` as
+      // division; if the regex body then ends in a trigger-set character (a trailing `+`
+      // is enough) the real closing `/` is taken as opening a new regex, and same-line
+      // code after it is swallowed. Contained to one line by the newline bail below.
+      //
+      // Do not "fix" this by adding keywords to the trigger set — that was measured and
+      // it trades one false negative for another: a keyword regex matches `o.return / 2`
+      // (the `.` counts as a word boundary), so division after a property named `return`
+      // then gets eaten instead, and `return /a[/` stays broken regardless. Making this
+      // correct needs a real JS lexer, not a bigger heuristic.
+      //
+      // Accepted because: no regex literal exists anywhere in graph-core.mjs or the
+      // generator; the blast radius is one physical line; and this scan guards a rule
+      // (no fs/Date.now in the conductor layer) that the restricted runtime would fail
+      // loudly on anyway. If regex literals ever enter the scanned sources, revisit with
+      // a real lexer rather than another heuristic.
       if (c === '/' && (prev === '' || '=(,:[!&|?{};+-*%~^<>'.includes(prev))) {
         i++;
         let inClass = false;
