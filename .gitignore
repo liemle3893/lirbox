@@ -15,6 +15,10 @@ docs/superpowers/
 .improve/
 .arena/
 
+# Harbor task ports + pruned skill catalog, derived from the arena suite by
+# scripts/harbor-port.mjs. Regenerated on demand; never a source of truth.
+.harbor/
+
 # Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
 implementation-notes/
 
