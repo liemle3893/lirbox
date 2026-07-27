@@ -1276,6 +1276,102 @@ async function main() {
 
   proc.kill();
 
+  section('DoD check freezing');
+
+  const FREEZE = path.join(__dirname, 'dod-freeze.mjs');
+  const dodDir = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-dod-'));
+  const dodPath = path.join(dodDir, 'dod.json');
+  const checksDir = path.join(dodDir, 'checks');
+  fs.writeFileSync(dodPath, JSON.stringify({ criteria: [
+    { id: 'c1', text: 'callback rejects mismatched state', tier: 'checkable',
+      script: '#!/usr/bin/env bash\nset -euo pipefail\nnpx vitest run auth/callback\n' },
+    { id: 'c2', text: 'suite still passes', tier: 'checkable', baseline: 'green-ok',
+      script: '#!/usr/bin/env bash\nset -euo pipefail\nnpm test\n' },
+    { id: 'c3', text: 'error copy reads clearly', tier: 'judged' },
+  ] }));
+  execFileSync('node', [FREEZE, '--dod', dodPath, '--checks-dir', checksDir]);
+  const frozen = JSON.parse(fs.readFileSync(dodPath, 'utf8'));
+
+  test('each checkable criterion becomes a file on disk', () => {
+    for (const id of ['c1', 'c2']) {
+      assert.ok(fs.existsSync(path.join(checksDir, `${id}.sh`)), `${id}.sh not written`);
+    }
+  });
+
+  test('check files are executable', () => {
+    const mode = fs.statSync(path.join(checksDir, 'c1.sh')).mode;
+    assert.ok(mode & 0o111, 'check file must be executable');
+  });
+
+  test('checkFile and checkSha replace the inline script', () => {
+    const c1 = frozen.criteria.find((c) => c.id === 'c1');
+    assert.ok(c1.checkFile.endsWith('c1.sh'));
+    assert.ok(/^sha256:[0-9a-f]{64}$/.test(c1.checkSha));
+    assert.strictEqual(c1.script, undefined, 'the inline script must be moved, not duplicated');
+  });
+
+  test('judged criteria are left alone', () => {
+    const c3 = frozen.criteria.find((c) => c.id === 'c3');
+    assert.strictEqual(c3.checkFile, undefined);
+  });
+
+  test('baseline defaults to "red" and green-ok is preserved', () => {
+    assert.strictEqual(frozen.criteria.find((c) => c.id === 'c1').baseline, 'red');
+    assert.strictEqual(frozen.criteria.find((c) => c.id === 'c2').baseline, 'green-ok');
+  });
+
+  test('a checkable criterion with no script is a hard error', () => {
+    const bad = path.join(dodDir, 'bad.json');
+    fs.writeFileSync(bad, JSON.stringify({ criteria: [
+      { id: 'x', text: 'no script', tier: 'checkable' }] }));
+    let threw = false;
+    try { execFileSync('node', [FREEZE, '--dod', bad, '--checks-dir', checksDir],
+      { stdio: 'pipe' }); } catch { threw = true; }
+    assert.ok(threw);
+  });
+
+  section('DoD check verification');
+
+  test('verifyChecks passes on untouched files', async () => {
+    const m = await import('file://' + FREEZE);
+    const r = m.verifyChecks(frozen, dodDir);
+    assert.ok(r.every((x) => x.ok), JSON.stringify(r));
+  });
+
+  test('verifyChecks catches a weakened check', async () => {
+    const m = await import('file://' + FREEZE);
+    fs.writeFileSync(path.join(checksDir, 'c1.sh'), '#!/usr/bin/env bash\nexit 0\n');
+    const r = m.verifyChecks(frozen, dodDir);
+    const c1 = r.find((x) => x.id === 'c1');
+    assert.strictEqual(c1.ok, false);
+    assert.ok(/sha|hash|modified/i.test(c1.reason));
+  });
+
+  test('verifyChecks catches a deleted check', async () => {
+    const m = await import('file://' + FREEZE);
+    fs.unlinkSync(path.join(checksDir, 'c2.sh'));
+    const c2 = m.verifyChecks(frozen, dodDir).find((x) => x.id === 'c2');
+    assert.strictEqual(c2.ok, false);
+    assert.ok(/missing/i.test(c2.reason));
+  });
+
+  section('DoDBaseline discrimination');
+
+  test('the delivery seed hard-fails a baseline-green criterion', () => {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    const n = d.nodes.find((x) => x.id === 'DoDBaseline');
+    assert.ok(/green-ok/.test(n.prompt),
+      'the baseline node must know about the green-ok waiver');
+    assert.ok(/cannot discriminate|hard failure|fail the run/i.test(n.prompt),
+      'a baseline-green criterion without a waiver must be a hard failure, not a note');
+  });
+
+  test('the DoDGate prompt demands a hash check before running a check', () => {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    const n = d.nodes.find((x) => x.id === 'DoDGate');
+    assert.ok(/checkSha|sha256/.test(n.prompt));
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }

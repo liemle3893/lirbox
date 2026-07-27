@@ -28,13 +28,14 @@
     {
       "id": "DoDBaseline",
       "kind": "work",
-      "prompt": "Run every checkable DoD criterion's check FILE against the worktree BEFORE any work, and record met/unmet/error per criterion. Measure only — fix nothing.",
+      "prompt": "Run every checkable DoD criterion's check FILE against the worktree BEFORE any work. For each: verify the file's sha256 matches its frozen checkSha, then run it and record met (exit 0) / unmet (non-zero) / error (could not run). Measure only — fix nothing. A criterion whose baseline is \"red\" but which is already MET cannot discriminate this run's work: report discriminates=false and FAIL the run, because a check that was green before the work began proves nothing about the work. Criteria explicitly marked baseline \"green-ok\" are regression guards and are expected to be MET — they never fail the run. A sha mismatch is a hard failure.",
       "model": "haiku",
       "schema": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "baselines"
+          "baselines",
+          "discriminates"
         ],
         "properties": {
           "baselines": {
@@ -60,6 +61,9 @@
                 }
               }
             }
+          },
+          "discriminates": {
+            "type": "boolean"
           }
         }
       }
