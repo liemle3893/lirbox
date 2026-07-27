@@ -1,5 +1,35 @@
 # Flowchart Model-Ladder Lift — Implementation Plan
 
+> ## STATUS: NOT PURSUED — decided 2026-07-28, before Task 1 ran
+>
+> **Do not execute this plan.** It is kept for the reasoning, not the steps. Task 0 (e2b) is the
+> only part that ran; its finding is real and stands.
+>
+> **Why it was stopped.** The plan's own controls shrank it to nothing. Sealing `escaping-hostile`
+> as a held-out task — required, or you tune and validate on the same cell and the green number
+> means nothing — leaves flowchart with exactly **one** discovery cell. The outcome space was
+> "sonnet saturates, learn nothing actionable" or "haiku gains a point on one task," and neither
+> changes a decision.
+>
+> **The general lesson: flowchart was the wrong skill to pilot Harbor on, *because* it is the
+> best-instrumented skill in the repo.** It already has 5 train / 4 val scored tasks, a held-out
+> `run-scored.mjs`, a green floor, and a cookbook flow verified against a real run. Harbor's
+> marginal value is highest where the local loop is *weakest*; here the local loop was already the
+> strongest thing available, so Harbor added a slow behavioural layer on top of a fast one that
+> worked.
+>
+> **When to revisit Harbor:** a skill with **no local scored surface** — nothing to hill-climb
+> against, so Harbor is the only instrument — or when cross-model capability-floor data is wanted
+> deliberately. Neither described flowchart.
+>
+> **What was banked anyway** (all independent of this plan, all landed):
+> - the `.harbor/tasks` drift gate — a tracked-but-derived mirror left unguarded when `13fae03`
+>   deleted the previous check;
+> - five stale doc references pointing at the deleted `harbor-port.mjs`;
+> - the e2b capability-floor finding in Task 0 below;
+> - the paired-matrix rule (every model arm runs ± the skill; report the lift, never the raw
+>   score) — cheap to hold, and the one thing `arena` structurally cannot express.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Establish whether `flowchart`'s `SKILL.md` measurably lifts a model on `flowchart__ci-pipeline`, and if so fix the *skill* defects costing weaker models points — filing them as whetstone items so the fix lands eval-gated, never as a hand-edit.
