@@ -238,8 +238,7 @@
       },
       "carry": [
         "findings"
-      ],
-      "locked": true
+      ]
     },
     {
       "from": "Review",
@@ -259,8 +258,7 @@
       },
       "carry": [
         "unmetCriteria"
-      ],
-      "locked": true
+      ]
     },
     {
       "from": "DoDGate",
@@ -287,6 +285,6 @@
       "Implement": 4
     },
     "nodeBudget": 40,
-    "lockedHash": "fnv1a:f374c7a4"
+    "lockedHash": "fnv1a:9c638e6a"
   }
 }

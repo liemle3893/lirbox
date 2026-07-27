@@ -854,11 +854,48 @@ async function main() {
       }
     });
 
-    test(`${profile}: every out-edge of every mustCross gate is locked`, () => {
+    test(`${profile}: each gate's PASSING edge is locked, its FAILURE edge is not`, () => {
+      // A gate's passing edge is where the bypass lives: an unlocked pass edge
+      // can be rerouted or weakened to 'always', skipping the gate.
+      // Failure edges stay unlocked: they are where loom's self-modification lives.
+      // If a failure edge is locked, a planner splicing a node into that path adds
+      // a parallel edge that validates but is never selected (pickEdge takes the
+      // first match). A silent no-op is worse than a rejection.
       for (const g of seed.invariants.mustCross) {
-        const outEdges = seed.edges.filter((e) => e.from === g);
-        for (const e of outEdges) {
-          assert.ok(e.locked, `gate ${g} has an unlocked out-edge to ${e.to}`);
+        const passEdges = seed.edges.filter((e) => e.from === g && e.when && e.when.eq === true);
+        const failEdges = seed.edges.filter((e) => e.from === g && e.when && e.when.eq === false);
+        for (const e of passEdges) {
+          assert.ok(e.locked, `gate ${g} pass-edge to ${e.to} must be locked`);
+        }
+        for (const e of failEdges) {
+          assert.ok(!e.locked, `gate ${g} fail-edge to ${e.to} must not be locked`);
+        }
+      }
+    });
+
+    test(`${profile}: a node can be spliced into a gate's failure path and is reachable`, () => {
+      // The worked example from the spec: a patch adds a node M between a gate's
+      // failure edge target. With the failure edge unlocked, pickEdge actually
+      // selects the new node. This test would have caught the round-1 error:
+      // I verified patches were accepted but never that they were reachable.
+      for (const g of seed.invariants.mustCross) {
+        const failEdges = seed.edges.filter((e) => e.from === g && e.when && e.when.eq === false);
+        for (const fe of failEdges) {
+          // Splice a node M between the gate and the fail-target.
+          const splicedGraph = core.applyPatchTo(seed, {
+            addNodes: [{ id: 'M', kind: 'work', prompt: 'intermediate' }],
+            addEdges: [
+              { from: g, to: 'M', when: { field: 'passed', eq: false } },
+              { from: 'M', to: fe.to, when: 'always' }
+            ],
+            removeEdges: [fe]
+          });
+          // Graph must validate (no locked-edge violation).
+          const v = core.validateGraph(splicedGraph, seed, null);
+          assert.deepStrictEqual(v, [], `splicing into ${g} -> ${fe.to} caused validation errors: ${JSON.stringify(v)}`);
+          // M must be reachable from start (so pickEdge actually selects it).
+          const fromStart = core.reachable(splicedGraph, splicedGraph.start, []);
+          assert.ok(fromStart.has('M'), `spliced node M is not reachable from start`);
         }
       }
     });

@@ -125,8 +125,7 @@
       },
       "carry": [
         "findings"
-      ],
-      "locked": true
+      ]
     },
     {
       "from": "Review",
@@ -147,6 +146,6 @@
       "Implement": 4
     },
     "nodeBudget": 20,
-    "lockedHash": "fnv1a:9d53f74a"
+    "lockedHash": "fnv1a:21e7419e"
   }
 }
