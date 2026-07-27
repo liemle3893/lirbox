@@ -3756,6 +3756,10 @@ The repo requires Tier 2 to ship a skill: `evals/floor/`, `evals/checks/`, `eval
 - Create: `plugins/lirbox/skills/loom/evals/checks/interpreter-no-terminal-fallback.check.mjs`
 - Create: `plugins/lirbox/skills/loom/evals/checks/purity-scan-has-teeth.check.mjs`
 - Create: `plugins/lirbox/skills/loom/evals/checks/dod-check-hash-lock.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/gate-failure-edges-return.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/baseline-discrimination-structural.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/server-no-lost-update.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/editor-escapes-approval-gate.check.mjs`
 - Create: `plugins/lirbox/skills/loom/evals/checks-manifest.json`
 
 **Interfaces:**
@@ -4201,6 +4205,212 @@ if (bad) { console.error(`\ndod-check-hash-lock: ${bad} failed`); process.exit(1
 console.log('dod-check-hash-lock: ok');
 ```
 
+- [ ] **Step 3b: Write the four later-Critical checks**
+
+The five checks above freeze the Criticals found in Tasks 1–5. Four more were found afterwards, in Tasks 5–8, and they need fences too — a suite that freezes half a run's findings implies the other half is covered.
+
+`evals/checks/gate-failure-edges-return.check.mjs`:
+
+```js
+// CHECK — only a gate's LOCKED PASSING edge may lead onward. Dominance proves a gate is
+// VISITED, not that it PASSED: `DoDGate --fail--> Done` left the gate on every path and
+// still ended the run with it unsatisfied. In lite, pickEdge returned the SAME
+// destination for {passed:true} and {passed:false} — the verdict was inert.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
+const core = await import(join(SCRIPTS, 'graph-core.mjs'));
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
+
+for (const profile of ['lite', 'delivery']) {
+  const seed = JSON.parse(readFileSync(join(SCRIPTS, 'seeds', `${profile}.json`), 'utf8'));
+  const gate = seed.invariants.mustCross[seed.invariants.mustCross.length - 1];
+  const fail = seed.edges.find((e) => e.from === gate && e.when && e.when.eq === false);
+
+  ok(core.validateGraph(seed, seed, null).length === 0, `${profile}: baseline validates`);
+
+  // Every shape that lets a not-passing gate lead onward must be rejected.
+  const reroute = core.applyPatchTo(seed, {
+    removeEdges: [{ from: gate, to: fail.to }],
+    addEdges: [{ from: gate, to: seed.terminal, when: fail.when }] });
+  ok(core.validateGraph(reroute, seed, null).length > 0, `${profile}: failure edge -> terminal rejected`);
+
+  const always = core.applyPatchTo(seed, {
+    addEdges: [{ from: gate, to: seed.terminal, when: 'always' }] });
+  ok(core.validateGraph(always, seed, null).length > 0, `${profile}: appended always-edge rejected`);
+
+  for (const field of ['passed', 'anythingAtAll']) {
+    const mint = core.applyPatchTo(seed, {
+      addEdges: [{ from: gate, to: seed.terminal, when: { field, eq: true } }] });
+    ok(core.validateGraph(mint, seed, null).length > 0,
+      `${profile}: minted pass edge on '${field}' rejected`);
+  }
+
+  // ...and legitimate reshaping of the failure path must still be accepted AND reachable.
+  const spliced = core.applyPatchTo(seed, {
+    removeEdges: [{ from: gate, to: fail.to }],
+    addNodes: [{ id: 'Spike', kind: 'work' }],
+    addEdges: [{ from: gate, to: 'Spike', when: { field: 'passed', eq: false } },
+               { from: 'Spike', to: fail.to, when: 'always' }] });
+  ok(core.validateGraph(spliced, seed, null).length === 0, `${profile}: spike splice accepted`);
+  ok((core.pickEdge(spliced, gate, { passed: false }) || {}).to === 'Spike',
+    `${profile}: spliced node is REACHABLE, not shadowed`);
+}
+
+if (bad) { console.error(`\ngate-failure-edges-return: ${bad} failed`); process.exit(1); }
+console.log('gate-failure-edges-return: ok');
+```
+
+`evals/checks/baseline-discrimination-structural.check.mjs`:
+
+```js
+// CHECK — DoDBaseline's "a non-discriminating baseline stops the run" must be enforced by the
+// GRAPH, not by prompt prose. Its out-edge was once when:"always", so a worker honestly
+// reporting discriminates:false routed onward and the run continued. Worse than enforced by
+// prose — enforced by nothing.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
+const core = await import(join(SCRIPTS, 'graph-core.mjs'));
+const seed = JSON.parse(readFileSync(join(SCRIPTS, 'seeds', 'delivery.json'), 'utf8'));
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
+
+const out = seed.edges.filter((e) => e.from === 'DoDBaseline');
+ok(out.length === 1, 'DoDBaseline has exactly one out-edge');
+ok(out[0].when && out[0].when.field === 'discriminates' && out[0].when.eq === true,
+  'that edge requires discriminates === true');
+
+ok((core.pickEdge(seed, 'DoDBaseline', { discriminates: true }) || {}).to === 'Plan',
+  'a discriminating baseline advances');
+for (const r of [{ discriminates: false }, { baselines: [] }, { discriminates: 1 },
+                 { discriminates: 'true' }, null]) {
+  ok(core.pickEdge(seed, 'DoDBaseline', r) === null,
+    `no edge matches ${JSON.stringify(r)} — interpreter hard-fails`);
+}
+
+// The tamper signal must stay reportable and distinct from an ordinary failure.
+const gate = seed.nodes.find((n) => n.id === 'DoDGate');
+ok(gate.schema.properties.criteria.items.properties.verdict.enum.includes('TAMPERED'),
+  'DoDGate can report TAMPERED distinctly from UNMET');
+
+if (bad) { console.error(`\nbaseline-discrimination-structural: ${bad} failed`); process.exit(1); }
+console.log('baseline-discrimination-structural: ok');
+```
+
+`evals/checks/server-no-lost-update.check.mjs`:
+
+```js
+// CHECK — POST /graph must not silently discard a concurrent save. Two valid saves once both
+// returned 200 with sequential versions and one edit vanished, the client told it succeeded.
+// The wrapper is mandatory: a bare body, or a wrapper with baseVersion omitted, were both
+// supported ways to opt out of the check entirely.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
+
+const root = mkdtempSync(join(tmpdir(), 'loom-eval-'));
+mkdirSync(join(root, '.loom', 'state'), { recursive: true });
+writeFileSync(join(root, '.loom', 'e.graph.json'),
+  readFileSync(join(SCRIPTS, 'seeds', 'delivery.json'), 'utf8'));
+
+const srv = spawn('node', [join(SCRIPTS, 'graph-server.mjs'), '--name', 'e', '--root', root, '--port', '0']);
+const port = await new Promise((res, rej) => {
+  const t = setTimeout(() => rej(new Error('server did not start')), 8000);
+  srv.stdout.on('data', (b) => {
+    const m = /LOOM_SERVER_PORT=(\d+)/.exec(b.toString());
+    if (m) { clearTimeout(t); res(Number(m[1])); }
+  });
+});
+const base = `http://127.0.0.1:${port}`;
+const post = (b) => fetch(`${base}/graph`, { method: 'POST',
+  headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.status);
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
+try {
+  const g = await (await fetch(`${base}/graph`)).json();
+  const mk = (id) => {
+    const c = JSON.parse(JSON.stringify(g));
+    c.nodes.push({ id, kind: 'work', prompt: 'x' });
+    c.edges.push({ from: 'Implement', to: id, when: { field: 'k', eq: 1 } });
+    c.edges.push({ from: id, to: 'Implement', when: 'always' });
+    return c;
+  };
+
+  ok(await post(mk('Bare')) === 400, 'a bare graph body is refused');
+  ok(await post({ graph: mk('NoBase') }) === 400, 'a wrapper without baseVersion is refused');
+
+  const [a, b] = await Promise.all([
+    post({ baseVersion: g.version, graph: mk('RaceA') }),
+    post({ baseVersion: g.version, graph: mk('RaceB') })]);
+  ok([a, b].sort().join(',') === '200,409',
+    `exactly one concurrent save wins and the loser is told (got ${a},${b})`);
+} finally { srv.kill(); }
+
+if (bad) { console.error(`\nserver-no-lost-update: ${bad} failed`); process.exit(1); }
+console.log('server-no-lost-update: ok');
+```
+
+`evals/checks/editor-escapes-approval-gate.check.mjs`:
+
+```js
+// CHECK — every dynamic value in the editor's panel must be escaped before innerHTML.
+// Node ids arrive from planner graphPatches (LLM text), and the panel is the page that IS
+// the human approval gate, with access to the loopback server. Escaping only `prompt` left
+// id and kind raw.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const EDITOR = resolve(HERE, '..', '..', 'scripts', 'editor');
+const js = readFileSync(join(EDITOR, 'editor.js'), 'utf8');
+const html = readFileSync(join(EDITOR, 'index.html'), 'utf8');
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
+
+const panel = js.slice(js.indexOf('function renderPanel'));
+const body = panel.slice(0, panel.indexOf('`;') + 2);
+const raw = [...body.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1].trim())
+  .filter((e) => !/^locked \?/.test(e)).filter((e) => !/^esc\(/.test(e));
+ok(raw.length === 0, `no unescaped interpolation reaches innerHTML (found ${JSON.stringify(raw)})`);
+ok(/replace\(\/&\/g, '&amp;'\)/.test(js), 'esc escapes & first, avoiding double-encoding');
+ok(/from ['"]\.\/graph-core\.mjs['"]/.test(js), 'validateGraph is imported, not reimplemented');
+ok(/baseVersion: graph\.version, graph: next/.test(js), 'saves send the concurrency wrapper');
+
+const external = [...html.matchAll(/<(script|link)\b[^>]*>/g)].map((m) => m[0])
+  .filter((t) => /https?:\/\//.test(t));
+ok(external.length >= 4, 'four external subresources are present');
+for (const tag of external) {
+  ok(/integrity="sha384-[A-Za-z0-9+/=]+"/.test(tag) && /crossorigin="anonymous"/.test(tag),
+    `SRI + crossorigin present on ${tag.slice(0, 48)}...`);
+}
+ok(!/REPLACE_WITH_SRI/.test(html), 'no SRI placeholder remains');
+
+if (bad) { console.error(`\neditor-escapes-approval-gate: ${bad} failed`); process.exit(1); }
+console.log('editor-escapes-approval-gate: ok');
+```
+
 - [ ] **Step 4: Write the manifest**
 
 `evals/checks-manifest.json` — a check missing from this file fails the gate, because an unlisted check is an unguarded check:
@@ -4222,7 +4432,11 @@ console.log('dod-check-hash-lock: ok');
     "cursor-rename-fails-closed": { "expect": "green" },
     "interpreter-no-terminal-fallback": { "expect": "green" },
     "purity-scan-has-teeth": { "expect": "green" },
-    "dod-check-hash-lock": { "expect": "green" }
+    "dod-check-hash-lock": { "expect": "green" },
+    "gate-failure-edges-return": { "expect": "green" },
+    "baseline-discrimination-structural": { "expect": "green" },
+    "server-no-lost-update": { "expect": "green" },
+    "editor-escapes-approval-gate": { "expect": "green" }
   }
 }
 ```
