@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Expectation manifest for loom's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern). MUST exit 0 or 1.",
+    "",
+    "A check file missing from this manifest FAILS the gate.",
+    "LOCKED (evals/**): improvement loops may never edit this file."
+  ],
+  "checks": {
+    "gate-dominance-not-bypassable": { "expect": "green" },
+    "cursor-rename-fails-closed": { "expect": "green" },
+    "interpreter-no-terminal-fallback": { "expect": "green" },
+    "purity-scan-has-teeth": { "expect": "green" },
+    "dod-check-hash-lock": { "expect": "green" },
+    "gate-failure-edges-return": { "expect": "green" },
+    "baseline-discrimination-structural": { "expect": "green" },
+    "server-no-lost-update": { "expect": "green" },
+    "editor-escapes-approval-gate": { "expect": "green" }
+  }
+}
