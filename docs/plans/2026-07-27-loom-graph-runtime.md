@@ -1666,6 +1666,20 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
       }
     });
 
+    test(`${profile}: every out-edge of every mustCross gate is locked`, () => {
+      // Locking the NODE is not enough — an unlocked out-edge can have its predicate
+      // loosened or be rerouted, and a gate's failure routing is as much part of its
+      // contract as its pass routing. The rule is uniform: every edge leaving a gate.
+      for (const gate of seed.invariants.mustCross) {
+        const out = seed.edges.filter((e) => e.from === gate);
+        assert.ok(out.length > 0, `${gate} has no out-edges`);
+        for (const e of out) {
+          assert.ok(e.locked,
+            `${gate} -> ${e.to} is a gate out-edge but is not locked`);
+        }
+      }
+    });
+
     test(`${profile}: lockedHash is present and correct`, () => {
       assert.strictEqual(seed.invariants.lockedHash, core.lockedFingerprint(seed));
     });
@@ -1743,7 +1757,7 @@ Create `plugins/lirbox/skills/loom/scripts/seeds/lite.json`:
     { "from": "Plan", "to": "Implement", "when": "always" },
     { "from": "Implement", "to": "Review", "when": "always" },
     { "from": "Review", "to": "Implement", "when": { "field": "passed", "eq": false },
-      "carry": ["findings"] },
+      "carry": ["findings"], "locked": true },
     { "from": "Review", "to": "Done", "when": { "field": "passed", "eq": true },
       "locked": true }
   ],
@@ -1823,8 +1837,9 @@ Create `plugins/lirbox/skills/loom/scripts/seeds/delivery.json` — the same sha
     { "from": "Plan", "to": "Implement", "when": "always" },
     { "from": "Implement", "to": "Review", "when": "always" },
     { "from": "Review", "to": "Implement", "when": { "field": "passed", "eq": false },
-      "carry": ["findings"] },
-    { "from": "Review", "to": "DoDGate", "when": { "field": "passed", "eq": true } },
+      "carry": ["findings"], "locked": true },
+    { "from": "Review", "to": "DoDGate", "when": { "field": "passed", "eq": true },
+      "locked": true },
     { "from": "DoDGate", "to": "Implement", "when": { "field": "passed", "eq": false },
       "carry": ["unmetCriteria"], "locked": true },
     { "from": "DoDGate", "to": "PR", "when": { "field": "passed", "eq": true },
@@ -2784,7 +2799,7 @@ Run every checkable DoD criterion's check FILE against the worktree BEFORE any w
 
 Add `"discriminates"` to the node's schema properties as `{ "type": "boolean" }` and to `required`.
 
-Because the seed changed, re-stamp its `lockedHash`. **Expect the value to be unchanged** — only `Review` and `DoDGate` are locked, and `DoDBaseline` is not, so editing its prompt cannot move the fingerprint. The re-stamp is defensive, and printing the same hash back (`fnv1a:e2a2731d`) means it worked, not that it failed:
+Because the seed changed, re-stamp its `lockedHash`. **Expect the value to be unchanged** — the fingerprint covers only locked nodes and edges, and `DoDBaseline` is not locked, so editing its prompt cannot move it. The re-stamp is defensive; printing the same hash back means it worked, not that it failed:
 
 ```bash
 cd plugins/lirbox/skills/loom/scripts && node -e "
