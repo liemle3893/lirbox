@@ -900,8 +900,8 @@ function applyPatchTo(graph, patch) {
     g.nodes = g.nodes.filter((n) => !rmN.has(n.id));
     g.edges = g.edges.filter((e) => !rmN.has(e.from) && !rmN.has(e.to));
   }
-  const rmE = new Set(arr(p.removeEdges).map((e) => e.from + ' ' + e.to));
-  if (rmE.size) g.edges = g.edges.filter((e) => !rmE.has(e.from + ' ' + e.to));
+  const rmE = new Set(arr(p.removeEdges).map((e) => e.from + '→' + e.to));
+  if (rmE.size) g.edges = g.edges.filter((e) => !rmE.has(e.from + '→' + e.to));
 
   for (const u of arr(p.updateNodes)) {
     const i = g.nodes.findIndex((n) => n.id === u.id);
