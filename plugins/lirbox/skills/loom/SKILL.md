@@ -94,8 +94,7 @@ the user `http://127.0.0.1:<port>`. Set `status: "awaiting-approval"`.
 
 Then poll `.loom/<name>.action.json`:
 - `replan` → run a replan worker over `(graph, comments)`, write the new graph, keep polling
-- `approve` → freeze. State it as a filter, not as prose — the previous wording ("every
-  `mustCross` node **and its edges**") had two readings and BOTH locked every fail edge:
+- `approve` → freeze. Lock every gate node, and of its edges lock **only the passing one**:
 
   ```js
   for (const n of g.nodes)
