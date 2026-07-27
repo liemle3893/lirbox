@@ -2796,6 +2796,20 @@ function App() {
   const [flow, setFlow] = useState({ nodes: [], edges: [] });
   const [tick, setTick] = useState(0);
 
+  // DELIBERATE TRADEOFF, not an accident: this refetches and overwrites the canvas
+  // whenever `tick` bumps, which includes the read-only transition when a run starts.
+  // Any UNSAVED local sketch in this tab is discarded at that moment, without warning.
+  //
+  // Nothing persisted is ever at risk — only an in-browser draft. In the primary flow it
+  // cannot bite, because "Approve & run" saves first and only fires the action if that
+  // save succeeded, so the running graph already matches the screen. The exposure is a
+  // SECOND tab (or another person — this is loopback with no auth) approving a run while
+  // this tab holds an unsaved edit.
+  //
+  // Accepted because once a run starts the run owns the graph, and showing a stale
+  // editable canvas over a live run is worse than dropping a draft. If this ever needs
+  // softening, the fix is to prompt before discarding — not to skip the refetch, which
+  // would leave the canvas lying about a graph the run is actively patching.
   useEffect(() => { loadGraph().then((g) => setFlow(toFlow(g))); }, [tick]);
   useEffect(() => { startPolling(() => setTick((t) => t + 1)); }, []);
 
