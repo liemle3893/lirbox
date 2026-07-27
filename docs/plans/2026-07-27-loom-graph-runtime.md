@@ -1848,6 +1848,27 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     });
   }
 
+  test('delivery: a non-discriminating baseline structurally stops the run', () => {
+    // The DoDBaseline prompt tells a worker that a baseline-red criterion already MET
+    // cannot discriminate this run. That instruction needs a mechanism: with an
+    // unconditional out-edge, a worker honestly reporting discriminates:false routed
+    // straight to Plan and the run continued. Gating the edge means a false result
+    // matches NO edge, which the interpreter treats as a hard failure (Task 4).
+    // Prose is not enforcement; the graph is.
+    const seed = JSON.parse(fs.readFileSync(
+      path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    const out = seed.edges.filter((e) => e.from === 'DoDBaseline');
+    assert.strictEqual(out.length, 1, 'DoDBaseline should have exactly one out-edge');
+    assert.deepStrictEqual(out[0].when, { field: 'discriminates', eq: true },
+      'DoDBaseline must only advance when the baseline actually discriminates');
+
+    assert.strictEqual(core.pickEdge(seed, 'DoDBaseline', { discriminates: true }).to, 'Plan');
+    assert.strictEqual(core.pickEdge(seed, 'DoDBaseline', { discriminates: false }), null,
+      'discriminates:false must match no edge so the interpreter hard-fails');
+    assert.strictEqual(core.pickEdge(seed, 'DoDBaseline', { baselines: [] }), null,
+      'a result omitting discriminates must not advance either');
+  });
+
   test('delivery carries a DoDGate and lite does not require one', () => {
     const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
     assert.ok(d.invariants.mustCross.includes('DoDGate'));
@@ -1980,7 +2001,7 @@ Create `plugins/lirbox/skills/loom/scripts/seeds/delivery.json` — the same sha
   ],
   "edges": [
     { "from": "Setup", "to": "DoDBaseline", "when": "always" },
-    { "from": "DoDBaseline", "to": "Plan", "when": "always" },
+    { "from": "DoDBaseline", "to": "Plan", "when": { "field": "discriminates", "eq": true } },
     { "from": "Plan", "to": "Implement", "when": "always" },
     { "from": "Implement", "to": "Review", "when": "always" },
     { "from": "Review", "to": "Implement", "when": { "field": "passed", "eq": false },
@@ -3161,10 +3182,12 @@ if (process.argv[1] && process.argv[1].endsWith('dod-freeze.mjs')) main();
 In `plugins/lirbox/skills/loom/scripts/seeds/delivery.json`, replace the `DoDBaseline` node's `prompt` with:
 
 ```
-Run every checkable DoD criterion's check FILE against the worktree BEFORE any work. For each: verify the file's sha256 matches its frozen checkSha, then run it and record met (exit 0) / unmet (non-zero) / error (could not run). Measure only — fix nothing. A criterion whose baseline is "red" but which is already MET cannot discriminate this run's work: report discriminates=false and FAIL the run, because a check that was green before the work began proves nothing about the work. Criteria explicitly marked baseline "green-ok" are regression guards and are expected to be MET — they never fail the run. A sha mismatch is a hard failure.
+Run every checkable DoD criterion's check FILE against the worktree BEFORE any work. For each: verify the file's sha256 matches its frozen checkSha, then run it and record met (exit 0) / unmet (non-zero) / error (could not run). Measure only — fix nothing. A criterion whose baseline is "red" but which is already MET cannot discriminate this run's work: report discriminates=false, because a check that was green before the work began proves nothing about the work. You do not need to do anything else to stop the run — this node's only outgoing edge requires discriminates=true, so reporting false matches no edge and the interpreter hard-fails with "no edge matched at DoDBaseline". Report honestly; the graph enforces the consequence. Criteria explicitly marked baseline "green-ok" are regression guards and are expected to be MET — they never fail the run. A sha mismatch is a hard failure.
 ```
 
 Add `"discriminates"` to the node's schema properties as `{ "type": "boolean" }` and to `required`.
+
+**Also change `DoDBaseline`'s out-edge** from `"when": "always"` to `"when": { "field": "discriminates", "eq": true }`. Without this the prompt's instruction has nothing to act on: the edge matches unconditionally, so a worker honestly reporting `discriminates: false` routes to `Plan` and the run continues as if nothing happened. Gating the edge makes a false result match NO edge, which the interpreter already treats as a hard failure (Task 4). The guarantee moves from prose into the graph, which is how every other gate in this system works.
 
 Because the seed changed, re-stamp its `lockedHash`. **Expect the value to be unchanged** — the fingerprint covers only locked nodes and edges, and `DoDBaseline` is not locked, so editing its prompt cannot move it. The re-stamp is defensive; printing the same hash back means it worked, not that it failed:
 
