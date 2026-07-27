@@ -89,4 +89,124 @@ function carryFor(edge, result) {
   return out;
 }
 
-export { outEdges, reachable, dominates, matches, pickEdge, capFor, carryFor };
+// Key-sorted JSON so a fingerprint depends on CONTENT, not on property order.
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  return '{' + Object.keys(v).sort()
+    .map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+}
+
+// FNV-1a, 32-bit. Pure JS because the conductor layer has no `crypto`.
+// This is a DRIFT DETECTOR, not a security boundary: it catches a replanner
+// quietly rewriting a locked gate, not an adversary hunting collisions.
+// (DoD check files use real sha256 — computed by a worker, which has full tools.)
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return ('00000000' + h.toString(16)).slice(-8);
+}
+
+function lockedFingerprint(graph) {
+  const nodes = graph.nodes.filter((n) => n.locked)
+    .slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const edges = graph.edges.filter((e) => e.locked).slice()
+    .sort((a, b) => {
+      const x = stableStringify(a), y = stableStringify(b);
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+  return 'fnv1a:' + fnv1a(stableStringify({ nodes, edges }));
+}
+
+// PURE: deep-clones, applies, returns a new graph. Order matters —
+// removals first, then updates, then additions, so a patch can replace a node
+// id in one step without colliding with itself.
+function applyPatchTo(graph, patch) {
+  const g = JSON.parse(JSON.stringify(graph));
+  const p = patch || {};
+
+  const rmN = new Set(p.removeNodes || []);
+  if (rmN.size) {
+    g.nodes = g.nodes.filter((n) => !rmN.has(n.id));
+    g.edges = g.edges.filter((e) => !rmN.has(e.from) && !rmN.has(e.to));
+  }
+  const rmE = new Set((p.removeEdges || []).map((e) => e.from + '→' + e.to));
+  if (rmE.size) g.edges = g.edges.filter((e) => !rmE.has(e.from + '→' + e.to));
+
+  for (const u of p.updateNodes || []) {
+    const i = g.nodes.findIndex((n) => n.id === u.id);
+    if (i >= 0) g.nodes[i] = Object.assign({}, g.nodes[i], u);
+  }
+  for (const n of p.addNodes || []) g.nodes.push(JSON.parse(JSON.stringify(n)));
+  for (const e of p.addEdges || []) g.edges.push(JSON.parse(JSON.stringify(e)));
+  return g;
+}
+
+// Returns violation messages; [] means the graph is acceptable.
+// `prev` supplies the frozen lockedHash (null pre-approval).
+// `cursor` = { node, unsatisfiedGates } during a run, null pre-flight.
+function validateGraph(next, prev, cursor) {
+  const v = [];
+  const ids = next.nodes.map((n) => n.id);
+  const idSet = new Set(ids);
+
+  const dup = ids.filter((id, i) => ids.indexOf(id) !== i);
+  if (dup.length) v.push('duplicate node id: ' + [...new Set(dup)].join(', '));
+
+  for (const e of next.edges) {
+    if (!idSet.has(e.from)) v.push('edge from unknown node: ' + e.from);
+    if (!idSet.has(e.to)) v.push('edge to unknown node: ' + e.to);
+  }
+
+  if (!idSet.has(next.start)) v.push('start node missing: ' + next.start);
+  if (!idSet.has(next.terminal)) v.push('terminal node missing: ' + next.terminal);
+
+  const inv = next.invariants || {};
+  if (inv.nodeBudget && ids.length > inv.nodeBudget) {
+    v.push('node budget exceeded: ' + ids.length + ' > ' + inv.nodeBudget);
+  }
+
+  const lockedHash = prev && prev.invariants && prev.invariants.lockedHash;
+  if (lockedHash && lockedFingerprint(next) !== lockedHash) {
+    v.push('locked nodes/edges were modified or removed');
+  }
+
+  // Everything below needs a well-formed skeleton; bail out rather than
+  // pile confusing secondary errors onto a graph that is already broken.
+  if (!idSet.has(next.start) || !idSet.has(next.terminal)) return v;
+
+  const live = reachable(next, next.start, []);
+  if (!live.has(next.terminal)) {
+    v.push('terminal ' + next.terminal + ' unreachable from ' + next.start);
+  }
+  const orphans = ids.filter((id) => !live.has(id));
+  if (orphans.length) v.push('orphaned node(s): ' + orphans.join(', '));
+
+  // Structural dominance — from `start`, over EVERY declared gate. Position-independent,
+  // so it holds for the whole run and cannot be invalidated by later progress.
+  for (const gate of inv.mustCross || []) {
+    if (!idSet.has(gate)) { v.push('mustCross node missing: ' + gate); continue; }
+    if (!dominates(next, gate, next.terminal, next.start)) {
+      v.push(gate + ' no longer dominates ' + next.terminal);
+    }
+  }
+
+  // Positional dominance — from the CURSOR, over gates not yet satisfied.
+  // Required because a back-edge admits start -> DoDGate -> Implement -> terminal:
+  // structurally dominated, yet the remaining path never re-crosses the failed gate.
+  if (cursor && cursor.node && idSet.has(cursor.node)) {
+    for (const gate of cursor.unsatisfiedGates || []) {
+      if (!idSet.has(gate)) continue;
+      if (!dominates(next, gate, next.terminal, cursor.node)) {
+        v.push(gate + ' is unsatisfied but no longer dominates ' + next.terminal
+          + ' from ' + cursor.node);
+      }
+    }
+  }
+  return v;
+}
+
+export { outEdges, reachable, dominates, matches, pickEdge, capFor, carryFor, stableStringify, fnv1a, lockedFingerprint, applyPatchTo, validateGraph };
