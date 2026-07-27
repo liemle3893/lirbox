@@ -554,7 +554,15 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
   const LOCKED = (() => {
     const g = JSON.parse(JSON.stringify(G));
     for (const n of g.nodes) if (n.id === 'DoDGate' || n.id === 'Review') n.locked = true;
-    for (const e of g.edges) if (e.from === 'DoDGate') e.locked = true;
+    // MIRROR THE SEEDS: only a gate's PASSING edge is locked. Locking failure edges here
+    // too would make this fixture over-locked relative to reality, so a test asserting the
+    // non-passing-edge rule could pass on a LOCK violation instead — staying green even if
+    // that rule regressed. The fixture must have the same shape as what ships.
+    for (const e of g.edges) {
+      if ((e.from === 'DoDGate' || e.from === 'Review') && e.when && e.when.eq === true) {
+        e.locked = true;
+      }
+    }
     g.invariants = {
       mustCross: ['Review', 'DoDGate'],
       visitCaps: { '*': 3, Implement: 4 },
@@ -590,8 +598,11 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
   });
 
   test('REJECT: deleting a locked edge', () => {
+    // Target the PASSING edge — that is the locked one. Deleting the FAILURE edge is also
+    // rejected, but by the non-passing-edge rule, which is a different test. Pointing this
+    // one at the failure edge would let it pass even if the lock check regressed.
     const next = core.applyPatchTo(LOCKED, {
-      removeEdges: [{ from: 'DoDGate', to: 'Implement' }] });
+      removeEdges: [{ from: 'DoDGate', to: 'PR' }] });
     assert.ok(core.validateGraph(next, LOCKED, null).some(m => /locked/.test(m)));
   });
 
