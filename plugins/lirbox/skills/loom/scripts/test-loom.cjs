@@ -1169,6 +1169,74 @@ async function main() {
       'the server must bind 127.0.0.1 explicitly, never 0.0.0.0');
   });
 
+  section('editor');
+
+  const editorHtml = fs.readFileSync(path.join(__dirname, 'editor', 'index.html'), 'utf8');
+  const editorJs = fs.readFileSync(path.join(__dirname, 'editor', 'editor.js'), 'utf8');
+
+  test('GET / now serves the editor HTML', async () => {
+    // Deferred from Task 6: the route existed, the file did not.
+    const r = await fetch(base + '/');
+    assert.strictEqual(r.status, 200);
+    assert.ok(/text\/html/.test(r.headers.get('content-type')));
+  });
+
+  test('loads React Flow from CDN', () => {
+    assert.ok(/reactflow/i.test(editorHtml), 'React Flow must be loaded');
+  });
+
+  test('every external subresource is pinned with SRI', () => {
+    // A CDN that serves different bytes tomorrow would be executing arbitrary code
+    // against the repo the editor is about to modify. Pin them.
+    const external = [...editorHtml.matchAll(/<(script|link)\b[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((tag) => /https?:\/\//.test(tag));
+    assert.ok(external.length >= 4, 'expected React, ReactDOM, React Flow and its stylesheet');
+    for (const tag of external) {
+      assert.ok(/integrity="sha384-[A-Za-z0-9+/=]+"/.test(tag),
+        `missing SRI integrity: ${tag}`);
+      assert.ok(/crossorigin="anonymous"/.test(tag), `missing crossorigin: ${tag}`);
+    }
+  });
+
+  test('external URLs are version-pinned, never a floating major', () => {
+    for (const m of editorHtml.matchAll(/https:\/\/unpkg\.com\/([^"'\s]+)/g)) {
+      assert.ok(/@\d+\.\d+\.\d+/.test(m[1]),
+        `pin an exact version, got ${m[1]} — SRI on a floating range breaks on every release`);
+    }
+  });
+
+  test('imports the shared validator rather than reimplementing it', () => {
+    assert.ok(/from ['"]\.\/graph-core\.mjs['"]/.test(editorJs),
+      'the editor must import graph-core.mjs — no second validator');
+    assert.ok(/validateGraph/.test(editorJs));
+  });
+
+  test('posts to every server route it needs', () => {
+    for (const route of ['/graph', '/state', '/action']) {
+      assert.ok(editorJs.includes(route), `editor never calls ${route}`);
+    }
+  });
+
+  test('renders 422 violations back to the user', () => {
+    assert.ok(/422/.test(editorJs) && /violations/.test(editorJs),
+      'a rejected save must show its reasons, not fail silently');
+  });
+
+  test('refuses to edit locked nodes', () => {
+    assert.ok(/locked/.test(editorJs));
+  });
+
+  test('polls state for live mode and goes read-only during a run', () => {
+    assert.ok(/setInterval/.test(editorJs));
+    assert.ok(/readOnly|readonly/.test(editorJs));
+  });
+
+  test('writes per-node visit caps into invariants, not onto the node', () => {
+    assert.ok(/invariants\.visitCaps|visitCaps\[/.test(editorJs),
+      'visit caps have exactly one home: invariants.visitCaps');
+  });
+
   proc.kill();
 
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
