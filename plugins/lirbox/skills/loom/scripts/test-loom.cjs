@@ -468,6 +468,164 @@ async function main() {
     assert.deepStrictEqual(v, []);
   });
 
+  section('generator');
+
+  const { execFileSync } = require('child_process');
+  const fs = require('fs');
+  const os = require('os');
+  const GEN = path.join(__dirname, 'scaffold-loom.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-loom-'));
+  const graphFile = path.join(tmp, 'graph.json');
+  fs.writeFileSync(graphFile, JSON.stringify({ ...LOCKED, name: 'demo', goal: 'demo goal' }));
+  const outFile = path.join(tmp, 'demo.js');
+  execFileSync('node', [GEN, '--name', 'demo', '--graph', graphFile, '--out', outFile]);
+  const emitted = fs.readFileSync(outFile, 'utf8');
+
+  test('emitted script parses', () => {
+    execFileSync('node', ['--check', outFile]);
+  });
+
+  // The restricted-layer scan. It MUST be scoped to executing code before it runs.
+  //
+  // Scanning the raw emitted text produces guaranteed false positives, because two kinds
+  // of legitimate content name these primitives in prose:
+  //   - graph-core.mjs's own header comment documents its purity rule ("no Date.now(),
+  //     no Math.random(), no crypto") and is required to travel into the conductor
+  //     byte-for-byte by the inlining test;
+  //   - node prompts are DATA and may say anything, including "don't use fs.".
+  //
+  // conductor hit exactly this and fixed it the same way (test-scaffold.cjs, conductorBody).
+  // loom differs in one respect: conductor slices from `const NAME`, which for loom would
+  // skip the inlined graph-core FUNCTIONS — those are executing code and must stay scanned.
+  // So strip comments and blank every string/template literal instead, keeping all real code.
+  const conductorBody = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, '')        // block comments (graph-core's prose header)
+    .replace(/^[ \t]*\/\/.*$/gm, '')         // line comments
+    .replace(/`(?:[^`\\]|\\.)*`/g, '""')     // template literals (worker prompts)
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")     // single-quoted strings
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""');    // double-quoted strings (GRAPH_V0 node prompts)
+
+  const FORBIDDEN = [
+    ['require(', /\brequire\s*\(/],
+    ['import', /^\s*import\s/m],
+    ['Date.now', /\bDate\.now\s*\(/],
+    ['new Date', /\bnew Date\b/],
+    ['Math.random', /\bMath\.random\s*\(/],
+    ['crypto', /\bcrypto\b/],
+    ['fs.', /\bfs\s*\./],
+    ['child_process', /child_process/],
+  ];
+  const emittedBody = conductorBody(emitted);
+  for (const [name, re] of FORBIDDEN) {
+    test(`emitted conductor body contains no ${name}`, () => {
+      assert.ok(!re.test(emittedBody),
+        `forbidden ${name} found in EXECUTING code of the generated conductor`);
+    });
+  }
+
+  test('the purity scan still has teeth', () => {
+    // A scoped scan that cannot fail is worse than no scan. Inject each forbidden
+    // primitive into executing code and confirm the scan catches every one.
+    for (const [label, code] of [
+      ['Date.now', 'const t = Date.now()'],
+      ['Math.random', 'const r = Math.random()'],
+      ['require', 'const x = require("fs")'],
+      ['fs.', 'fs.writeFileSync(a, b)'],
+      ['new Date', 'const d = new Date()'],
+      ['crypto', 'const h = crypto.createHash("sha256")'],
+    ]) {
+      const tampered = conductorBody(emitted.replace('const NAME =', code + '\nconst NAME ='));
+      assert.ok(FORBIDDEN.some(([, re]) => re.test(tampered)),
+        `scan failed to catch an injected ${label} — the scoping is too aggressive`);
+    }
+  });
+
+  test('meta is a literal and never read at runtime', () => {
+    assert.ok(/^export const meta = \{/m.test(emitted));
+    const body = emitted.slice(emitted.indexOf('\n}\n') + 3);
+    assert.ok(!/\bmeta\s*\./.test(body), 'meta is metadata, not a runtime binding');
+  });
+
+  test('inlined graph-core matches the module byte-for-byte', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'graph-core.mjs'), 'utf8');
+    const expected = src.replace(/^export \{[^}]*\};?\s*$/m, '').trimEnd();
+    assert.ok(emitted.includes(expected),
+      'the generator must inline graph-core.mjs verbatim — no second implementation');
+  });
+
+  test('the graph is spliced in as DATA', () => {
+    assert.ok(/const GRAPH_V0 = \{/.test(emitted));
+    assert.ok(emitted.includes('"DoDGate"') || emitted.includes('DoDGate'));
+  });
+
+  test('prompt placeholders are escaped, not interpolated', () => {
+    // `node --check` CANNOT catch this. An unescaped placeholder inside the emitted
+    // template literal parses perfectly and only throws ReferenceError once a workflow
+    // runs. The escaped form is the only static evidence that it will behave.
+    for (const ph of ['nodeId', 'visit', 'cap', 'carryText', 'nodePrompt', 'terminal']) {
+      assert.ok(emitted.includes('\\${' + ph + '}'),
+        `placeholder ${ph} must appear ESCAPED in the emitted template literal`);
+      assert.ok(!new RegExp('[^\\\\\\\\]\\\\$\\\\{' + ph + '\\\\}').test(emitted),
+        `found an UNESCAPED ${ph} placeholder — it will interpolate at generation time ` +
+        'and the conductor will throw ReferenceError on its first run');
+    }
+  });
+
+  test('placeholder substitution uses sub(), not String.replace', () => {
+    assert.ok(/function sub\(text, vars\)/.test(emitted),
+      'the emitted conductor needs its own sub() helper');
+    assert.ok(!/\.replace\('\$\{/.test(emitted),
+      "String.replace with a '${...}' pattern swaps only the FIRST occurrence and expands " +
+      'special patterns found in the replacement value');
+  });
+
+  test('a prompt containing a special replacement pattern survives', () => {
+    // A node prompt legitimately containing dollar-ampersand must not corrupt the output.
+    const f = path.join(tmp, 'special.json');
+    const g = JSON.parse(JSON.stringify({ ...LOCKED, name: 'special', goal: 'g' }));
+    g.nodes = g.nodes.map((n) => n.id === 'Implement'
+      ? { ...n, prompt: "handle the $& and $` and $' cases" } : n);
+    fs.writeFileSync(f, JSON.stringify(g));
+    const o = path.join(tmp, 'special.js');
+    execFileSync('node', [GEN, '--name', 'special', '--graph', f, '--out', o, '--force']);
+    const src = fs.readFileSync(o, 'utf8');
+    assert.ok(src.includes("handle the $& and $` and $' cases"),
+      'the prompt was mangled by special replacement-pattern expansion');
+    execFileSync('node', ['--check', o]);
+  });
+
+  test('meta.phases lists the approved node ids', () => {
+    for (const id of ['Setup', 'Implement', 'Review', 'DoDGate']) {
+      assert.ok(emitted.includes(`title: '${id}'`), `meta.phases missing ${id}`);
+    }
+  });
+
+  test('the interpreter enforces the visit cap', () => {
+    assert.ok(/visit cap exceeded/.test(emitted));
+  });
+
+  test('a rejected patch is logged and does not mutate the graph', () => {
+    assert.ok(/patch REJECTED/.test(emitted));
+  });
+
+  test('--force is required to overwrite', () => {
+    let threw = false;
+    try { execFileSync('node', [GEN, '--name', 'demo', '--graph', graphFile, '--out', outFile],
+      { stdio: 'pipe' }); } catch (e) { threw = true; }
+    assert.ok(threw, 'overwriting without --force must fail');
+    execFileSync('node', [GEN, '--name', 'demo', '--graph', graphFile, '--out', outFile, '--force']);
+  });
+
+  test('an invalid graph is rejected at generation time', () => {
+    const badFile = path.join(tmp, 'bad.json');
+    const bad = core.applyPatchTo(LOCKED, { addEdges: [{ from: 'Implement', to: 'PR', when: 'always' }] });
+    fs.writeFileSync(badFile, JSON.stringify({ ...bad, name: 'bad' }));
+    let threw = false;
+    try { execFileSync('node', [GEN, '--name', 'bad', '--graph', badFile,
+      '--out', path.join(tmp, 'bad.js')], { stdio: 'pipe' }); } catch (e) { threw = true; }
+    assert.ok(threw, 'the generator must refuse a graph that violates its own invariants');
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }
