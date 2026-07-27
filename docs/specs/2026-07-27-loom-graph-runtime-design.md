@@ -120,7 +120,18 @@ gate loops it replaces — it is unit-testable without spawning a single agent.
 
 ## 5. Invariants and patch validation
 
-Frozen at approval. `applyPatch` rejects a patch unless **all** hold:
+Frozen at approval.
+
+**Where the invariants are read from is itself load-bearing.** They are taken from the
+*previously approved* graph, never from the graph being validated. Reading them from the
+submitted graph is a complete bypass: a caller supplies `mustCross: []` together with an
+unlocked `Implement → terminal` edge, the locked-subgraph fingerprint still matches (that edge
+is not locked), no dominance check runs because the gate list is empty, and validation returns
+clean. Every gate is skipped with nothing reported. A submitted graph whose invariants differ
+from the approved ones is itself a violation. Only before approval, when no prior graph exists,
+may a graph declare its own invariants.
+
+`applyPatch` rejects a patch unless **all** hold:
 
 1. no locked node or edge removed or mutated (re-hash locked subgraph, compare to `lockedHash`)
 2. `terminal` still reachable from `start` — a patch may not make the run unfinishable
