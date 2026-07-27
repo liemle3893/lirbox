@@ -1848,6 +1848,30 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     });
   }
 
+  test('delivery: DoDGate can report TAMPERED distinctly from UNMET', () => {
+    // A tampered check and an unimplemented criterion produced the IDENTICAL signal
+    // (passed:false -> retry), yet they need opposite operator responses: a retry is
+    // exactly right for unmet work and can never fix a check someone edited. This does
+    // not change routing — nothing routes on `verdict` — it makes the distinction
+    // visible in the trace instead of hiding it among ordinary failures.
+    const seed = JSON.parse(fs.readFileSync(
+      path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    const gate = seed.nodes.find((n) => n.id === 'DoDGate');
+    const verdicts = gate.schema.properties.criteria.items.properties.verdict.enum;
+    assert.ok(verdicts.includes('TAMPERED'),
+      `DoDGate must be able to report TAMPERED, got ${JSON.stringify(verdicts)}`);
+    assert.ok(/TAMPERED/.test(gate.prompt),
+      'the prompt must tell the worker when to use it');
+
+    // Adding an enum value must not have changed how the gate routes.
+    const fields = new Set(seed.edges.filter((e) => e.when && e.when.field)
+      .map((e) => e.when.field));
+    assert.ok(!fields.has('verdict'),
+      'verdict must stay a reporting field, never a routing one');
+    assert.strictEqual(core.pickEdge(seed, 'DoDGate', { passed: true }).to, 'PR');
+    assert.strictEqual(core.pickEdge(seed, 'DoDGate', { passed: false }).to, 'Implement');
+  });
+
   test('delivery: a non-discriminating baseline structurally stops the run', () => {
     // The DoDBaseline prompt tells a worker that a baseline-red criterion already MET
     // cannot discriminate this run. That instruction needs a mechanism: with an
@@ -1981,7 +2005,7 @@ Create `plugins/lirbox/skills/loom/scripts/seeds/delivery.json` — the same sha
           "findings": { "type": "array", "items": { "type": "string" } } } } },
 
     { "id": "DoDGate", "kind": "gate", "locked": true,
-      "prompt": "Adjudicate EVERY definition-of-done criterion against the work on this branch. MEASURE ONLY — do not fix. For tier checkable: verify the check file's sha256 matches the frozen checkSha, then run it; exit 0 is MET, non-zero UNMET, a hash mismatch is a hard failure. For tier judged: cite artifact evidence (file:line, command output, test result) from the actual diff; worker reports are untrusted claims and can never satisfy a criterion alone. A deferral without a recorded human decision is UNMET.",
+      "prompt": "Adjudicate EVERY definition-of-done criterion against the work on this branch. MEASURE ONLY — do not fix. For tier checkable: verify the check file's sha256 matches the frozen checkSha, then run it; exit 0 is MET, non-zero UNMET, a hash mismatch means the frozen check FILE was altered — record that criterion's verdict as TAMPERED (not merely UNMET) and set passed=false. TAMPERED and UNMET are categorically different: an unmet criterion is work still to do, which a retry can fix; a tampered check is evidence someone edited the thing doing the measuring, which no amount of retrying can fix. Using the distinct verdict makes that visible in the trace instead of hiding it among ordinary failures. For tier judged: cite artifact evidence (file:line, command output, test result) from the actual diff; worker reports are untrusted claims and can never satisfy a criterion alone. A deferral without a recorded human decision is UNMET.",
       "schema": { "type": "object", "additionalProperties": false,
         "required": ["passed", "criteria"],
         "properties": { "passed": { "type": "boolean" },
@@ -1989,7 +2013,7 @@ Create `plugins/lirbox/skills/loom/scripts/seeds/delivery.json` — the same sha
           "criteria": { "type": "array", "items": { "type": "object",
             "additionalProperties": false, "required": ["id", "verdict"],
             "properties": { "id": { "type": "string" },
-              "verdict": { "type": "string", "enum": ["MET", "UNMET", "PARTIAL"] },
+              "verdict": { "type": "string", "enum": ["MET", "UNMET", "PARTIAL", "TAMPERED"] },
               "evidence": { "type": "string" } } } } } } },
 
     { "id": "PR", "kind": "work",
