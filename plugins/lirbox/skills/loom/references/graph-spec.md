@@ -236,5 +236,6 @@ reporting `false` matches no edge, and the interpreter hard-fails rather than si
 `mustCross` gates: each is `locked`, each has exactly one *locked passing* edge (`eq: true`) and
 one *unlocked failing* edge (`eq: false`) back into `Implement`, and `Implement`'s own visit cap
 (`4`) is raised above the wildcard (`3`) because it is the node both gates retry into. `lite.json`
-(`scripts/seeds/lite.json`) is the same shape with `DoDBaseline` and `DoDGate` removed — `Review`
-alone is `mustCross`, going straight to `Done` on pass.
+(`scripts/seeds/lite.json`) is the smaller shape: `Setup, Plan, Implement, Review, Done` — no
+`DoDBaseline`, `DoDGate`, or `PR`. `Review` alone is `mustCross`, going straight to `Done` on
+pass.

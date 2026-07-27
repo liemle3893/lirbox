@@ -31,9 +31,11 @@ narrow fix worker; the decomposition is not knowable up front. Otherwise use `co
 <core-model>
 Three layers — confusing them causes every bug in this system:
 - **Graph** (`.loom/<name>.graph.json`) — nodes, conditional edges, invariants. DATA.
-- **Conductor** (the generated `.js`) — a ~60-line interpreter. **Pure JS: no `fs`, `git`,
-  `require`, `import`, `Date.now()`, `Math.random()`, `crypto`.** `graph-core.mjs` is
-  **inlined** into it, never imported.
+- **Conductor** (the generated `.js`) — several hundred lines total (`graph-core.mjs`
+  **inlined** verbatim, plus the graph itself spliced in as data), but the loom-specific
+  interpreter logic — everything besides the inlined math and the embedded graph — is about
+  140 lines, and its `while` loop is the ~80 lines that actually walk the graph. **Pure JS: no
+  `fs`, `git`, `require`, `import`, `Date.now()`, `Math.random()`, `crypto`.**
 - **Workers** — the subagents it spawns. Full tools. Every side effect.
 
 **One shared worktree** `.worktrees/<name>` on `wf/<name>` holds every edit; `state.json`
@@ -49,8 +51,8 @@ The dominance argument → [`references/invariants.md`](references/invariants.md
 
 | `$ARGUMENTS` | do |
 |---|---|
-| empty or `list` | `node <skill-dir>/scripts/list-runs.cjs`, show the table, stop |
-| a state file, `running`/`failed` | **resume** → step 5 |
+| empty or `list` | `node <skill-dir>/scripts/list-runs.cjs` (add `--all` to include `complete` runs), show the table, stop |
+| a state file, `running`/`failed` | run `loom-report.cjs <name>` first — if its RESUME section says `NOT AVAILABLE` (the cursor is not in the stored graph, e.g. a bad patch renamed it out from under a live run), it is **not** resumable; fix the cursor or the graph before touching step 5. Otherwise **resume** → step 5 |
 | a state file, `awaiting-approval` | restart the server, reopen the editor → step 3 |
 | a state file, `complete` | say so; offer `loom-report.cjs <name>` |
 | anything else — a goal | fresh run → step 2 |
@@ -78,8 +80,10 @@ Copy the seed: `scripts/seeds/lite.json` or `scripts/seeds/delivery.json` →
 
 ### 3. Pre-flight — plan, review, approve
 
-Run Setup + the bootstrap planner first, so the human reviews a graph grounded in the
-**actual repo** rather than a guess. Then serve the editor:
+Serve the editor on the seed graph. (The human is reviewing the *shape* — which gates exist
+and where failures route — not repo-specific detail. The graph's own planner node refines it
+during the run, under the invariants frozen here. There is no separate pre-flight runner: the
+only launch path is step 4, which starts at `graph.start`.)
 
 ```
 node <skill-dir>/scripts/graph-server.mjs --name <name> --root . --port 0
@@ -90,8 +94,18 @@ the user `http://127.0.0.1:<port>`. Set `status: "awaiting-approval"`.
 
 Then poll `.loom/<name>.action.json`:
 - `replan` → run a replan worker over `(graph, comments)`, write the new graph, keep polling
-- `approve` → freeze: set `locked: true` on every `invariants.mustCross` node and its edges,
-  stamp `invariants.lockedHash`, set `approved: true`
+- `approve` → freeze: set `locked: true` on every `invariants.mustCross` node and on **only
+  that gate's PASSING edge** (`when.eq === true`). Then stamp `invariants.lockedHash` and set
+  `approved: true`.
+
+  **Never lock a gate's failing edge.** `applyPatchTo` appends and `pickEdge` takes the first
+  match, so a locked fail edge permanently shadows anything a later patch splices onto the
+  fail path: the patch validates clean and the spliced node is never selected. Reshaping the
+  failure path is the whole reason loom exists. `validateGraph` does **not** catch this — it
+  exempts only `locked && when.eq === true` from the dominance rule, so an over-locked graph
+  passes validation and then fails silently at runtime. Verified: over-lock `delivery.json`,
+  splice `DoDGate -> Spike -> Implement`, and `pickEdge(g, "DoDGate", {passed:false})` still
+  returns `Implement`.
 
 ### 4. Generate and launch
 

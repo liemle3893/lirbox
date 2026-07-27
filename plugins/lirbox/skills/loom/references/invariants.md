@@ -35,7 +35,8 @@ every multi-hop gate.
 
 ## Structural dominance alone is not enough
 
-`validateGraph` first checks each `mustCross` gate structurally, from `start`:
+`validateGraph` first checks each `mustCross` gate structurally, from `start` (abridged — omits
+the `!idSet.has(gate)` guard that reports a missing gate id before attempting dominance at all):
 
 ```js
 for (const gate of inv.mustCross || []) {
@@ -55,10 +56,14 @@ terminal`:
 
 ```
 start ----always---> DoDGate
-DoDGate --pass(eq:true)--> terminal
+DoDGate --pass(eq:true, locked)--> terminal
 DoDGate --fail(eq:false)--> Implement
 Implement ----always---> terminal
 ```
+
+(The pass edge is `locked`, matching how the seeds actually freeze a gate — see
+`graph-spec.md`'s edge fields. Leave it unlocked and the second check below would flag *both*
+edges, not just the fail edge, which muddies the point being made here.)
 
 Delete `DoDGate` from this graph: `Implement` is now unreachable (its only inbound edge came from
 `DoDGate`), so `terminal` is unreachable too. By the deletion test, `DoDGate` **does** dominate
@@ -75,7 +80,9 @@ while structural dominance from `start` reported the graph as fine.
 
 `validateGraph`'s second `mustCross` loop re-runs the *same* `dominates()` function, but not from
 `start` — from the target of every edge leaving the gate that is not its locked, `eq: true`
-passing edge:
+passing edge (abridged — omits the `!idSet.has(gate)` skip and the `!idSet.has(e.to)` skip, both
+of which just avoid re-reporting an endpoint the earlier structural checks already flagged as
+missing):
 
 ```js
 for (const gate of inv.mustCross || []) {
@@ -168,7 +175,7 @@ is the same shape as `delivery.json`'s `Review`/`DoDGate` pair, freshly fingerpr
 | Add enough nodes to exceed `nodeBudget` (checked against `prev`'s budget, `10`) | Node budget | REJECT — `node budget exceeded` |
 | Add a node reusing an existing `id` | Duplicate id | REJECT — `duplicate node id` |
 | Add an edge to a nonexistent node | Unknown endpoint | REJECT — `edge to unknown node` |
-| Splice a node into the fail path *and* wire it in correctly (worked example from the spec) | Validates cleanly | ACCEPT — `[]` |
+| Add a `Spike` node and wire it in correctly (`Implement -> Spike -> Implement`, conditional entry, unconditional return) | Validates cleanly — this is not `DoDGate`'s fail path, just an ordinary reachable detour off `Implement` | ACCEPT — `[]` |
 | Empty `next.invariants.mustCross` while adding an unlocked bypass edge | Invariants are read from `prev`, never `next` — see below | REJECT — both `... no longer dominates ...` (from `prev`'s `mustCross`) **and** `invariants were modified — they are frozen at approval` |
 | Raise `next.invariants.nodeBudget` to `9999` while padding nodes past `prev`'s real budget (`10`) | Same principle: `prev` governs | REJECT — `node budget exceeded` (using `10`, not the submitted `9999`) |
 | Validate a fresh graph against itself with no `prev` (`validateGraph(g, null, null)`) | Pre-approval seeding — nothing is frozen yet, so a graph may declare its own `invariants` | ACCEPT — `[]` |
