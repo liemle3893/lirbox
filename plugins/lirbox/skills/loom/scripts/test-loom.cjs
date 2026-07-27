@@ -1427,6 +1427,7 @@ async function main() {
       { node: 'DoDGate', visit: 1, patch: 'rejected', violations: ['DoDGate no longer dominates Done'] },
       { node: 'Plan', visit: 1, patch: 'accepted', version: 1 },
     ],
+    port: 3490,
   };
   fs.writeFileSync(path.join(runRoot, '.loom', 'state', 'demo.json'), JSON.stringify(runState, null, 2));
 
@@ -1471,6 +1472,24 @@ async function main() {
 
   test('list-runs shows the run, status and cursor', () => {
     assert.ok(/demo/.test(listOut) && /running/.test(listOut) && /Implement/.test(listOut));
+  });
+
+  test('list-runs does not cry wolf about a running run\'s port', () => {
+    // The fixture's run is `running` with a recorded port — that port is legitimate, not
+    // stale. Warning on any port at all would put a "stale server" notice beside every
+    // healthy run, and a warning that always fires teaches people to ignore it.
+    assert.ok(!/stale editor server/.test(listOut),
+      'a running run must not be reported as a stale server');
+
+    // ...and a genuinely stale one must still be surfaced.
+    const staleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-stale-'));
+    fs.mkdirSync(path.join(staleRoot, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(staleRoot, '.loom', 'state', 'dead.json'), JSON.stringify({
+      workflow: 'dead', status: 'failed', cursor: 'Implement', visits: { Implement: 1 }, port: 7391,
+    }));
+    const out = execFileSync('node', [LIST], { cwd: staleRoot }).toString();
+    assert.ok(/stale editor server/.test(out) && /dead/.test(out) && /7391/.test(out),
+      `a non-running run with a port must be flagged, got: ${out}`);
   });
 
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);

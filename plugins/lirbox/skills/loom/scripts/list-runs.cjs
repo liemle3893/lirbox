@@ -37,7 +37,12 @@ for (const r of rows) {
   process.stdout.write(
     `${pad(r.name, 24)}${pad(r.status, 20)}${pad(r.cursor, 16)}${pad(r.visits, 7)}${r.port}\n`);
 }
-if (rows.some((r) => r.port !== '-')) {
-  process.stdout.write('\nA PORT on a non-running row is a stale editor server: kill it with\n');
-  process.stdout.write('  lsof -ti tcp:<port> | xargs kill\n');
+// Only warn when a port belongs to a run that is NOT running — that is the stale case.
+// Firing on any port at all would put a "stale server" warning beside every healthy run,
+// and a warning that always fires teaches people to ignore it.
+const stale = rows.filter((r) => r.port !== '-' && r.status !== 'running');
+if (stale.length) {
+  process.stdout.write(`\n${stale.length} stale editor server(s) — the run is not running but a port is recorded:\n`);
+  for (const r of stale) process.stdout.write(`  ${r.name} (port ${r.port})\n`);
+  process.stdout.write('  kill with: lsof -ti tcp:<port> | xargs kill\n');
 }
