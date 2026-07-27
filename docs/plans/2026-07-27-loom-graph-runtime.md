@@ -620,6 +620,16 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
       ['appended edge with an unrelated predicate', {
         addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'n', gt: 0 } }],
       }],
+      // A MINTED pass edge must not earn the exemption. Testing `eq === true` alone
+      // checks the predicate's VALUE and never its FIELD, so both of these would slip
+      // through — including the one reusing the real field name. Only the edge LOCKED
+      // at approval may lead onward.
+      ['minted pass edge on an unrelated field', {
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'anythingAtAll', eq: true } }],
+      }],
+      ['minted pass edge reusing the real field', {
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: true } }],
+      }],
     ]) {
       const v = core.validateGraph(core.applyPatchTo(LOCKED, patch), LOCKED, null);
       assert.ok(v.some((m) => /non-passing edge/.test(m)),
@@ -990,7 +1000,13 @@ function validateGraph(next, prev, cursor) {
     if (!idSet.has(gate)) continue;
     for (const e of next.edges) {
       if (e.from !== gate) continue;
-      if (e.when && e.when.eq === true) continue;      // the passing edge may lead onward
+      // ONLY THE LOCKED passing edge is exempt. Testing `eq === true` alone is not
+      // enough: it checks the VALUE of the predicate and never which FIELD it reads, so
+      // a patch could mint `{field:'anythingAtAll', eq:true}` — or even reuse the real
+      // field name — and have it exempted. Requiring `locked` ties the exemption to the
+      // edge frozen at approval: a minted edge cannot carry `locked: true`, because
+      // adding one changes lockedFingerprint and the lock check rejects it.
+      if (e.locked && e.when && e.when.eq === true) continue;
       if (!idSet.has(e.to)) continue;
       if (!dominates(next, gate, next.terminal, e.to)) {
         v.push(gate + ' non-passing edge -> ' + e.to + ' can reach ' + next.terminal
