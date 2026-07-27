@@ -936,6 +936,42 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     assert.ok(emitted.includes('"DoDGate"') || emitted.includes('DoDGate'));
   });
 
+  test('prompt placeholders are escaped, not interpolated', () => {
+    // `node --check` CANNOT catch this. An unescaped placeholder inside the emitted
+    // template literal parses perfectly and only throws ReferenceError once a workflow
+    // runs. The escaped form is the only static evidence that it will behave.
+    for (const ph of ['nodeId', 'visit', 'cap', 'carryText', 'nodePrompt', 'terminal']) {
+      assert.ok(emitted.includes('\\${' + ph + '}'),
+        `placeholder ${ph} must appear ESCAPED in the emitted template literal`);
+      assert.ok(!new RegExp('[^\\\\\\\\]\\\\$\\\\{' + ph + '\\\\}').test(emitted),
+        `found an UNESCAPED ${ph} placeholder — it will interpolate at generation time ` +
+        'and the conductor will throw ReferenceError on its first run');
+    }
+  });
+
+  test('placeholder substitution uses sub(), not String.replace', () => {
+    assert.ok(/function sub\(text, vars\)/.test(emitted),
+      'the emitted conductor needs its own sub() helper');
+    assert.ok(!/\.replace\('\$\{/.test(emitted),
+      "String.replace with a '${...}' pattern swaps only the FIRST occurrence and expands " +
+      'special patterns found in the replacement value');
+  });
+
+  test('a prompt containing a special replacement pattern survives', () => {
+    // A node prompt legitimately containing dollar-ampersand must not corrupt the output.
+    const f = path.join(tmp, 'special.json');
+    const g = JSON.parse(JSON.stringify({ ...LOCKED, name: 'special', goal: 'g' }));
+    g.nodes = g.nodes.map((n) => n.id === 'Implement'
+      ? { ...n, prompt: "handle the $& and $` and $' cases" } : n);
+    fs.writeFileSync(f, JSON.stringify(g));
+    const o = path.join(tmp, 'special.js');
+    execFileSync('node', [GEN, '--name', 'special', '--graph', f, '--out', o, '--force']);
+    const src = fs.readFileSync(o, 'utf8');
+    assert.ok(src.includes("handle the $& and $` and $' cases"),
+      'the prompt was mangled by special replacement-pattern expansion');
+    execFileSync('node', ['--check', o]);
+  });
+
   test('meta.phases lists the approved node ids', () => {
     for (const id of ['Setup', 'Implement', 'Review', 'DoDGate']) {
       assert.ok(emitted.includes(`title: '${id}'`), `meta.phases missing ${id}`);
@@ -1070,7 +1106,16 @@ const coreSrc = inlineCore(fs.readFileSync(corePath, 'utf8'));
   }
 
   const tpl = (f) => fs.readFileSync(path.join(__dirname, 'prompts', f), 'utf8');
-  const esc = (s) => s.replace(/\\/g, '\\\\').replace(/`/g, '\\`');
+  // Escape a prompt template for embedding in an emitted template literal.
+  // Escaping the dollar-brace sequence is NOT optional. Prompt templates contain literal
+  // placeholder markers that are substituted at RUNTIME. Left unescaped they become real
+  // interpolations in the generated script — which still PARSES, so `node --check` passes
+  // and the restricted-layer scan passes, and then the conductor throws
+  // "ReferenceError: nodeId is not defined" the first time a workflow actually runs.
+  const esc = (s) => s.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+
+  // NOTE: the matching `sub()` helper is emitted INTO the conductor (see the generated
+  // source below), because substitution happens at conductor runtime with runtime values.
 
   // meta MUST be a pure literal. It lists the APPROVED nodes; nodes added by a
   // runtime patch simply get their own progress group from the Workflow engine.
@@ -1108,6 +1153,20 @@ let carry   = (args && args.carry)   ? args.carry   : {}
 let trace   = (args && args.trace)   ? args.trace   : []
 let node    = (args && args.cursor)  ? args.cursor  : graph.start
 
+// Substitute placeholder markers in a prompt template.
+// split/join, NOT String.replace: replace() with a string pattern swaps only the FIRST
+// occurrence, and expands special replacement patterns (dollar-ampersand, dollar-backtick,
+// dollar-quote, dollar-digit) found in the REPLACEMENT — so a node prompt or a JSON
+// payload containing one would be silently corrupted or splice in unrelated text.
+function sub(text, vars) {
+  let out = text
+  for (const k of Object.keys(vars)) {
+    const v = vars[k] === undefined || vars[k] === null ? '' : String(vars[k])
+    out = out.split('\${' + k + '}').join(v)
+  }
+  return out
+}
+
 // A gate is "satisfied" once its most recent visit returned passed === true.
 function unsatisfiedGates() {
   const out = []
@@ -1125,8 +1184,7 @@ async function checkpoint(cursor) {
     graph, cursor, visits, results, carry, trace,
   }, null, 2)
   await agent(
-    \`${esc(tpl('checkpoint.txt'))}\`
-      .replace('\${name}', NAME).replace('\${payload}', payload),
+    sub(\`${esc(tpl('checkpoint.txt'))}\`, { name: NAME, payload }),
     { label: 'checkpoint:' + cursor, phase: 'Checkpoint' },
   )
 }
@@ -1153,11 +1211,9 @@ while (node && node !== graph.terminal) {
     const carryText = Object.keys(carryIn).length
       ? 'CARRIED FORWARD from the edge that sent you here:\\n' + JSON.stringify(carryIn, null, 2)
       : ''
-    const prompt = \`${esc(tpl('node-lead.txt'))}\`
-      .replace('\${WORKTREE}', WORKTREE).replace('\${BRANCH}', BRANCH)
-      .replace('\${nodeId}', node).replace('\${visit}', String(visit))
-      .replace('\${cap}', String(cap)).replace('\${carryText}', carryText)
-      .replace('\${nodePrompt}', n.prompt || '').replace('\${terminal}', graph.terminal)
+    const prompt = sub(\`${esc(tpl('node-lead.txt'))}\`, {
+      WORKTREE, BRANCH, nodeId: node, visit: String(visit), cap: String(cap),
+      carryText, nodePrompt: n.prompt || '', terminal: graph.terminal })
     r = await agent(prompt, {
       label: key, phase: node,
       ...(n.agentType ? { agentType: n.agentType } : {}),
