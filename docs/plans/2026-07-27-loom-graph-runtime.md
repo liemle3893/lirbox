@@ -459,7 +459,7 @@ export { outEdges, reachable, dominates, matches, pickEdge, capFor, carryFor };
 node plugins/lirbox/skills/loom/scripts/test-loom.cjs
 ```
 
-Expected: PASS — 23 `ok` lines, `all green`.
+Expected: PASS — every Task 1 test still green, plus the 15 new `matches`/`pickEdge`/`capFor`/`carryFor` tests. The gate is the final `all green` line and a zero exit code, not a specific total.
 
 - [ ] **Step 5: Commit**
 
@@ -804,7 +804,7 @@ export { outEdges, reachable, dominates, matches, pickEdge, capFor, carryFor, st
 node plugins/lirbox/skills/loom/scripts/test-loom.cjs
 ```
 
-Expected: PASS — 42 `ok` lines, `all green`. Every malicious fixture rejected, both ACCEPT fixtures clean.
+Expected: PASS — `all green`, zero exit. Every malicious-patch fixture rejected and both ACCEPT fixtures clean; those are the assertions that matter, not the running total.
 
 - [ ] **Step 5: Commit**
 
