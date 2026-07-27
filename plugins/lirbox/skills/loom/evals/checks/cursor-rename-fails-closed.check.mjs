@@ -38,6 +38,12 @@ ok(core.lockedFingerprint(renamed) === G.invariants.lockedHash,
   'fixture is only meaningful if the lock check stays silent');
 const v = core.validateGraph(renamed, G, cursor);
 ok(v.length > 0, 'renaming the cursor node is REJECTED');
+// v.length > 0 alone is vacuous: this fixture's G3-shape graph can independently trip an
+// unrelated structural violation, so "REJECTED" can pass even with the cursor check gone
+// entirely. Attribute the rejection to the cursor check specifically.
+const cursorViolations = v.filter((m) => /cursor node/.test(m));
+ok(cursorViolations.length > 0,
+  'the rejection is attributable to the cursor check, not to an unrelated structural violation');
 ok(v.some((m) => /cursor node C was removed/.test(m)), 'explicit cursor-removal violation');
 
 if (bad) { console.error(`\ncursor-rename-fails-closed: ${bad} failed`); process.exit(1); }
