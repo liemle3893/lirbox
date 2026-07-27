@@ -1677,10 +1677,25 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line. Note t
       'the editor must receive the same validator the conductor inlines');
   });
 
-  test('static serving refuses to escape the editor directory', async () => {
+  test('only the three known paths are served; everything else 404s', async () => {
+    // NOTE: `new URL()` normalises ".." BEFORE the router sees it, so a traversal-shaped
+    // request arrives as an already-collapsed pathname. `/editor.js/../../../graph-core.mjs`
+    // therefore becomes `/graph-core.mjs` — a legitimate route that correctly returns 200.
+    // The real guarantee is that the router serves a fixed allow-list and nothing else, so
+    // that is what this asserts. (`serveStatic`'s prefix check is defence in depth; the
+    // routes only ever hand it two literal strings.)
+    for (const p of ['/editor.js/../../package.json', '/../../../etc/passwd',
+                     '/graph-server.mjs', '/seeds/delivery.json', '/nope']) {
+      const r = await fetch(base + p);
+      assert.strictEqual(r.status, 404, `${p} must not be served, got ${r.status}`);
+    }
+  });
+
+  test('a traversal that collapses onto a real route is still only that route', async () => {
     const r = await fetch(base + '/editor.js/../../../graph-core.mjs');
-    assert.ok(r.status === 403 || r.status === 404,
-      `path traversal must not be served, got ${r.status}`);
+    assert.strictEqual(r.status, 200);
+    assert.ok((await r.text()).includes('function validateGraph'),
+      'it resolved to /graph-core.mjs, which is intentionally public to the editor');
   });
 
   const bypass = core.applyPatchTo(seedGraph, {
