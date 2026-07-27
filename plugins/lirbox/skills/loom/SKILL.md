@@ -119,7 +119,7 @@ Then poll `.loom/<name>.action.json`:
   fail path: the patch validates clean and the spliced node is never selected. Reshaping the
   failure path is the whole reason loom exists. `validateGraph` does **not** catch this — it
   exempts only `locked && when.eq === true` from the dominance rule, so an over-locked graph
-  passes validation and then fails silently at runtime. Verified: over-lock `delivery.json`,
+  passes validation and then fails silently at runtime. To confirm: over-lock `delivery.json`,
   splice `DoDGate -> Spike -> Implement`, and `pickEdge(g, "DoDGate", {passed:false})` still
   returns `Implement`.
 

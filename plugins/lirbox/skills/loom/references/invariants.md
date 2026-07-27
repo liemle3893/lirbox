@@ -51,8 +51,7 @@ can visit a gate, fail it, and still reach the terminal, and structural dominanc
 stays completely silent about that, because dominance is a property of the graph's shape, not of
 which edge out of the gate actually gets walked.
 
-**Worked counter-example**, in the shape the brief names — `start → DoDGate → Implement →
-terminal`:
+**Worked counter-example** — `start → DoDGate → Implement → terminal`:
 
 ```
 start ----always---> DoDGate
@@ -168,6 +167,7 @@ is the same shape as `delivery.json`'s `Review`/`DoDGate` pair, freshly fingerpr
 | Append an unconditional `DoDGate -> PR` edge (`when: "always"`) | Same as above — an off-shape result now falls through to this edge too, defeating the "no silent fallback" rule as a side effect | REJECT — `non-passing edge` |
 | Append `DoDGate -> PR` on an unrelated field (`{ field: 'anythingAtAll', eq: true }`) | Not `locked`, so not exempt | REJECT — `non-passing edge` |
 | Append `DoDGate -> PR` reusing the real field (`{ field: 'passed', eq: true }`) but unlocked | `eq === true` alone is not the exemption; `locked` is required too | REJECT — `non-passing edge` |
+| Append `DoDGate -> PR` on a non-boolean predicate (`{ field: 'n', gt: 0 }`) | The rule is keyed to the LOCKED passing edge, not to `eq` — any other predicate is a non-passing edge | REJECT — `non-passing edge` |
 | Splice a `Spike` node into the fail path (`DoDGate -> Spike -> Implement`) | Legitimate reshaping; `Spike` still returns to `DoDGate`'s territory via `Implement` | ACCEPT |
 | Self-loop the fail edge (`DoDGate -> DoDGate` on `eq: false`) | The edge's target *is* the gate, so `dominates(next, 'DoDGate', 'PR', 'DoDGate')` skips `DoDGate` as both the gate and the starting point — `reachable()` treats the start as already-removed and returns the empty set, so `PR` is trivially unreachable and dominance holds | ACCEPT |
 | Add a node with no outgoing edge, reachable via a real predicate | Dead-end check | REJECT — `dead-end node(s) with no outgoing edge` |
