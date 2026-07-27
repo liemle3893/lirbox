@@ -1383,6 +1383,26 @@ async function main() {
     assert.strictEqual(core.matches(e.when, {}), false, 'missing field must not match');
   });
 
+  test('delivery: DoDGate can report TAMPERED distinctly from UNMET', () => {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    const gate = d.nodes.find((x) => x.id === 'DoDGate');
+    const verdictEnum = gate.schema.properties.criteria.items.properties.verdict.enum;
+    assert.ok(verdictEnum.includes('TAMPERED'), 'verdict enum must include TAMPERED');
+    assert.ok(/TAMPERED/.test(gate.prompt), 'prompt must mention TAMPERED');
+    assert.ok(/categorically different|distinguish/.test(gate.prompt),
+      'prompt must explain why tampering is distinct from unmet');
+    // Verify verdict is purely reporting: nothing routes on it
+    for (const e of d.edges.filter((x) => x.from === 'DoDGate')) {
+      assert.ok(!e.when || (!e.when.hasOwnProperty('verdict')),
+        `no edge must route on verdict — only discriminates and passed`);
+    }
+    // Verify passed still drives routing
+    const toImplement = d.edges.find((x) => x.from === 'DoDGate' && x.when && x.when.eq === false);
+    const toPR = d.edges.find((x) => x.from === 'DoDGate' && x.when && x.when.eq === true);
+    assert.ok(toImplement && toImplement.when.field === 'passed');
+    assert.ok(toPR && toPR.when.field === 'passed');
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }

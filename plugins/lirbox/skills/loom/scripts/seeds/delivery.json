@@ -142,7 +142,7 @@
       "id": "DoDGate",
       "kind": "gate",
       "locked": true,
-      "prompt": "Adjudicate EVERY definition-of-done criterion against the work on this branch. MEASURE ONLY — do not fix. For tier checkable: verify the check file's sha256 matches the frozen checkSha, then run it; exit 0 is MET, non-zero UNMET, a hash mismatch is a hard failure. For tier judged: cite artifact evidence (file:line, command output, test result) from the actual diff; worker reports are untrusted claims and can never satisfy a criterion alone. A deferral without a recorded human decision is UNMET.",
+      "prompt": "Adjudicate EVERY definition-of-done criterion against the work on this branch. MEASURE ONLY — do not fix. For tier checkable: verify the check file's sha256 matches the frozen checkSha, then run it; exit 0 is MET, non-zero is UNMET. If the sha256 does not match the frozen value, record verdict=TAMPERED and set passed=false — do not run the file. Tampering and unmet work both require fixes, but they are categorically different signals and must be distinguished in the trace. For tier judged: cite artifact evidence (file:line, command output, test result) from the actual diff; worker reports are untrusted claims and can never satisfy a criterion alone. A deferral without a recorded human decision is UNMET.",
       "schema": {
         "type": "object",
         "additionalProperties": false,
@@ -178,7 +178,8 @@
                   "enum": [
                     "MET",
                     "UNMET",
-                    "PARTIAL"
+                    "PARTIAL",
+                    "TAMPERED"
                   ]
                 },
                 "evidence": {
@@ -292,6 +293,6 @@
       "Implement": 4
     },
     "nodeBudget": 40,
-    "lockedHash": "fnv1a:9c638e6a"
+    "lockedHash": "fnv1a:51d7641c"
   }
 }
