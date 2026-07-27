@@ -2,89 +2,133 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Use sonnet-5's passing Harbor artifact as the reference to find and fix the *skill* defects costing haiku-4.5 and gemma4:e2b-mlx points on `flowchart__ci-pipeline` — filing them as whetstone items so the fix lands eval-gated, never as a hand-edit. Separates skill defects (fixable by wording) from capability defects (not), so `SKILL.md` does not accrete text that helps nothing.
+**Goal:** Establish whether `flowchart`'s `SKILL.md` measurably lifts a model on `flowchart__ci-pipeline`, and if so fix the *skill* defects costing weaker models points — filing them as whetstone items so the fix lands eval-gated, never as a hand-edit.
 
-**Architecture:** Harbor is the *measurement* instrument (containerised, per-model, 6-key reward); whetstone is the *improvement* loop (RED→GREEN, floor-gated, surface-locked, PR at the end). They do not overlap: Harbor produces the evidence and re-verifies the lift, whetstone owns every edit to `plugins/lirbox/skills/flowchart/SKILL.md`. Precedent: `plan-deck.jsonl`'s `wire-output-validator-into-verify` filed this exact defect class ("step 5 lists only manual eyeball checks and invokes nothing runnable") for a sibling skill.
+**Architecture:** Harbor is the *measurement* instrument (containerised, per-model, paired with/without skill); whetstone is the *improvement* loop (RED→GREEN, floor-gated, surface-locked, PR at the end). They do not overlap: Harbor produces the evidence and re-verifies the lift, whetstone owns every edit to `plugins/lirbox/skills/flowchart/SKILL.md`.
 
 **Tech Stack:** `harbor` 0.20.0 (`-e docker`), `lirbox:whetstone`, `feedback/flowchart.jsonl` (repo-root backlog, 6 lines, append-only), flowchart `evals/{floor,checks,fixtures}`.
 
 ## Global Constraints
 
+- **THE MATRIX IS ALWAYS PAIRED: every model runs `{with skill} × {without skill}`.** An absolute score is not admissible evidence — a model may pass without the skill entirely. The measured quantity is the **lift** (with-skill − no-skill), never the raw number. The no-skill arm is identical except that `--skill .harbor/skills` is dropped.
 - **Do NOT hand-edit `plugins/lirbox/skills/flowchart/SKILL.md`** — every change flows through `feedback/flowchart.jsonl` → whetstone. This plan's only repo writes are backlog appends and this file.
 - The backlog is at repo root: `feedback/flowchart.jsonl`. (`plugins/lirbox/skills/feedback/` is the *feedback skill*, not a backlog.) One JSON object per line, append-only, newline-terminated; do not touch existing lines.
 - Existing ids — do not duplicate: `node-nonascii`, `floor-breaker`, `prettier`, `pan-zoom-fullscreen`, `harvest-03-edge-dashlabel-nonascii`, `harvest-04-round-node-special`.
-- **Hold tools constant across all three arms.** The same `--ak disallowed_tools=…` on every model, including the big-window ones. Trimming only e2b would vary two things at once and make the ladder uninterpretable.
+- **Hold everything except the skill constant.** Same `--ak disallowed_tools=…` on every arm including big-window models; same `-k`; same task. Varying two things at once makes the lift uninterpretable.
+- **Do not touch `plugins/lirbox/skills/flowchart/harbor/`** mid-ladder. Changing the task or its harness breaks comparability with arms already run.
 - Never commit runtime artifacts (`jobs/`, `.workflows/`, `.worktrees/`, `.improve/`). `.harbor/tasks` is tracked but derived — never hand-edit; the `Harbor tasks in sync` CI step rebuilds and fails on drift.
 - Commit identity enforced by `.githooks/pre-commit` (author `liemle3893 <33980597+liemle3893@users.noreply.github.com>`). `main` is pull-request-only.
 - Credentials live in gitignored `.env` (`CLAUDE_CODE_OAUTH_TOKEN`). Source it; never echo it, never let it reach a log or a commit.
+- **`total_cost_usd` is fictional on the Ollama endpoint** — a LiteLLM estimate. The e2b run reported `$33.35` for a local model. This Harbor version emits no `cost_source` tag, so the filter CONTRIBUTING prescribes will not catch it automatically. Never let it reach a scorecard.
 
 ## Success Criteria — fixed now, before any edit
 
-| Model | Target | Attempts |
-|---|---|---|
-| sonnet-5 | stays `reward: 1` — **no regression** | `-k 3` |
-| haiku-4.5 | `partial: 4 → 5`, `reward: 0 → 1` | `-k 3`, consecutive |
-| gemma4:e2b-mlx | `output_exists: 0 → 1` **only** | `-k 3` |
-| flowchart floor | green | every whetstone iteration |
+Measured as **lift**, `-k 3` on every cell:
 
-e2b's target is deliberately not `reward: 1`. It is failing *engagement*, not quality; a 2B-class model at 32K producing a validator-clean interactive artifact is not a claim this plan makes.
+| Model | no-skill (control) | with-skill | Gate |
+|---|---|---|---|
+| sonnet-5 | must be **< 5/5** | 5/5 | lift > 0, else task is inadmissible (see Task 1) |
+| haiku-4.5 | record | `partial: 4 → 5`, `reward: 0 → 1` | lift > 0 after whetstone |
+| gemma4:e2b-mlx | — | — | **dropped from the ladder** (Task 0) |
+| flowchart floor | — | — | green every whetstone iteration |
 
 ---
 
-### Task 1: Collect the reference evidence
+### Task 0: e2b — closed, capability floor recorded
 
-n=1 is below the ~20pp MDE this repo already declared for its 7-cell suite. Nothing downstream is decidable from single trials, and sonnet's passing artifact does not currently exist anywhere on disk — it was run outside Claude Code and is in no transcript.
+**Status: DONE. Finding, not a defect. No action.**
+
+The `-k 1` run (`jobs/2026-07-28__03-29-28`) failed all five criteria with **0 exceptions**. The trajectory settles the cause:
+
+| Evidence | Value |
+|---|---|
+| Tools available | `["Bash","Edit","Read","Skill","Write"]` — trim worked |
+| Skills injected | 15, pruned, no eval material leaked |
+| `Skill` calls | **176, byte-identical args** |
+| `Write` / `Edit` / `Read` / `Bash` calls | **0** |
+| Turns / duration | 355 / 802s |
+| Input tokens | 6,410,921 for 42,070 output |
+
+The skill body **was** delivered (one user event carries the full `SKILL.md`), and the model knew the target — it embedded *"Output this flowchart to /app/out.html"* in its own args all 176 times. It never called `Write`. `Skill` returns the terse acknowledgement `"Launching skill: flowchart"` with content arriving in the *following* message; the model read that as failure and retried until it concluded the tool was broken. Its first move was calling a nonexistent tool named `flowchart` (`No such tool available`).
+
+**Classified capability defect → discarded.** No `SKILL.md` wording fixes a model that receives correct instructions, knows the path, has `Write`, and never calls it.
+
+- [x] Record as a capability-floor datapoint: flowchart is not drivable by gemma4:e2b-mlx at 32K.
+- [ ] Do **not** file a whetstone item for it.
+- [ ] Do **not** pursue a "minimal skeleton" path. The earlier hypothesis — that e2b would fail on the 4.2K-token template read — is **disproved**: it never read the template. Failure is at turn 2, not the context ceiling.
+
+---
+
+### Task 1: Null-skill control — the admissibility fork
+
+The reference model saturating the task would make it a regression guard, not an improvement instrument. Nothing downstream is worth running until this is known.
 
 **Files:** none (produces `jobs/`, gitignored)
 
 - [ ] Source credentials without echoing: `set -a; . ./.env; set +a`
-- [ ] Run sonnet-5, `-k 3`, tools held constant:
+- [ ] Sonnet-5 **without** the skill, `-k 3`:
   ```bash
   harbor run -p .harbor/tasks/flowchart__ci-pipeline \
-    -a claude-code -m claude-sonnet-5 --skill .harbor/skills -k 3 \
+    -a claude-code -m claude-sonnet-5 -k 3 \
     --ae CLAUDE_FORCE_OAUTH=1 --ae CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
     --ak disallowed_tools="Task,Workflow,TodoWrite,Glob,Grep,CronCreate,CronDelete,CronList,EnterWorktree,ExitWorktree,NotebookEdit,ReportFindings,ScheduleWakeup,SendMessage,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,ToolSearch,WebFetch,WebSearch" \
     -e docker -y
   ```
-- [ ] Same for `-m claude-haiku-4-5-20251001`
-- [ ] Same for e2b (endpoint form, no OAuth):
-  ```bash
-  harbor run -p .harbor/tasks/flowchart__ci-pipeline \
-    -a claude-code -m gemma4:e2b-mlx --skill .harbor/skills -k 3 \
-    --ae ANTHROPIC_BASE_URL=http://100.84.254.2:11434 \
-    --ae ANTHROPIC_AUTH_TOKEN=ollama \
-    --ae CLAUDE_CODE_AUTO_COMPACT_WINDOW=26000 \
-    --ae CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=85 \
-    --ak disallowed_tools="Task,Workflow,TodoWrite,Glob,Grep,CronCreate,CronDelete,CronList,EnterWorktree,ExitWorktree,NotebookEdit,ReportFindings,ScheduleWakeup,SendMessage,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,ToolSearch,WebFetch,WebSearch" \
-    -e docker -y
-  ```
-- [ ] Archive each trial's `out.html`, `agent/` and `verifier/` outside `jobs/` before the next run — verified: `jobs/` currently holds exactly one trial dir, so runs are not self-preserving.
+- [ ] Sonnet-5 **with** the skill: identical, plus `--skill .harbor/skills`.
+- [ ] Archive both arms' `out.html`, `agent/` and `verifier/` outside `jobs/` — verified: `jobs/` does not preserve prior trials.
 
-**Verify:** three model arms × 3 attempts, each with a readable `reward.json` and a retained `out.html` for at least one passing sonnet attempt.
+**Fork on the control result:**
+
+| Sonnet no-skill | Meaning | Action |
+|---|---|---|
+| also 5/5 | task measures the model, not the skill | **STOP.** Drop `ci-pipeline` from the ladder; keep it as a regression guard. Go to Task 1b. |
+| 2–3/5 | skill carries real weight; task discriminates | proceed to Task 2 |
+| 0/5 | task is skill-gated end to end | proceed to Task 2 |
+
+**Verify:** both sonnet arms complete at `-k 3` with retained artifacts; the lift is computed and the fork resolved in writing.
 
 ---
 
-### Task 2: Classify each lost criterion
+### Task 1b: Only if the control saturates — find a discriminating task
+
+**Files:** none (analysis); may add a task under `plugins/lirbox/skills/flowchart/harbor/tasks/`
+
+- [ ] Run the same paired matrix on `flowchart__escaping-hostile`. Its name suggests it targets the label-escaping failure mode `validate.mjs` exists to catch — **unverified**; read the task before assuming.
+- [ ] If that also saturates, the ladder needs a harder task before any skill work is measurable. Authoring one is a separate decision, out of scope here.
+
+---
+
+### Task 2: Haiku paired arms
+
+**Files:** none
+
+- [ ] Haiku-4.5 no-skill and with-skill, `-k 3` each, same flags as Task 1.
+- [ ] Compute the lift. A with-skill score that does not beat its own control is not evidence the skill helped, whatever its absolute value.
+
+**Verify:** four sonnet cells + two haiku cells recorded, each with a lift figure.
+
+---
+
+### Task 3: Classify each lost criterion
 
 **Files:** none (analysis)
 
-- [ ] For every criterion scoring 0, diff the failing `out.html` against sonnet's passing one **on that criterion alone** (e.g. `no_template_markers` is a literal grep for `{{` / `TEMPLATE-GRAPH` / `TEMPLATE-STEPS`).
-- [ ] Read the losing arm's `agent/` trajectory for the divergence: did it read `assets/template.html`? load `references/components.md`? emit once and stop, or attempt self-checking?
-- [ ] Label each finding **skill defect** (instruction missing/buried/ambiguous — fixable, usually free for sonnet) or **capability defect** (could not hold template + output at once — not fixable by wording).
-- [ ] Discard capability defects. They are findings for the capability-floor record, not backlog items.
+- [ ] For every criterion haiku loses that sonnet-with-skill wins, diff the two `out.html` files **on that criterion alone** (e.g. `no_template_markers` is a literal grep for `{{` / `TEMPLATE-GRAPH` / `TEMPLATE-STEPS`).
+- [ ] Read the losing trajectory for the divergence: did it read `assets/template.html`? load `references/components.md`? emit once and stop, or attempt self-checking?
+- [ ] Label **skill defect** (instruction missing/buried/ambiguous — fixable) or **capability defect** (not fixable by wording — discard, record as floor).
 
 **Verify:** each zeroed criterion carries a label and a one-line justification citing the diff or trajectory line that produced it.
 
-**Prior from the recorded data** (all transcript runs scored `reward: 0`; best was `partial: 4`): `validator_passes: 0` and `no_template_markers: 0` are very likely skill defects — plan-deck's filed concern says the identical thing about a sibling skill. `single_crit_node: 0` in every recorded run points at instruction placement, not capability.
+**Prior:** `validator_passes: 0` and `no_template_markers: 0` look like skill defects — `feedback/plan-deck.jsonl`'s `wire-output-validator-into-verify` filed the identical complaint against a sibling skill ("step 5 lists only manual eyeball checks and invokes nothing runnable").
 
 ---
 
-### Task 3: File the confirmed skill defects
+### Task 4: File the confirmed skill defects
 
 **Files:** Modify `feedback/flowchart.jsonl` (append one line per confirmed defect)
 
 - [ ] Append one object per confirmed skill defect, schema `{id, type, text, suggestedCriterion, acceptanceCheck}` matching existing entries. `text` states Expected / Actual.
-- [ ] Lead candidate (no existing id collides):
+- [ ] Lead candidate (no id collision):
   ```
   id: wire-output-validator-into-verify
   Expected: SKILL.md instructs running assets/validate.mjs on the generated HTML
@@ -93,14 +137,13 @@ n=1 is below the ~20pp MDE this repo already declared for its 7-cell suite. Noth
   Actual:   the verify step lists eyeball checks only; every recorded Harbor run
             scored validator_passes: 0.
   ```
-- [ ] **Prove every `acceptanceCheck` is RED against current `SKILL.md` before the whetstone run.** A check that is already green fixes nothing and will be kept spuriously.
-- [ ] Confirm each line is valid JSON and the file still parses line-by-line.
+- [ ] **Prove every `acceptanceCheck` is RED against current `SKILL.md` before the whetstone run.** A check already green fixes nothing and will be kept spuriously.
 
 **Verify:** `python3 -c "import json;[json.loads(l) for l in open('feedback/flowchart.jsonl') if l.strip()]"` exits 0; each new check exits non-zero on the unmodified skill.
 
 ---
 
-### Task 4: Run whetstone
+### Task 5: Run whetstone
 
 **Files:** whetstone owns all writes to `plugins/lirbox/skills/flowchart/SKILL.md`
 
@@ -108,24 +151,26 @@ n=1 is below the ~20pp MDE this repo already declared for its 7-cell suite. Noth
 - [ ] Keep only on floor-green AND the item's frozen check green AND surface-lock intact; revert otherwise.
 - [ ] Let it finish on its own branch and open its PR. Do not merge.
 
-**Verify:** `node scripts/evals-all.mjs --fast` green; each kept item's check flipped RED→GREEN; the run report lists kept/unresolved.
+**Verify:** `node scripts/evals-all.mjs --fast` green; each kept item's check flipped RED→GREEN.
 
 ---
 
-### Task 5: Re-verify the lift
+### Task 6: Re-verify the lift
 
 **Files:** none
 
-- [ ] Re-run all three arms from Task 1 against the whetstone branch, `-k 3`, same tool set.
-- [ ] Check against the Success Criteria table. Any unmet row loops back to Task 2.
-- [ ] Record the outcome — including a null result — in the PR body. A fix that did not move the number is a finding, not a failure to hide.
+- [ ] Re-run the **full paired matrix** (sonnet ± skill, haiku ± skill) against the whetstone branch, `-k 3`, same flags.
+- [ ] Check against the Success Criteria table. Any unmet row loops back to Task 3.
+- [ ] Record the outcome — including a null result — in the PR body. A fix that did not move the lift is a finding, not a failure to hide.
 
-**Verify:** sonnet unregressed, haiku at target across 3 consecutive attempts, e2b's `output_exists` recorded either way.
+**Verify:** sonnet's lift unregressed, haiku's lift positive and reaching target across 3 attempts.
 
 ---
 
-## Expected outcome, stated honestly
+## What this plan can and cannot conclude
 
-The self-validate loop is the highest-value single change and should lift haiku. **It will probably not lift e2b** — generate→validate→repair costs *more* context, and e2b's problem is having none to spare: ~16–18K of its 32K is consumed before it writes a byte (tool schemas ~9–11K, `SKILL.md` ~933, `references/components.md` ~1.6K, `assets/template.html` ~4.2K), and it must then emit ~5–8K of exact HTML.
+It can establish whether `flowchart`'s `SKILL.md` lifts sonnet and haiku on one task, and fix instruction-level defects that cost haiku points.
 
-If e2b stays at `output_exists: 0` after Task 5, that is the capability floor, and the only remaining lever is a minimal-skeleton path that skips the template read entirely. **That is a separate decision and explicitly out of scope here** — it would change the skill's output contract, not just its wording.
+It cannot establish that flowchart is *good* — one task, two models, `-k 3`. This repo's own arena work puts the minimum detectable effect at ~20pp on a 7-cell suite; a single task at `-k 3` is weaker still. Treat a positive lift as directional, not as a scorecard.
+
+And it says nothing about models below the capability floor. e2b's failure was not about instructions, context, or template size — it never called `Write`. That is a property of the model, and no skill change reaches it.
