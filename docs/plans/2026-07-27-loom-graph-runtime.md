@@ -1666,18 +1666,59 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
       }
     });
 
-    test(`${profile}: every out-edge of every mustCross gate is locked`, () => {
-      // Locking the NODE is not enough — an unlocked out-edge can have its predicate
-      // loosened or be rerouted, and a gate's failure routing is as much part of its
-      // contract as its pass routing. The rule is uniform: every edge leaving a gate.
+    test(`${profile}: each gate's PASSING edge is locked, its FAILURE edge is not`, () => {
+      // The rule, and why it is asymmetric:
+      //
+      // The PASSING edge is what carries the run onward past the gate. Tampering with it
+      // — rerouting it at the terminal, or loosening its predicate to "always" — is the
+      // actual bypass. It must be locked.
+      //
+      // The FAILURE edge must stay UNLOCKED, because reshaping where a failing gate sends
+      // the run is the self-modification loom exists for. The spec's own worked example
+      // splices a Spike node into the failure path. Locking that edge does not merely
+      // forbid the splice — `applyPatchTo` appends, and `pickEdge` takes the FIRST match,
+      // so a parallel fail-edge added alongside a locked one VALIDATES and is then
+      // silently shadowed. A patch that appears to succeed and does nothing is worse than
+      // one that is rejected.
+      //
+      // Rerouting a failure edge is bounded anyway: dominance still forces every path to
+      // cross the gate, and visit caps bound the looping.
       for (const gate of seed.invariants.mustCross) {
         const out = seed.edges.filter((e) => e.from === gate);
         assert.ok(out.length > 0, `${gate} has no out-edges`);
-        for (const e of out) {
-          assert.ok(e.locked,
-            `${gate} -> ${e.to} is a gate out-edge but is not locked`);
+        const pass = out.filter((e) => e.when && e.when.eq === true);
+        const fail = out.filter((e) => e.when && e.when.eq === false);
+        assert.ok(pass.length > 0, `${gate} has no passing edge`);
+        for (const e of pass) {
+          assert.ok(e.locked, `${gate} -> ${e.to} is the PASSING edge and must be locked`);
+        }
+        for (const e of fail) {
+          assert.ok(!e.locked,
+            `${gate} -> ${e.to} is the FAILURE edge and must stay unlocked so the failure ` +
+            'path can be reshaped; locking it silently shadows any spliced node');
         }
       }
+    });
+
+    test(`${profile}: a node can be spliced into a gate's failure path AND is reachable`, () => {
+      // The spec's worked example. Validating is not enough — the spliced node must
+      // actually be selected on failure, or the patch is an accepted no-op.
+      const gate = seed.invariants.mustCross[seed.invariants.mustCross.length - 1];
+      const failEdge = seed.edges.find((e) => e.from === gate && e.when && e.when.eq === false);
+      const spliced = core.applyPatchTo(seed, {
+        removeEdges: [{ from: gate, to: failEdge.to }],
+        addNodes: [{ id: 'Spike', kind: 'work', prompt: 'investigate' }],
+        addEdges: [{ from: gate, to: 'Spike', when: { field: 'passed', eq: false },
+                     carry: failEdge.carry || [] },
+                   { from: 'Spike', to: failEdge.to, when: 'always' }],
+      });
+      assert.deepStrictEqual(core.validateGraph(spliced, seed, null), [],
+        'splicing a node into the failure path must be accepted');
+      const chosen = core.pickEdge(spliced, gate, { passed: false });
+      assert.strictEqual(chosen && chosen.to, 'Spike',
+        'the spliced node must actually be reached on failure, not shadowed');
+      assert.ok(core.dominates(spliced, gate, spliced.terminal, spliced.start),
+        'the gate must still dominate the terminal after the splice');
     });
 
     test(`${profile}: lockedHash is present and correct`, () => {
@@ -1757,7 +1798,7 @@ Create `plugins/lirbox/skills/loom/scripts/seeds/lite.json`:
     { "from": "Plan", "to": "Implement", "when": "always" },
     { "from": "Implement", "to": "Review", "when": "always" },
     { "from": "Review", "to": "Implement", "when": { "field": "passed", "eq": false },
-      "carry": ["findings"], "locked": true },
+      "carry": ["findings"] },
     { "from": "Review", "to": "Done", "when": { "field": "passed", "eq": true },
       "locked": true }
   ],
@@ -1837,11 +1878,11 @@ Create `plugins/lirbox/skills/loom/scripts/seeds/delivery.json` — the same sha
     { "from": "Plan", "to": "Implement", "when": "always" },
     { "from": "Implement", "to": "Review", "when": "always" },
     { "from": "Review", "to": "Implement", "when": { "field": "passed", "eq": false },
-      "carry": ["findings"], "locked": true },
+      "carry": ["findings"] },
     { "from": "Review", "to": "DoDGate", "when": { "field": "passed", "eq": true },
       "locked": true },
     { "from": "DoDGate", "to": "Implement", "when": { "field": "passed", "eq": false },
-      "carry": ["unmetCriteria"], "locked": true },
+      "carry": ["unmetCriteria"] },
     { "from": "DoDGate", "to": "PR", "when": { "field": "passed", "eq": true },
       "locked": true },
     { "from": "PR", "to": "Done", "when": "always" }
