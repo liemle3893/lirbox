@@ -1520,6 +1520,38 @@ async function main() {
       `expected the run listed as UNREADABLE, got: ${out}`);
   });
 
+  test('the report does not stay silent about states that block a resume', () => {
+    // Every one of these renders "successfully" while withholding the thing an operator
+    // most needs. The report's job is the path actually taken — including the parts that
+    // explain why it stopped.
+    const mk = (state) => {
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-omit-'));
+      fs.mkdirSync(path.join(d, '.loom', 'state'), { recursive: true });
+      fs.writeFileSync(path.join(d, '.loom', 'state', 'p.json'), JSON.stringify(state));
+      return execFileSync('node', [REPORT, 'p'], { cwd: d }).toString();
+    };
+
+    // A run stopped at its cap almost certainly stopped BECAUSE of it. Showing 3/3 and
+    // making the operator notice the numbers match is an omission, not a report.
+    const atCap = mk({ workflow: 'p', status: 'failed', cursor: 'A', visits: { A: 3 },
+      graph: { nodes: [{ id: 'A' }], edges: [], invariants: { visitCaps: { '*': 3 } } }, trace: [] });
+    assert.ok(/AT CAP/.test(atCap), `a run at its visit cap must say so, got:\n${atCap}`);
+
+    // A cursor naming a node the stored graph lacks is NOT resumable — the interpreter
+    // throws "unknown node" on the first step. Rendering it as ordinary sends an operator
+    // to re-run something that cannot start.
+    const ghost = mk({ workflow: 'p', status: 'running', cursor: 'GHOST', visits: { B: 1 },
+      graph: { nodes: [{ id: 'B' }], edges: [], invariants: {} }, trace: [] });
+    assert.ok(/NOT IN THE STORED GRAPH/.test(ghost) && /NOT resumable/.test(ghost),
+      `a cursor outside the graph must be flagged, got:\n${ghost}`);
+
+    // A rejected patch with no recorded reason must not render as a dangling colon.
+    const noWhy = mk({ workflow: 'p', status: 'running', cursor: 'A', visits: { A: 1 },
+      trace: [{ node: 'A', visit: 1, patch: 'rejected' }] });
+    assert.ok(/no reason recorded/.test(noWhy), `expected an explicit placeholder, got:\n${noWhy}`);
+    assert.ok(!/REJECTED: *$/m.test(noWhy), 'must not print a bare trailing colon');
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }

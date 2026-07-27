@@ -30,7 +30,15 @@ const out = [];
 out.push(`loom run: ${st.workflow}`);
 out.push(`status:   ${st.status}${st.finishedAt ? ` (finished ${st.finishedAt})` : ''}`);
 out.push(`started:  ${st.startedAt || 'unknown'}`);
-out.push(`cursor:   ${st.cursor}`);
+const nodeIds = new Set(((st.graph && st.graph.nodes) || []).map((n) => n.id));
+const cursorMissing = st.cursor && nodeIds.size > 0 && !nodeIds.has(st.cursor);
+out.push(`cursor:   ${st.cursor}${cursorMissing ? '   *** NOT IN THE STORED GRAPH ***' : ''}`);
+if (cursorMissing) {
+  // This state cannot be resumed — the interpreter throws "unknown node" immediately.
+  // Rendering it as ordinary would send an operator to re-run something that cannot start.
+  out.push('          this run is NOT resumable as stored: the interpreter will throw');
+  out.push('          "unknown node" on the first step. The graph or the cursor is wrong.');
+}
 out.push(`graph:    v${st.graphVersion || 0}, ${(st.graph && st.graph.nodes || []).length} nodes`);
 out.push('');
 
@@ -38,14 +46,19 @@ out.push('VISITS');
 for (const [node, n] of Object.entries(st.visits || {})) {
   const cap = ((st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {})[node]
     ?? ((st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {})['*'] ?? 3;
-  out.push(`  ${node.padEnd(16)} ${n}/${cap}${n > 1 ? '   <- revisited' : ''}`);
+  // Flag reaching the cap, not merely being revisited: a run that stopped here almost
+  // certainly stopped BECAUSE of it, and making the operator notice the two numbers match
+  // is exactly the kind of omission that wastes incident time.
+  const mark = n >= cap ? '   <- AT CAP' : n > 1 ? '   <- revisited' : '';
+  out.push(`  ${node.padEnd(16)} ${n}/${cap}${mark}`);
 }
 out.push('');
 
 out.push('PATH');
 for (const t of st.trace || []) {
   if (t.patch === 'rejected') {
-    out.push(`  ${t.node}#${t.visit}  PATCH REJECTED: ${(t.violations || []).join('; ')}`);
+    const why = (t.violations || []).join('; ') || '(no reason recorded in state)';
+    out.push(`  ${t.node}#${t.visit}  PATCH REJECTED: ${why}`);
   } else if (t.patch === 'accepted') {
     out.push(`  ${t.node}#${t.visit}  patch accepted -> graph v${t.version}`);
   } else {
