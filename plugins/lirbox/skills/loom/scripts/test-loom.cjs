@@ -9,6 +9,9 @@
  */
 const assert = require('assert');
 const path = require('path');
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 
 let failures = 0;
 function test(name, fn) {
@@ -541,9 +544,6 @@ async function main() {
 
   section('generator');
 
-  const { execFileSync } = require('child_process');
-  const fs = require('fs');
-  const os = require('os');
   const GEN = path.join(__dirname, 'scaffold-loom.cjs');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-loom-'));
   const graphFile = path.join(tmp, 'graph.json');
@@ -1401,6 +1401,76 @@ async function main() {
     const toPR = d.edges.find((x) => x.from === 'DoDGate' && x.when && x.when.eq === true);
     assert.ok(toImplement && toImplement.when.field === 'passed');
     assert.ok(toPR && toPR.when.field === 'passed');
+  });
+
+  section('resume + report');
+
+  const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-run-'));
+  fs.mkdirSync(path.join(runRoot, '.loom', 'state'), { recursive: true });
+  // A run that went Implement -> Review(fail) -> Implement -> Review(pass) -> DoDGate(fail)
+  // -> Implement, applying one accepted patch and rejecting one bypass along the way.
+  const patched = core.applyPatchTo(seedGraph, {
+    addNodes: [{ id: 'Spike', kind: 'work', prompt: 'investigate' }],
+    addEdges: [{ from: 'Spike', to: 'Implement', when: 'always' }] });
+  patched.edges.unshift({ from: 'Plan', to: 'Spike', when: 'always' });
+  patched.version = 1;
+  const runState = {
+    workflow: 'demo', status: 'running', startedAt: '2026-07-27T00:00:00Z',
+    graphVersion: 1, graph: patched, cursor: 'Implement',
+    visits: { Setup: 1, Plan: 1, Spike: 1, Implement: 3, Review: 2, DoDGate: 1 },
+    results: { 'Implement#3': { summary: 'third pass' } },
+    carry: { Implement: { unmetCriteria: ['c3', 'c5'] } },
+    trace: [
+      { node: 'Review', visit: 1, verdict: false, to: 'Implement' },
+      { node: 'Review', visit: 2, verdict: true, to: 'DoDGate' },
+      { node: 'DoDGate', visit: 1, verdict: false, to: 'Implement' },
+      { node: 'DoDGate', visit: 1, patch: 'rejected', violations: ['DoDGate no longer dominates Done'] },
+      { node: 'Plan', visit: 1, patch: 'accepted', version: 1 },
+    ],
+  };
+  fs.writeFileSync(path.join(runRoot, '.loom', 'state', 'demo.json'), JSON.stringify(runState, null, 2));
+
+  const REPORT = path.join(__dirname, 'loom-report.cjs');
+  const reportOut = execFileSync('node', [REPORT, 'demo'], { cwd: runRoot }).toString();
+
+  test('report shows the revisit count', () => {
+    assert.ok(/Implement.*3/.test(reportOut), 'the report must surface repeat visits');
+  });
+
+  test('report surfaces the rejected patch', () => {
+    assert.ok(/rejected/i.test(reportOut) && /dominates/.test(reportOut));
+  });
+
+  test('report shows gate verdicts in order', () => {
+    assert.ok(reportOut.indexOf('Review') < reportOut.indexOf('DoDGate'));
+  });
+
+  test('report shows the carried criteria', () => {
+    assert.ok(/c3/.test(reportOut) && /c5/.test(reportOut));
+  });
+
+  test('resume args carry the PATCHED graph, not the seed', () => {
+    // This is the failure the whole design hinges on: a resume that replays the
+    // approved topology silently discards every runtime patch.
+    const st = JSON.parse(fs.readFileSync(path.join(runRoot, '.loom', 'state', 'demo.json'), 'utf8'));
+    assert.ok(st.graph.nodes.some((n) => n.id === 'Spike'),
+      'state.graph must be the patched graph');
+    assert.strictEqual(st.graph.version, 1);
+  });
+
+  test('the resumed cursor and visits round-trip', () => {
+    const st = JSON.parse(fs.readFileSync(path.join(runRoot, '.loom', 'state', 'demo.json'), 'utf8'));
+    assert.strictEqual(st.cursor, 'Implement');
+    assert.strictEqual(st.visits.Implement, 3);
+    assert.strictEqual(core.capFor(st.graph, 'Implement'), 4,
+      'one visit left before the cap — a resume must not lose that');
+  });
+
+  const LIST = path.join(__dirname, 'list-runs.cjs');
+  const listOut = execFileSync('node', [LIST], { cwd: runRoot }).toString();
+
+  test('list-runs shows the run, status and cursor', () => {
+    assert.ok(/demo/.test(listOut) && /running/.test(listOut) && /Implement/.test(listOut));
   });
 
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
