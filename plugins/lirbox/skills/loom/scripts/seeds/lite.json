@@ -1,0 +1,151 @@
+{
+  "version": 0,
+  "start": "Setup",
+  "terminal": "Done",
+  "nodes": [
+    {
+      "id": "Setup",
+      "kind": "work",
+      "prompt": "Create or reuse the git worktree and branch for this run. Report the paths.",
+      "model": "haiku",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "worktree",
+          "branch"
+        ],
+        "properties": {
+          "worktree": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "Plan",
+      "kind": "plan",
+      "prompt": "Read the repository and decide this run's decomposition. Return a graphPatch that adds the work nodes you need between Plan and Review, with their dependency edges.",
+      "schema": {
+        "type": "object",
+        "required": [
+          "summary"
+        ],
+        "properties": {
+          "summary": {
+            "type": "string"
+          },
+          "graphPatch": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "id": "Implement",
+      "kind": "work",
+      "prompt": "Implement the goal in the worktree. Commit your work on the branch.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "summary"
+        ],
+        "properties": {
+          "summary": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Review",
+      "kind": "gate",
+      "locked": true,
+      "prompt": "Review the diff on this branch for correctness, security and convention violations. Fix every Critical and High finding, keep the build green, and commit. Report passed=true only when nothing Critical or High is left UNRESOLVED, and only after actually running the build.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "passed",
+          "buildExit"
+        ],
+        "properties": {
+          "passed": {
+            "type": "boolean"
+          },
+          "buildExit": {
+            "type": "number"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Done",
+      "kind": "terminal"
+    }
+  ],
+  "edges": [
+    {
+      "from": "Setup",
+      "to": "Plan",
+      "when": "always"
+    },
+    {
+      "from": "Plan",
+      "to": "Implement",
+      "when": "always"
+    },
+    {
+      "from": "Implement",
+      "to": "Review",
+      "when": "always"
+    },
+    {
+      "from": "Review",
+      "to": "Implement",
+      "when": {
+        "field": "passed",
+        "eq": false
+      },
+      "carry": [
+        "findings"
+      ]
+    },
+    {
+      "from": "Review",
+      "to": "Done",
+      "when": {
+        "field": "passed",
+        "eq": true
+      },
+      "locked": true
+    }
+  ],
+  "invariants": {
+    "mustCross": [
+      "Review"
+    ],
+    "visitCaps": {
+      "*": 3,
+      "Implement": 4
+    },
+    "nodeBudget": 20,
+    "lockedHash": "fnv1a:21e7419e"
+  }
+}

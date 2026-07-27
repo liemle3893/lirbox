@@ -1,0 +1,290 @@
+{
+  "version": 0,
+  "start": "Setup",
+  "terminal": "Done",
+  "nodes": [
+    {
+      "id": "Setup",
+      "kind": "work",
+      "prompt": "Create or reuse the git worktree and branch for this run. Report the paths.",
+      "model": "haiku",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "worktree",
+          "branch"
+        ],
+        "properties": {
+          "worktree": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "DoDBaseline",
+      "kind": "work",
+      "prompt": "Run every checkable DoD criterion's check FILE against the worktree BEFORE any work, and record met/unmet/error per criterion. Measure only — fix nothing.",
+      "model": "haiku",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "baselines"
+        ],
+        "properties": {
+          "baselines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "status"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "met",
+                    "unmet",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Plan",
+      "kind": "plan",
+      "prompt": "Read the repository and decide this run's decomposition. Return a graphPatch that adds the work nodes you need between Plan and Review, with their dependency edges.",
+      "schema": {
+        "type": "object",
+        "required": [
+          "summary"
+        ],
+        "properties": {
+          "summary": {
+            "type": "string"
+          },
+          "graphPatch": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "id": "Implement",
+      "kind": "work",
+      "prompt": "Implement the goal in the worktree. Commit your work on the branch.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "summary"
+        ],
+        "properties": {
+          "summary": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Review",
+      "kind": "gate",
+      "locked": true,
+      "prompt": "Review the diff on this branch for correctness, security and convention violations. Fix every Critical and High finding, keep the build green, and commit. Report passed=true only when nothing Critical or High is left UNRESOLVED, and only after actually running the build.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "passed",
+          "buildExit"
+        ],
+        "properties": {
+          "passed": {
+            "type": "boolean"
+          },
+          "buildExit": {
+            "type": "number"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "DoDGate",
+      "kind": "gate",
+      "locked": true,
+      "prompt": "Adjudicate EVERY definition-of-done criterion against the work on this branch. MEASURE ONLY — do not fix. For tier checkable: verify the check file's sha256 matches the frozen checkSha, then run it; exit 0 is MET, non-zero UNMET, a hash mismatch is a hard failure. For tier judged: cite artifact evidence (file:line, command output, test result) from the actual diff; worker reports are untrusted claims and can never satisfy a criterion alone. A deferral without a recorded human decision is UNMET.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "passed",
+          "criteria"
+        ],
+        "properties": {
+          "passed": {
+            "type": "boolean"
+          },
+          "unmetCriteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "verdict"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "MET",
+                    "UNMET",
+                    "PARTIAL"
+                  ]
+                },
+                "evidence": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "PR",
+      "kind": "work",
+      "prompt": "Push the branch and open a pull request with the GitHub CLI. Never merge. If a PR already exists for this branch, return its URL.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "prUrl"
+        ],
+        "properties": {
+          "prUrl": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "Done",
+      "kind": "terminal"
+    }
+  ],
+  "edges": [
+    {
+      "from": "Setup",
+      "to": "DoDBaseline",
+      "when": "always"
+    },
+    {
+      "from": "DoDBaseline",
+      "to": "Plan",
+      "when": "always"
+    },
+    {
+      "from": "Plan",
+      "to": "Implement",
+      "when": "always"
+    },
+    {
+      "from": "Implement",
+      "to": "Review",
+      "when": "always"
+    },
+    {
+      "from": "Review",
+      "to": "Implement",
+      "when": {
+        "field": "passed",
+        "eq": false
+      },
+      "carry": [
+        "findings"
+      ]
+    },
+    {
+      "from": "Review",
+      "to": "DoDGate",
+      "when": {
+        "field": "passed",
+        "eq": true
+      }
+    },
+    {
+      "from": "DoDGate",
+      "to": "Implement",
+      "when": {
+        "field": "passed",
+        "eq": false
+      },
+      "carry": [
+        "unmetCriteria"
+      ],
+      "locked": true
+    },
+    {
+      "from": "DoDGate",
+      "to": "PR",
+      "when": {
+        "field": "passed",
+        "eq": true
+      },
+      "locked": true
+    },
+    {
+      "from": "PR",
+      "to": "Done",
+      "when": "always"
+    }
+  ],
+  "invariants": {
+    "mustCross": [
+      "Review",
+      "DoDGate"
+    ],
+    "visitCaps": {
+      "*": 3,
+      "Implement": 4
+    },
+    "nodeBudget": 40,
+    "lockedHash": "fnv1a:e2a2731d"
+  }
+}

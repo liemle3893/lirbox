@@ -836,6 +836,50 @@ async function main() {
     assert.ok(threw, 'the generator must refuse a graph that violates its own invariants');
   });
 
+  section('seed graphs');
+
+  for (const profile of ['lite', 'delivery']) {
+    const seed = JSON.parse(fs.readFileSync(
+      path.join(__dirname, 'seeds', `${profile}.json`), 'utf8'));
+
+    test(`${profile}: validates against itself`, () => {
+      assert.deepStrictEqual(core.validateGraph(seed, seed, null), []);
+    });
+
+    test(`${profile}: every mustCross gate is locked`, () => {
+      for (const g of seed.invariants.mustCross) {
+        const n = seed.nodes.find((x) => x.id === g);
+        assert.ok(n, `${g} missing from nodes`);
+        assert.ok(n.locked, `${g} is a mustCross gate but is not locked`);
+      }
+    });
+
+    test(`${profile}: lockedHash is present and correct`, () => {
+      assert.strictEqual(seed.invariants.lockedHash, core.lockedFingerprint(seed));
+    });
+
+    test(`${profile}: has a failure back-edge into a work node`, () => {
+      const back = seed.edges.filter((e) => {
+        const to = seed.nodes.find((n) => n.id === e.to);
+        return to && to.kind === 'work' && e.when && e.when.eq === false;
+      });
+      assert.ok(back.length > 0, 'a seed with no back-edge defeats the purpose of loom');
+    });
+
+    test(`${profile}: generates a valid conductor`, () => {
+      const f = path.join(tmp, `${profile}.json`);
+      fs.writeFileSync(f, JSON.stringify({ ...seed, name: profile, goal: 'seed check' }));
+      const o = path.join(tmp, `${profile}.js`);
+      execFileSync('node', [GEN, '--name', profile, '--graph', f, '--out', o, '--force']);
+      execFileSync('node', ['--check', o]);
+    });
+  }
+
+  test('delivery carries a DoDGate and lite does not require one', () => {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    assert.ok(d.invariants.mustCross.includes('DoDGate'));
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }
