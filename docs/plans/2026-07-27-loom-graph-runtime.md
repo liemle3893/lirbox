@@ -4779,19 +4779,54 @@ Expected: all five print `ok` and exit 0; the repo gate is green.
 
 - [ ] **Step 7: Prove each check can actually fail**
 
-A check that cannot go red is not a fence. For each, temporarily break the thing it guards and confirm the check exits 1, then restore. Do this in a scratch copy — **never** commit a broken source file:
+A check that cannot go red is not a fence, and this step is the only part of the task that can
+tell the difference. Three rules, each of which exists because ignoring it produced a wrong
+verdict on this project:
 
-```bash
-cp plugins/lirbox/skills/loom/scripts/graph-core.mjs /tmp/graph-core.bak
-# invariants bypass: read invariants from `next` again
-sed -i '' 's|const inv = (prev \&\& prev.invariants) ? prev.invariants : (next.invariants || {});|const inv = next.invariants || {};|' \
-  plugins/lirbox/skills/loom/scripts/graph-core.mjs
-node plugins/lirbox/skills/loom/evals/checks/gate-dominance-not-bypassable.check.mjs; echo "exit=$? (want 1)"
-cp /tmp/graph-core.bak plugins/lirbox/skills/loom/scripts/graph-core.mjs
-node plugins/lirbox/skills/loom/evals/checks/gate-dominance-not-bypassable.check.mjs; echo "exit=$? (want 0)"
+**1. Mutate a COPY, outside the repo.** Copy `scripts/` into your scratchpad and mutate there.
+Do not `sed` the worktree and restore afterwards — a crash, a timeout, or an interleaved commit
+between break and restore ships a broken source file, and three agents have been writing to this
+worktree concurrently.
+
+**2. The mutation must be SEMANTICALLY equivalent to the defect and SYNTACTICALLY different from
+anything the check names.** This is the rule that matters most and it is easy to get wrong. A
+check asserting `!/edge \? edge\.to : graph\.terminal/` was "proven" by reintroducing exactly
+`edge ? edge.to : graph.terminal` — it went red, and proved nothing except that the grep matches
+the string it was written against. `edge?.to ?? graph.terminal` is the same defect and sailed
+through. **Reproducing the literal text an assertion names tests the transcription, not the
+fence.** Structural deletions (remove the sha comparison, delete the second `mustCross` loop,
+drop the 409 branch) are immune to this, because they have no spelling to reproduce — prefer
+them, and when you must mutate an expression, write it differently than the check spells it.
+
+**3. The mutation harness must ASSERT IT WAS APPLIED.** A `replace` whose anchor has drifted is
+a silent no-op, and a no-op mutation yields exit 0 — which reads as "the check is blind" and
+**inverts the verdict**. Print `(mutation applied)` on success and hard-fail with `ANCHOR MISS`
+otherwise. This cost nothing and caught three false findings on this project: two floor "failures"
+that were snapshot artifacts, and one `ReferenceError` that would have falsely accused a check
+that had just been fixed. The mutation harness is itself a check, and it has to state that it did
+what it claims.
+
+Shape to follow, per check:
+
+```js
+// mutate.cjs — run from the scratchpad, never against the worktree
+const fs = require('fs');
+const [file, from, to] = process.argv.slice(2);
+const src = fs.readFileSync(file, 'utf8');
+if (!src.includes(from)) { console.error('!! ANCHOR MISS — mutation NOT applied'); process.exit(2); }
+fs.writeFileSync(file, src.split(from).join(to));
+console.log('(mutation applied)');
 ```
 
-Repeat the same pattern for the other four (restore the silent terminal fallback in `scaffold-loom.cjs`; restore the permissive `idSet.has(cursor.node)` guard; blank template literals in a way that hides an injected primitive; drop the sha comparison in `dod-freeze.mjs`). Record the observed exit codes in your report. Confirm `git status` is clean afterwards.
+Then for each of the nine: apply, assert exit **1**, restore, assert exit **0**. Record in your
+report, per check: the mutation text, that it reported `(mutation applied)`, and both exit codes.
+
+**A check that stays green under a faithful mutation is a finding.** Report it; do not weaken the
+mutation until it goes red, and do not edit the code under test to satisfy a check. If you cannot
+construct a mutation for some check, say so plainly — that is itself the finding, because it means
+the check is not anchored to anything that can break.
+
+Confirm `git status --porcelain` is empty afterwards.
 
 - [ ] **Step 8: Commit**
 
