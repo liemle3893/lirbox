@@ -68,6 +68,9 @@ gate (`-a nop` / `-a oracle`) is **free** (no model calls, ~30s/task); a real be
 (`-a claude-code -m <model>`) is **~$5–15 per task**. Declined → skip it and say so in the summary.
 Accepted → write the task and run the free gate; the paid run is a separate ask.
 
-When injecting skills into a container, always use the pruned catalog (`.harbor/skills` from
-`scripts/harbor-port.mjs`), never `plugins/lirbox/skills` — conductor ships its arena fixtures
-inside its own skill dir, so an unpruned inject hands the agent the graders it is scored against.
+Tasks are declared per skill under `plugins/lirbox/skills/<skill>/harbor/tasks/<id>/`
+(`instruction.md` + `verify.sh` required) and built by `node scripts/harbor-build.mjs [--skill <name>]`
+into `.harbor/tasks/<skill>__<id>/`. When injecting skills into a container, always use the pruned
+catalog it emits (`.harbor/skills`), never `plugins/lirbox/skills` — skills keep eval material inside
+their own dir, so an unpruned inject hands the agent the graders it is scored against. The prune drops
+every skill's `evals/`, `harbor/` and `arena/`, and hard-fails if any survives.

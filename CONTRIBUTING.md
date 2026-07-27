@@ -192,17 +192,30 @@ cost split — the two halves differ by three orders of magnitude:**
 - If the user **accepts** — write the Harbor task and run the **free** gate. The paid run is a
   separate ask, made separately.
 
+A skill declares its own tasks; nothing in the builder knows about any specific skill.
+
+```
+plugins/lirbox/skills/<skill>/harbor/
+  harness.md              directive prepended to every instruction (optional)
+  tasks/<id>/
+    instruction.md        REQUIRED — what the agent is asked to do
+    verify.sh             REQUIRED — the only grader; writes /logs/verifier/reward.json
+    files/                optional — copied into /app before the agent runs
+    task.toml             optional — hand-tuned resources/network/artifacts; merged
+```
+
 ```bash
-node scripts/harbor-port.mjs                          # derive tasks from the arena suite
-harbor run -p .harbor/tasks/<id> -a nop -e docker -y  # free: discrimination gate only
+node scripts/harbor-build.mjs --skill <skill>                    # build that skill's tasks
+harbor run -p .harbor/tasks/<skill>__<id> -a nop -e docker -y    # free: discrimination gate only
 ```
 
 Two honest caveats. Harbor is **not adopted** — `swe-run.mjs` is still the execution engine and
 no scorecard has been produced through Harbor; treat tier 3 as an available instrument, not the
 default path. And when injecting the skill catalog into a container, always use the **pruned**
-catalog `harbor-port.mjs` emits (`.harbor/skills`), never `plugins/lirbox/skills` — conductor
-ships its arena fixtures inside its own skill directory, so an unpruned inject puts every task's
-hidden graders in the agent's own discovery path and it can read the answer key.
+catalog `harbor-build.mjs` emits (`.harbor/skills`), never `plugins/lirbox/skills` — skills keep
+their eval material inside their own directory, so an unpruned inject puts every task's hidden
+graders in the agent's own discovery path and it can read the answer key. The prune is generic —
+every skill's `evals/`, `harbor/` and `arena/` — and hard-fails if anything leaks.
 
 #### Running against Ollama, or any Anthropic-compatible endpoint
 
@@ -239,7 +252,7 @@ docker run --rm curlimages/curl -s $URL/api/version
 **Run:**
 
 ```bash
-harbor run -p .harbor/tasks/<id> -a claude-code -m <model> --skill .harbor/skills \
+harbor run -p .harbor/tasks/<skill>__<id> -a claude-code -m <model> --skill .harbor/skills \
   --ae ANTHROPIC_BASE_URL=$URL --ae ANTHROPIC_AUTH_TOKEN=<any-non-empty> \
   --ae CLAUDE_CODE_AUTO_COMPACT_WINDOW=26000 --ae CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=85 \
   --ak disallowed_tools="CronCreate,CronDelete,CronList,EnterWorktree,ExitWorktree,NotebookEdit,ReportFindings,ScheduleWakeup,SendMessage,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,ToolSearch,WebFetch,WebSearch" \
