@@ -134,12 +134,149 @@ unrestricted; they already finish by opening a PR.
 
 ## Testing
 
-Always validate and smoke-test before pushing:
+Three tiers, cheapest first. **Tiers 1 and 2 are required before shipping. Tier 3 is offered,
+never assumed.**
+
+### Tier 1 — validate + smoke-test (seconds, always)
 
 ```bash
 claude plugin validate .                      # schema-check marketplace + all plugins
 claude --plugin-dir ./plugins/lirbox         # load the plugin in a throwaway session and try the skill/agent
 ```
+
+Then run `/lirbox:skill-lint` — it audits word budget, XML structure and weak frontmatter
+triggers. Advisory only: it reports, it does not edit.
+
+### Tier 2 — evals (REQUIRED — this is the real release gate)
+
+A skill with no floor cannot be regression-tested, and **cannot be improved by `whetstone`
+later**: whetstone's keep-rule is *floor passes AND the item's check goes RED→GREEN AND the
+surface-lock holds*, so with no floor there is nothing to tunnel-proof against. Skills that
+shipped without one (`codewalk`, `c4-model`, `deep-understanding`, `pr-writeup`) are stuck
+ungated and unimprovable — do not add to that list.
+
+```
+plugins/lirbox/skills/<name>/evals/
+  floor/                 invariants that must always hold
+  checks/                one frozen check per bug fixed later (empty at first)
+  checks-manifest.json   declares every check — an UNLISTED check fails the whole gate
+```
+
+For an **artifact skill**, the highest-value floor runs a headless validator over the skill's
+own output. `flowchart` ships `assets/validate.mjs` and its floor runs it — which is why its
+label-escaping bugs are caught deterministically and `codewalk`'s are not. If your skill emits
+a file, write the checker.
+
+Confirm the gate sees it — the repo-wide run must stay green, not just your slice:
+
+```bash
+node scripts/evals-all.mjs --fast --skill <name>
+node scripts/evals-all.mjs --fast
+```
+
+### Tier 3 — Harbor: containerised behavioural test — OFFER IT, DO NOT ASSUME IT
+
+Tier 2 is **artifact-level**: it checks what a skill's text and generators *contain*. Swap the
+model underneath and every tier-2 check stays green while behaviour changes completely. A
+containerised run is the only layer that sees that.
+
+**An agent implementing a skill MUST ask the user before doing any of this, and MUST state the
+cost split — the two halves differ by three orders of magnitude:**
+
+| | cost | what it buys |
+|---|---|---|
+| build the task + run the discrimination gate (`-a nop`, `-a oracle`) | **free** — no model calls, ~30s/task | proves the task is well-formed: hidden graders RED on base, fixture GREEN on base, a do-nothing agent scores 0 |
+| a real behavioural run (`-a claude-code -m <model>`) | **~$5–15 per task** | whether the skill actually works |
+
+- If the user **declines** — skip it and **say so in your summary**. Never silently omit it.
+- If the user **accepts** — write the Harbor task and run the **free** gate. The paid run is a
+  separate ask, made separately.
+
+```bash
+node scripts/harbor-port.mjs                          # derive tasks from the arena suite
+harbor run -p .harbor/tasks/<id> -a nop -e docker -y  # free: discrimination gate only
+```
+
+Two honest caveats. Harbor is **not adopted** — `swe-run.mjs` is still the execution engine and
+no scorecard has been produced through Harbor; treat tier 3 as an available instrument, not the
+default path. And when injecting the skill catalog into a container, always use the **pruned**
+catalog `harbor-port.mjs` emits (`.harbor/skills`), never `plugins/lirbox/skills` — conductor
+ships its arena fixtures inside its own skill directory, so an unpruned inject puts every task's
+hidden graders in the agent's own discovery path and it can read the answer key.
+
+#### Running against Ollama, or any Anthropic-compatible endpoint
+
+Free (your own hardware), and the only honest way to measure the **capability floor** — which
+models a skill can actually be driven by. It is *not* a cheap substitute for a paid run: a small
+model failing tells you where the floor is, it does not tell you the skill is broken.
+
+**Auth.** A subscription does not transfer into a container. Either an API key, or a token:
+
+```bash
+claude setup-token   # then: --ae CLAUDE_FORCE_OAUTH=1 --ae CLAUDE_CODE_OAUTH_TOKEN=<token>
+```
+
+**Pre-flight 1 — tool calling.** Claude Code is dead without it, so check before anything else:
+
+```bash
+curl -s $URL/v1/messages -H 'content-type: application/json' -d '{
+  "model":"<model>","max_tokens":512,
+  "tools":[{"name":"get_weather","description":"Get weather","input_schema":
+    {"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],
+  "messages":[{"role":"user","content":"Use the tool for Hanoi."}]}'
+```
+
+Want `"stop_reason":"tool_use"` and a `tool_use` content block. The first call often times out while
+the model loads — retry with a longer timeout before concluding the route is missing.
+
+**Pre-flight 2 — container reachability.** A Tailscale/LAN host reachable from the shell is not
+automatically reachable from inside a container:
+
+```bash
+docker run --rm curlimages/curl -s $URL/api/version
+```
+
+**Run:**
+
+```bash
+harbor run -p .harbor/tasks/<id> -a claude-code -m <model> --skill .harbor/skills \
+  --ae ANTHROPIC_BASE_URL=$URL --ae ANTHROPIC_AUTH_TOKEN=<any-non-empty> \
+  --ae CLAUDE_CODE_AUTO_COMPACT_WINDOW=26000 --ae CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=85 \
+  --ak disallowed_tools="CronCreate,CronDelete,CronList,EnterWorktree,ExitWorktree,NotebookEdit,ReportFindings,ScheduleWakeup,SendMessage,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,ToolSearch,WebFetch,WebSearch" \
+  -e docker -y
+```
+
+Why each flag, with numbers measured on this repo:
+
+- **`CLAUDE_CODE_AUTO_COMPACT_WINDOW`** — Claude Code cannot detect a third-party context window
+  and falls back to a hardcoded **200K**, so it would auto-compact at ~187K, long after a 32K
+  server has already truncated. Set it *below* your real window;
+  `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is a percentage of that value.
+- **`--ak disallowed_tools`** — a non-first-party base URL disables MCP tool search, so every tool
+  schema ships on every request. Measured: **19,014** input tokens with the full set, **11,080**
+  trimmed to conductor's seven (`Task, Bash, Edit, Read, Skill, Workflow, Write`). That ~7.9K is
+  the difference between fitting and not.
+
+**Budget floor (measured):** ~11,080 baseline + ~2,447 for conductor's `SKILL.md` + 1.5–3.3K per
+reference file loaded. So **16K is structurally impossible** — the floor exceeds the window — and
+**32K is marginal**, leaving ~18K of actual working room.
+
+**Compaction cannot rescue you below that floor.** It summarises *conversation history*; it cannot
+touch the system prompt, the tool schemas, or loaded skill content. Trimming tools and pruning the
+injected catalog are the only levers that move the floor itself.
+
+**Cost is fictional on a local endpoint.** Harbor reports `cost_usd` from a LiteLLM estimate,
+tagged `cost_source: litellm_estimate`. A local run costs nothing — filter on that tag before any
+cost figure reaches a scorecard.
+
+**Reading the result.** A 0 is a finding, not a failure. Check *which* failure: no `wf/` branch
+means the model could not drive the skill (engagement), while a branch with a wrong diff means it
+drove it and got the work wrong (quality). Measured example: a 2B-class local model invoked the
+conductor skill correctly, then ignored the foreground directive, backgrounded the workflow, ended
+its turn — orphaning the run — and reported success. Engagement 0, and nothing to do with its
+coding ability.
+
+### Then ship
 
 Commit with a clear message (`feat(lirbox): add <skill>` / `feat(marketplace): add <plugin>`),
 push, then `/plugin marketplace update lirbox` to pull the change into an installed copy.
