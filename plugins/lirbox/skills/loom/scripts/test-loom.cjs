@@ -1055,7 +1055,7 @@ async function main() {
 
   const bypass = core.applyPatchTo(seedGraph, {
     addEdges: [{ from: 'Implement', to: 'Done', when: 'always' }] });
-  const rBad = await post('/graph', bypass);
+  const rBad = await post('/graph', { baseVersion: seedGraph.version || 0, graph: bypass });
   test('POST /graph rejects a gate bypass with 422 and reasons', () => {
     assert.strictEqual(rBad.status, 422);
     assert.ok(Array.isArray(rBad.body.violations) && rBad.body.violations.length);
@@ -1071,7 +1071,7 @@ async function main() {
     addNodes: [{ id: 'Migrate', kind: 'work', prompt: 'run the migration' }],
     addEdges: [{ from: 'Migrate', to: 'Implement', when: 'always' }] });
   okGraph.edges.unshift({ from: 'Plan', to: 'Migrate', when: 'always' });
-  const rOk = await post('/graph', okGraph);
+  const rOk = await post('/graph', { baseVersion: seedGraph.version || 0, graph: okGraph });
   test('POST /graph accepts a valid graph and bumps the version', () => {
     assert.strictEqual(rOk.status, 200);
     assert.strictEqual(rOk.body.version, (seedGraph.version || 0) + 1);
@@ -1126,6 +1126,28 @@ async function main() {
     const loser = a.status === 409 ? a : b;
     assert.ok(loser.body.currentVersion !== undefined,
       'the rejected save must report the current version so the client can retry');
+  });
+
+  test('POST /graph refuses a bare graph body — no opt-out from the version check', async () => {
+    // A bare body used to be accepted "for compatibility", which meant any client could
+    // skip the concurrency check entirely. Measured before this was closed: two bare
+    // bodies raced, both got 200, and one edit vanished. A guard with a supported
+    // bypass is not a guard.
+    const current = (await get('/graph')).body;
+    const bare = await post('/graph', current);           // the graph, unwrapped
+    assert.strictEqual(bare.status, 400, 'a bare graph body must be refused');
+
+    // These shapes each used to slip past the check; all must now be refused.
+    for (const bad of [
+      { graph: current },                                  // baseVersion missing
+      { baseVersion: null, graph: current },
+      { baseVersion: String(current.version), graph: current },
+      { baseVersion: current.version },                    // graph missing
+    ]) {
+      const r = await post('/graph', bad);
+      assert.strictEqual(r.status, 400,
+        `expected 400 for ${JSON.stringify(Object.keys(bad))}, got ${r.status}`);
+    }
   });
 
   test('an oversized body gets a readable 413, not a socket reset', async () => {

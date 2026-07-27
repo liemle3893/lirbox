@@ -113,10 +113,23 @@ const server = http.createServer(async (req, res) => {
       // The client must declare which version it edited from; a stale base is 409.
       // `baseVersion` travels alongside the graph rather than inside it, so it can
       // never be confused with the server-owned `version` field.
-      const { baseVersion, graph: next } = (body && body.graph)
-        ? body
-        : { baseVersion: undefined, graph: body };   // legacy shape: graph posted bare
-      if (baseVersion !== undefined && baseVersion !== prevVersion) {
+      //
+      // THE WRAPPER IS MANDATORY. An earlier revision accepted a bare graph body for
+      // "compatibility" — which was simply a documented way to opt out of this check.
+      // Measured: two bare bodies raced, both returned 200, and one edit vanished.
+      // A guard with a supported bypass is not a guard. There is exactly one client
+      // (the editor in Task 7) and we control it, so requiring the wrapper costs
+      // nothing. Note `typeof baseVersion === 'number'` also rejects a missing key,
+      // `null`, and a numeric string, each of which would otherwise skip the check.
+      if (!body || typeof body !== 'object' || !body.graph
+          || typeof body.baseVersion !== 'number') {
+        return send(res, 400, {
+          error: 'POST /graph requires { baseVersion: <number>, graph: { ... } }',
+          hint: 'GET /graph first and send its `version` back as baseVersion',
+        });
+      }
+      const { baseVersion, graph: next } = body;
+      if (baseVersion !== prevVersion) {
         return send(res, 409, {
           error: 'stale base version',
           yourBaseVersion: baseVersion,
