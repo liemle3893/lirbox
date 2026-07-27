@@ -986,20 +986,60 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     execFileSync('node', ['--check', outFile]);
   });
 
-  // The restricted-layer scan, mirroring conductor's test-scaffold.cjs:109.
+  // The restricted-layer scan. It MUST be scoped to executing code before it runs.
+  //
+  // Scanning the raw emitted text produces guaranteed false positives, because two kinds
+  // of legitimate content name these primitives in prose:
+  //   - graph-core.mjs's own header comment documents its purity rule ("no Date.now(),
+  //     no Math.random(), no crypto") and is required to travel into the conductor
+  //     byte-for-byte by the inlining test;
+  //   - node prompts are DATA and may say anything, including "don't use fs.".
+  //
+  // conductor hit exactly this and fixed it the same way (test-scaffold.cjs, conductorBody).
+  // loom differs in one respect: conductor slices from `const NAME`, which for loom would
+  // skip the inlined graph-core FUNCTIONS — those are executing code and must stay scanned.
+  // So strip comments and blank every string/template literal instead, keeping all real code.
+  const conductorBody = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, '')        // block comments (graph-core's prose header)
+    .replace(/^[ \t]*\/\/.*$/gm, '')         // line comments
+    .replace(/`(?:[^`\\]|\\.)*`/g, '""')     // template literals (worker prompts)
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")     // single-quoted strings
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""');    // double-quoted strings (GRAPH_V0 node prompts)
+
   const FORBIDDEN = [
     ['require(', /\brequire\s*\(/],
     ['import', /^\s*import\s/m],
     ['Date.now', /\bDate\.now\s*\(/],
+    ['new Date', /\bnew Date\b/],
     ['Math.random', /\bMath\.random\s*\(/],
+    ['crypto', /\bcrypto\b/],
     ['fs.', /\bfs\s*\./],
     ['child_process', /child_process/],
   ];
+  const emittedBody = conductorBody(emitted);
   for (const [name, re] of FORBIDDEN) {
-    test(`emitted script contains no ${name}`, () => {
-      assert.ok(!re.test(emitted), `forbidden ${name} found in the generated conductor`);
+    test(`emitted conductor body contains no ${name}`, () => {
+      assert.ok(!re.test(emittedBody),
+        `forbidden ${name} found in EXECUTING code of the generated conductor`);
     });
   }
+
+  test('the purity scan still has teeth', () => {
+    // A scoped scan that cannot fail is worse than no scan. Inject each forbidden
+    // primitive into executing code and confirm the scan catches every one.
+    for (const [label, code] of [
+      ['Date.now', 'const t = Date.now()'],
+      ['Math.random', 'const r = Math.random()'],
+      ['require', 'const x = require("fs")'],
+      ['fs.', 'fs.writeFileSync(a, b)'],
+      ['new Date', 'const d = new Date()'],
+      ['crypto', 'const h = crypto.createHash("sha256")'],
+    ]) {
+      const tampered = conductorBody(emitted.replace('const NAME =', code + '\nconst NAME ='));
+      assert.ok(FORBIDDEN.some(([, re]) => re.test(tampered)),
+        `scan failed to catch an injected ${label} — the scoping is too aggressive`);
+    }
+  });
 
   test('meta is a literal and never read at runtime', () => {
     assert.ok(/^export const meta = \{/m.test(emitted));
