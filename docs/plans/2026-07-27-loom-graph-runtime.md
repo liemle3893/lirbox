@@ -2169,6 +2169,57 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line. Note t
     assert.strictEqual(r.status, 400);
   });
 
+  test('POST /graph rejects a stale baseVersion with 409', async () => {
+    // Optimistic concurrency. Without it, two valid concurrent saves both return 200
+    // and one is silently discarded — the client is told it succeeded while its work
+    // is gone. Measured before the fix: both posts got 200, only the later survived.
+    const current = (await get('/graph')).body;
+    const edited = JSON.parse(JSON.stringify(current));
+    edited.nodes.push({ id: 'Stale', kind: 'work', prompt: 'x' });
+    edited.edges.push({ from: 'Implement', to: 'Stale', when: { field: 'k', eq: 1 } });
+    edited.edges.push({ from: 'Stale', to: 'Implement', when: 'always' });
+
+    const stale = await post('/graph', { baseVersion: current.version - 1, graph: edited });
+    assert.strictEqual(stale.status, 409, 'a stale base version must be rejected');
+    assert.strictEqual(stale.body.currentVersion, current.version);
+
+    const fresh = await post('/graph', { baseVersion: current.version, graph: edited });
+    assert.strictEqual(fresh.status, 200, 'the correct base version must be accepted');
+    assert.strictEqual(fresh.body.version, current.version + 1);
+  });
+
+  test('concurrent saves cannot silently lose an edit', async () => {
+    const base = (await get('/graph')).body;
+    const mk = (id) => {
+      const g = JSON.parse(JSON.stringify(base));
+      g.nodes.push({ id, kind: 'work', prompt: 'x' });
+      g.edges.push({ from: 'Implement', to: id, when: { field: 'k', eq: 1 } });
+      g.edges.push({ from: id, to: 'Implement', when: 'always' });
+      return { baseVersion: base.version, graph: g };
+    };
+    const [a, b] = await Promise.all([post('/graph', mk('RaceA')), post('/graph', mk('RaceB'))]);
+    const codes = [a.status, b.status].sort();
+    assert.deepStrictEqual(codes, [200, 409],
+      `exactly one concurrent save may win; got ${JSON.stringify(codes)}`);
+    // And the loser must be told, not silently dropped.
+    const loser = a.status === 409 ? a : b;
+    assert.ok(loser.body.currentVersion !== undefined,
+      'the rejected save must report the current version so the client can retry');
+  });
+
+  test('an oversized body gets a readable 413, not a socket reset', async () => {
+    const huge = JSON.stringify({ baseVersion: 0, graph: { pad: 'x'.repeat(5e6) } });
+    let status = null, err = null;
+    try {
+      const r = await fetch(base + '/graph', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: huge });
+      status = r.status;
+    } catch (e) { err = e; }
+    assert.strictEqual(status, 413, `expected a 413 the client can read, got ${status ?? err}`);
+    // ...and the server must still be healthy afterwards.
+    assert.strictEqual((await get('/graph')).status, 200, 'server must survive an oversized body');
+  });
+
   test('the server binds loopback only', () => {
     const srcText = fs.readFileSync(SERVER, 'utf8');
     assert.ok(/'127\.0\.0\.1'|"127\.0\.0\.1"/.test(srcText),
@@ -2236,13 +2287,27 @@ const send = (res, code, obj) => {
   res.writeHead(code, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
   res.end(body);
 };
-const readBody = (req) => new Promise((resolve, reject) => {
+// Reject an oversized body with a real 413 the client can read. Destroying the socket
+// immediately (as an earlier version did) tears it down before any response can be
+// written, so the caller sees a bare ECONNRESET instead of the error the code intended
+// to send. Stop accumulating, answer, THEN destroy.
+const readBody = (req, res) => new Promise((resolve, reject) => {
   let d = '';
+  let over = false;
   req.on('data', (c) => {
+    if (over) return;
     d += c;
-    if (d.length > 4e6) { reject(new Error('body too large')); req.destroy(); }
+    if (d.length > 4e6) {
+      over = true;
+      send(res, 413, { error: 'body too large', limit: 4e6 });
+      req.destroy();
+      reject(new Error('body too large'));
+    }
   });
-  req.on('end', () => { try { resolve(JSON.parse(d || '{}')); } catch (e) { reject(e); } });
+  req.on('end', () => {
+    if (over) return;
+    try { resolve(JSON.parse(d || '{}')); } catch (e) { reject(e); }
+  });
 });
 
 // Static assets are limited to the editor directory and resolved through a prefix
@@ -2281,18 +2346,41 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, readJson(statePath, { status: 'not started' }));
     }
     if (req.method === 'POST' && p === '/graph') {
-      const next = await readBody(req);
+      const body = await readBody(req, res);
       const prev = readJson(graphPath, null);
+      const prevVersion = (prev && prev.version) || 0;
+
+      // OPTIMISTIC CONCURRENCY. Without this, two concurrent valid saves both return
+      // 200 with sequential versions and one edit is silently discarded — the client
+      // is told it succeeded while its work is gone. Measured: two Promise.all posts
+      // adding different nodes both got 200, and only the later node survived.
+      // The client must declare which version it edited from; a stale base is 409.
+      // `baseVersion` travels alongside the graph rather than inside it, so it can
+      // never be confused with the server-owned `version` field.
+      const { baseVersion, graph: next } = (body && body.graph)
+        ? body
+        : { baseVersion: undefined, graph: body };   // legacy shape: graph posted bare
+      if (baseVersion !== undefined && baseVersion !== prevVersion) {
+        return send(res, 409, {
+          error: 'stale base version',
+          yourBaseVersion: baseVersion,
+          currentVersion: prevVersion,
+          hint: 'GET /graph, re-apply your edit on the current graph, and POST again',
+        });
+      }
+
       // Re-validate server-side ALWAYS. The editor's lock badges are a courtesy;
       // this is the enforcement.
       const violations = validateGraph(next, prev, null);
       if (violations.length) return send(res, 422, { violations });
-      next.version = ((prev && prev.version) || 0) + 1;
+
+      // The server owns `version` — a client-submitted value is always ignored.
+      next.version = prevVersion + 1;
       fs.writeFileSync(graphPath, JSON.stringify(next, null, 2) + '\n');
       return send(res, 200, { ok: true, version: next.version });
     }
     if (req.method === 'POST' && p === '/action') {
-      const body = await readBody(req);
+      const body = await readBody(req, res);
       if (body.action !== 'replan' && body.action !== 'approve') {
         return send(res, 400, { error: 'action must be "replan" or "approve"' });
       }
@@ -2303,6 +2391,9 @@ const server = http.createServer(async (req, res) => {
     }
     return send(res, 404, { error: 'not found' });
   } catch (e) {
+    // readBody already answered (413) and destroyed the socket for an oversized body;
+    // writing again would throw on a dead response.
+    if (res.headersSent || res.writableEnded) return;
     return send(res, 400, { error: String(e && e.message) });
   }
 });
@@ -2555,13 +2646,28 @@ async function save(next) {
   const local = validateGraph(next, graph, null);
   if (local.length) { showViolations(local); return false; }
 
+  // Send the version this edit was based on. Without it two saves close together —
+  // two tabs, or an auto-save racing a manual one — both return 200 and one edit is
+  // silently discarded.
   const res = await fetch('/graph', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(next),
+    body: JSON.stringify({ baseVersion: graph.version, graph: next }),
   });
   if (res.status === 422) {
     const { violations } = await res.json();
     showViolations(violations);
+    return false;
+  }
+  if (res.status === 409) {
+    const { currentVersion } = await res.json();
+    showViolations([
+      `This graph changed underneath you (you edited v${graph.version}, current is v${currentVersion}).`,
+      'Your edit was NOT saved. Reload to get the current graph, then re-apply it.',
+    ]);
+    return false;
+  }
+  if (res.status === 413) {
+    showViolations(['Graph too large to save (over 4 MB).']);
     return false;
   }
   const body = await res.json();
