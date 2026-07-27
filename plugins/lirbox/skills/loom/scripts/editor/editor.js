@@ -34,7 +34,12 @@ function toFlow(g) {
   const edges = g.edges.map((e, i) => ({
     id: `e${i}:${e.from}->${e.to}`,
     source: e.from, target: e.to,
-    label: e.when === 'always' ? '' : `${e.when.field}=${JSON.stringify(e.when.eq ?? e.when.neq)}`,
+    // `graph-spec.md` and `matches()` both treat 'always', undefined and null as the same
+    // no-predicate edge — `e.when === 'always'` alone missed the other two and threw on
+    // `e.when.field`, which crashes inside loadGraph().then(...) with no error surfaced:
+    // setFlow never runs and the canvas stays blank. A planner graphPatch that legally
+    // omits `when` bricked the approval gate.
+    label: (!e.when || e.when === 'always') ? '' : `${e.when.field}=${JSON.stringify(e.when.eq ?? e.when.neq)}`,
     animated: !!e.carry,
     deletable: !readOnly && !e.locked,
   }));
@@ -59,8 +64,22 @@ function fromFlow(flowNodes, flowEdges) {
     // and the user gets a confusing "edge from unknown node" 422 instead of a clean save.
     .filter((fe) => keep.has(fe.source) && keep.has(fe.target))
     .map((fe) => {
-      const prior = graph.edges.find((e) => e.from === fe.source && e.to === fe.target);
-      return prior || { from: fe.source, to: fe.target, when: 'always' };
+      // Match by the ORIGINAL edge's position, not by (source, target). `graph.edges.find`
+      // returns the FIRST edge between a pair — harmless with one edge between two nodes,
+      // but two parallel edges (e.g. a gate's pass/fail predicates aren't the only shape;
+      // DoDGate -> Implement can carry both a {passed:false} retry edge and a distinct
+      // {severity:'soft'} edge) both resolved to the same first match, so the second
+      // edge's real predicate was silently discarded and replaced by the first's on every
+      // save. toFlow embeds the source index in the flow id (`e${i}:...`); use it to find
+      // the exact edge this one came from. Endpoints are re-checked in case the id survived
+      // a rewire (dragging an edge's end to a different node keeps its id) — if they no
+      // longer match, this is effectively a new edge and falls through to 'always', same as
+      // a genuinely new hand-drawn connection.
+      const m = /^e(\d+):/.exec(fe.id);
+      const idx = m ? Number(m[1]) : -1;
+      const prior = idx >= 0 ? graph.edges[idx] : undefined;
+      return (prior && prior.from === fe.source && prior.to === fe.target)
+        ? prior : { from: fe.source, to: fe.target, when: 'always' };
     });
   return next;
 }
@@ -170,13 +189,26 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // REFRESH THE CANVAS after every successful save, from the graph the SERVER accepted
+    // (`graph`, updated by save() itself), not by re-deriving from the pre-save `flow`.
+    // fromFlow matches a flow edge back to its graph edge by the index toFlow embedded in
+    // its id (e${i}:...). save() re-indexes graph.edges server-side (a deleted mid-array
+    // edge shifts every index after it), but nothing was re-running toFlow to hand out flow
+    // ids for the NEW indices — so a second save (Save-then-Approve, or two Saves) matched
+    // every edge against a stale index, missed, and fell through to 'always'. Measured: a
+    // valid graph, delete one edge, Save, Approve -> the second call 422s with locked-gate
+    // violations and 5 of 11 predicates silently collapsed to 'always'. Fails closed
+    // (dominance catches it before anything corrupt reaches disk) but wedges the editor —
+    // only a reload recovers. This is C1's symptom again through a different door: the fix
+    // for the first bug assumed the canvas and the server never disagree about indices,
+    // which a successful save was exactly the moment that stopped being true.
     $('save').onclick = async () => {
       if (readOnly) return setStatus('run in progress — editor is read-only');
-      await save(fromFlow(flow.nodes, flow.edges));
+      if (await save(fromFlow(flow.nodes, flow.edges))) setFlow(toFlow(graph));
     };
     $('replan').onclick = () => action('replan');
     $('approve').onclick = async () => {
-      if (await save(fromFlow(flow.nodes, flow.edges))) action('approve');
+      if (await save(fromFlow(flow.nodes, flow.edges))) { setFlow(toFlow(graph)); action('approve'); }
     };
   }, [flow]);
 
@@ -236,5 +268,15 @@ function renderPanel() {
     setStatus(`${comments.length} comment(s) queued — press Replan`);
   };
 }
+
+// Exported for the regression net, so the round-trip through graph <-> React Flow can be
+// tested by CALLING these functions with real data, not by regexing the source text for
+// what they're supposed to do. `loadGraph` is exported alongside them because `fromFlow`
+// reads the module-scoped `graph` it sets, rather than taking a graph parameter. An unused
+// named export changes nothing for the browser.
+// `graph` is exported as a live binding (ESM re-reads it on every access, it cannot be
+// reassigned from outside) so a test can read the exact post-save state save() sets, rather
+// than re-deriving it a different way than the app does.
+export { toFlow, fromFlow, loadGraph, save, graph };
 
 ReactDOM.createRoot($('canvas')).render(h(App));

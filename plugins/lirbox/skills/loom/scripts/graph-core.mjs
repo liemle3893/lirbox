@@ -110,8 +110,16 @@ function fnv1a(str) {
   return ('00000000' + h.toString(16)).slice(-8);
 }
 
+// STRIP `pos` before hashing. The locked CONTRACT is ids, prompts, schemas and
+// predicates — never canvas coordinates. `pos` is documented (graph-spec.md) as "purely a
+// layout hint... never read by graph-core.mjs" — but lockedFingerprint stringified whole
+// node objects, so it read it anyway. The editor writes `pos` onto every node (including
+// locked gates) on every save, so a plain open-and-save of an already-approved graph moved
+// the hash and 422'd — the human approval gate the whole design rests on could not be
+// passed through the UI for either stock seed, with zero user edits.
 function lockedFingerprint(graph) {
-  const nodes = graph.nodes.filter((n) => n.locked)
+  const stripPos = (n) => { const { pos, ...rest } = n; return rest; };
+  const nodes = graph.nodes.filter((n) => n.locked).map(stripPos)
     .slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const edges = graph.edges.filter((e) => e.locked).slice()
     .sort((a, b) => {

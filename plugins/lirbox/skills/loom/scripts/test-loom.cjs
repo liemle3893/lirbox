@@ -14,9 +14,26 @@ const fs = require('fs');
 const os = require('os');
 
 let failures = 0;
+// Several test bodies below are `async () => {...}`. A bare `fn()` call does not wait for
+// that promise, so a rejection inside one is never caught by the try/catch here — it
+// becomes an unhandled rejection instead, either silently (misreported as "ok", the
+// assertions having run too late to matter) or by crashing the whole process later, at a
+// point that looks unrelated to the test that actually failed. `pending` collects every
+// async test's promise so `main()` can await all of them before deciding pass/fail — every
+// call site stays the unchanged bare `test(name, fn);` statement it already was.
+const pending = [];
 function test(name, fn) {
-  try { fn(); process.stdout.write(`  ok  ${name}\n`); }
-  catch (e) { failures++; process.stdout.write(`  FAIL ${name}\n       ${e.message}\n`); }
+  let result;
+  try { result = fn(); }
+  catch (e) { failures++; process.stdout.write(`  FAIL ${name}\n       ${e.message}\n`); return; }
+  if (result && typeof result.then === 'function') {
+    pending.push(result.then(
+      () => { process.stdout.write(`  ok  ${name}\n`); },
+      (e) => { failures++; process.stdout.write(`  FAIL ${name}\n       ${e.message}\n`); },
+    ));
+    return;
+  }
+  process.stdout.write(`  ok  ${name}\n`);
 }
 function section(name) { process.stdout.write(`\n${name}\n`); }
 
@@ -1109,6 +1126,15 @@ async function main() {
     assert.strictEqual(fresh.body.version, current.version + 1);
   });
 
+  // Drain here: this test and the next one both read the server's CURRENT version and act
+  // on it, against the SAME live server. `test()` does not await an async fn (see its
+  // definition), so without this, "concurrent saves"'s Promise.all([...]) — two fetches, no
+  // intermediate await — routinely finishes and bumps the version BEFORE this test's second,
+  // slower POST (three sequential awaits) gets there, turning its expected 200 into a 409.
+  // Not hypothetical: reproduced 3/3 runs once `pending` started properly surfacing it,
+  // rather than losing it to an unhandled rejection this file never used to check for.
+  await Promise.all(pending);
+
   test('concurrent saves cannot silently lose an edit', async () => {
     const base = (await get('/graph')).body;
     const mk = (id) => {
@@ -1248,6 +1274,205 @@ async function main() {
     // dangling edge would surface to the user as a confusing "edge from unknown node" 422.
     assert.ok(/\.filter\(\(fe\) => keep\.has\(fe\.source\) && keep\.has\(fe\.target\)\)/.test(editorJs),
       'fromFlow must filter edges against the surviving node set itself');
+  });
+
+  // REAL round-trip through toFlow/fromFlow, executed, not a static assertion. Every editor
+  // test above proves the SOURCE SAYS the right thing; none of them prove CALLING it does.
+  // Branch review found a Critical this way: toFlow/fromFlow route every node's canvas
+  // position through n.pos, including locked gates, and lockedFingerprint hashed whole node
+  // objects — so opening either stock seed and saving with ZERO edits moved the hash and the
+  // save 422'd. The human approval gate the whole design rests on could not be passed through
+  // the UI, for either seed, with nothing wrong in the graph itself.
+  //
+  // editor.js does `import './graph-core.mjs'`, a path the SERVER rewrites virtually (both
+  // served from site root) but that does not exist on disk relative to scripts/editor/ — so
+  // it's copied alongside a real graph-core.mjs into a temp dir rather than imported in place.
+  // Module-scope code shells out to `window`, `document`, `React`, `ReactDOM` at import time
+  // (down to the `ReactDOM.createRoot(...).render(...)` bootstrap on the last line), so those
+  // are shimmed just enough to not throw; none of the shims are exercised by toFlow/fromFlow
+  // themselves. `fetch` is stubbed only for the `loadGraph()` calls below and restored
+  // immediately after, because the server tests around this section use the real one.
+  //
+  // Drain `pending` FIRST. Several tests earlier in this section are `async () => {...}` and
+  // (see `pending`'s definition) their bodies keep running after test() already moved on — if
+  // any of them are still mid-flight when `globalThis.fetch` gets overridden below, THEIR
+  // next `fetch` call picks up this stub instead of the real one and corrupts an unrelated
+  // test against the live server. Measured: without this, "POST /graph rejects a stale
+  // baseVersion with 409" intermittently got a 409 on the call it expected 200 from.
+  await Promise.all(pending);
+
+  const editorTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-editor-mod-'));
+  fs.copyFileSync(path.join(__dirname, 'editor', 'editor.js'), path.join(editorTmp, 'editor.js'));
+  fs.copyFileSync(path.join(__dirname, 'graph-core.mjs'), path.join(editorTmp, 'graph-core.mjs'));
+
+  const savedGlobals = { fetch: globalThis.fetch, window: globalThis.window,
+    document: globalThis.document, React: globalThis.React, ReactDOM: globalThis.ReactDOM };
+  globalThis.window = { ReactFlow: {} };
+  globalThis.React = { useState: () => [null, () => {}], useEffect: () => {},
+    useCallback: (fn) => fn, createElement: () => ({}) };
+  globalThis.document = { getElementById: () => ({}) };
+  globalThis.ReactDOM = { createRoot: () => ({ render: () => {} }) };
+
+  // window/document/React/ReactDOM stay shimmed for the REST of this section (through the
+  // two-save test below) — save() itself calls setStatus()/showViolations(), which need
+  // document.getElementById to exist. Only `fetch` is restored/re-stubbed per block below,
+  // since each block talks to a different place (a canned seed, or a real server).
+  const editorMod = await import('file://' + path.join(editorTmp, 'editor.js'));
+  const roundTrips = {};
+  try {
+    for (const name of ['lite', 'delivery']) {
+      const seed = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', `${name}.json`), 'utf8'));
+      globalThis.fetch = async () => ({ json: async () => JSON.parse(JSON.stringify(seed)) });
+      const g = await editorMod.loadGraph();
+      const flow = editorMod.toFlow(g);
+      const next = editorMod.fromFlow(flow.nodes, flow.edges);
+      roundTrips[name] = { seed: g, next, violations: core.validateGraph(next, g, null) };
+    }
+  } finally {
+    globalThis.fetch = savedGlobals.fetch;
+  }
+
+  for (const name of ['lite', 'delivery']) {
+    test(`editor round-trip: opening and saving ${name} with zero edits stays valid`, () => {
+      const { seed, next, violations } = roundTrips[name];
+      assert.deepStrictEqual(violations, [],
+        `a zero-edit round-trip must validate clean, got: ${JSON.stringify(violations)}`);
+      assert.strictEqual(core.lockedFingerprint(next), seed.invariants.lockedHash,
+        'lockedFingerprint must NOT move on a zero-edit round-trip through the editor '
+        + '(pos is a layout hint, not part of the locked contract)');
+    });
+  }
+
+  test('toFlow does not throw on a when shape the spec declares legal', () => {
+    // graph-spec.md and matches() both treat 'always', undefined and null as the same
+    // no-predicate edge. `e.when === 'always'` alone missed the other two and read
+    // `e.when.field` unguarded — throwing inside loadGraph().then(...) with the error never
+    // surfaced, so setFlow never runs and the canvas silently stays blank. A planner
+    // graphPatch that legally omits `when` (or sets it null) bricked the approval gate.
+    for (const when of [undefined, null, 'always']) {
+      const g = { nodes: [{ id: 'A' }, { id: 'B' }], edges: [{ from: 'A', to: 'B', when }] };
+      const flow = editorMod.toFlow(g);
+      assert.strictEqual(flow.edges[0].label, '', `when=${JSON.stringify(when)} must not throw`);
+    }
+  });
+
+  // Resolved OUTSIDE test(): test()'s callback runs synchronously (see its definition
+  // above) and does not await an async fn — a promise returned from inside it is never
+  // waited on, so its assertions would run after "ok" was already printed. Every async
+  // setup in this file resolves before the matching test() call for that reason.
+  globalThis.fetch = async () => ({ json: async () => ({
+    nodes: [{ id: 'DoDGate' }, { id: 'Implement' }],
+    edges: [
+      { from: 'DoDGate', to: 'Implement', when: { field: 'passed', eq: false } },
+      { from: 'DoDGate', to: 'Implement', when: { field: 'severity', eq: 'soft' } },
+    ],
+    invariants: {}, version: 1,
+  }) });
+  const parallelG = await editorMod.loadGraph();
+  const parallelFlow = editorMod.toFlow(parallelG);
+  const parallelNext = editorMod.fromFlow(parallelFlow.nodes, parallelFlow.edges);
+  globalThis.fetch = savedGlobals.fetch;
+
+  test('fromFlow preserves parallel edges between the same node pair', () => {
+    // graph.edges.find(...) by (source, target) returns only the FIRST match — harmless
+    // with one edge between a pair, but two parallel edges (a gate's fail edge plus an
+    // unrelated soft-severity edge between the same nodes is a legal shape) both resolved
+    // to the SAME first match, so the second edge's real predicate was silently replaced by
+    // the first's on every save. Only mattered once C1 stopped 422ing every save outright.
+    assert.deepStrictEqual(parallelNext.edges.map((e) => e.when),
+      [{ field: 'passed', eq: false }, { field: 'severity', eq: 'soft' }],
+      `both predicates must survive distinctly, got: ${JSON.stringify(parallelNext.edges)}`);
+  });
+
+  test('save wiring refreshes the canvas from the saved graph on success', () => {
+    // STRUCTURAL, not behavioural: this is the piece the round-trip tests above cannot
+    // reach, because they call toFlow/fromFlow/save directly rather than through the click
+    // handlers. Matching a flow edge back to its graph edge by the index toFlow embedded in
+    // its id is only valid until the array those indices point into changes shape — and a
+    // successful save is EXACTLY that moment: a deleted mid-array edge re-indexes every
+    // edge after it server-side. Without re-deriving the flow from the just-saved graph,
+    // the NEXT save (a second edit, or Save-then-Approve) matches every flow edge against
+    // stale indices and silently drops real predicates to 'always'.
+    assert.ok(
+      /if \(await save\(fromFlow\(flow\.nodes, flow\.edges\)\)\) setFlow\(toFlow\(graph\)\);/.test(editorJs),
+      'the Save handler must refresh the canvas (setFlow(toFlow(graph))) after a successful save');
+    assert.ok(
+      /if \(await save\(fromFlow\(flow\.nodes, flow\.edges\)\)\) \{ setFlow\(toFlow\(graph\)\); action\('approve'\); \}/.test(editorJs),
+      'the Approve handler must refresh the canvas before firing the approve action');
+  });
+
+  // BEHAVIOURAL companion to the structural test above: proves the REFRESHED sequence
+  // (toFlow(graph) called again between saves, exactly what setFlow(toFlow(graph)) does)
+  // actually preserves every predicate across two real saves against a real server — not
+  // just that the source contains the right-looking call. Isolated server + custom fixture
+  // (not the shared editor-section server, which this would leave mutated for nothing after
+  // it): a graph with a genuinely redundant parallel edge into a locked gate, so removing it
+  // is a legitimate first edit (save #1 must actually succeed — an invalid first edit tests
+  // an unreachable sequence) while still re-indexing every edge declared after it.
+  const twoSaveCore = await import('file://' + path.join(__dirname, 'graph-core.mjs'));
+  const TWOSAVE_G = {
+    name: 'e2', goal: 'g', start: 'Start', terminal: 'PR',
+    nodes: [{ id: 'Start' }, { id: 'A' }, { id: 'Gate', locked: true }, { id: 'PR' }],
+    edges: [
+      { from: 'Start', to: 'A', when: 'always' },
+      { from: 'A', to: 'Gate', when: { field: 'x', eq: 1 } },
+      { from: 'A', to: 'Gate', when: { field: 'y', eq: 2 } }, // redundant parallel edge
+      { from: 'Gate', to: 'PR', when: { field: 'passed', eq: true }, locked: true },
+      { from: 'Gate', to: 'A', when: { field: 'passed', eq: false }, locked: true },
+    ],
+    invariants: { mustCross: ['Gate'], visitCaps: { '*': 3 }, nodeBudget: 20 },
+    version: 1,
+  };
+  TWOSAVE_G.invariants.lockedHash = twoSaveCore.lockedFingerprint(TWOSAVE_G);
+
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-2save-'));
+  fs.mkdirSync(path.join(root2, '.loom', 'state'), { recursive: true });
+  fs.writeFileSync(path.join(root2, '.loom', 'e2.graph.json'), JSON.stringify(TWOSAVE_G));
+  const srv2 = spawn('node', [SERVER, '--name', 'e2', '--root', root2, '--port', '0']);
+  const port2 = await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('e2 server did not start')), 8000);
+    srv2.stdout.on('data', (b) => {
+      const m = /LOOM_SERVER_PORT=(\d+)/.exec(b.toString());
+      if (m) { clearTimeout(t); res(Number(m[1])); }
+    });
+  });
+  const base2 = `http://127.0.0.1:${port2}`;
+  const savedFetch2 = globalThis.fetch;
+  globalThis.fetch = (url, opts) => savedFetch2(new URL(url, base2).toString(), opts);
+
+  let save1ok, save2Violations, save2Edges;
+  try {
+    const g2a = await editorMod.loadGraph();
+    const flowA = editorMod.toFlow(g2a);
+    const dropId = flowA.edges[2].id; // the redundant A->Gate {y:2} edge
+    const flowBEdges = flowA.edges.filter((e) => e.id !== dropId);
+    const nextA = editorMod.fromFlow(flowA.nodes, flowBEdges);
+    save1ok = await editorMod.save(nextA);
+    // THE FIX, exactly as the click handlers now call it: re-derive the flow from the
+    // just-saved graph before anything downstream uses it again.
+    const freshFlow = editorMod.toFlow(editorMod.graph);
+    const nextB = editorMod.fromFlow(freshFlow.nodes, freshFlow.edges);
+    save2Violations = twoSaveCore.validateGraph(nextB, editorMod.graph, null);
+    save2Edges = nextB.edges;
+  } finally {
+    globalThis.fetch = savedGlobals.fetch;
+    globalThis.window = savedGlobals.window;
+    globalThis.document = savedGlobals.document;
+    globalThis.React = savedGlobals.React;
+    globalThis.ReactDOM = savedGlobals.ReactDOM;
+    srv2.kill();
+  }
+
+  test('two saves in a row preserve every predicate, including locked gate edges', () => {
+    assert.strictEqual(save1ok, true,
+      'setup precondition: the first save must legitimately succeed, or this test exercises '
+      + 'a sequence the real editor could never reach');
+    assert.deepStrictEqual(save2Violations, [],
+      `a second save immediately after the first must stay valid, got: ${JSON.stringify(save2Violations)}`);
+    assert.deepStrictEqual(save2Edges.map((e) => e.when), [
+      'always', { field: 'x', eq: 1 },
+      { field: 'passed', eq: true }, { field: 'passed', eq: false },
+    ], `no predicate may collapse to 'always', got: ${JSON.stringify(save2Edges)}`);
   });
 
   test('every dynamic value in renderPanel is escaped before innerHTML', () => {
@@ -1655,6 +1880,9 @@ async function main() {
     const gi = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', '..', '.gitignore'), 'utf8');
     assert.ok(/^\.loom\/?$/m.test(gi), '.loom/ must be gitignored — it is runtime scratch');
   });
+
+  // Drain every async test's promise before deciding pass/fail — see `pending`'s comment.
+  await Promise.all(pending);
 
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
