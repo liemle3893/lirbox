@@ -90,15 +90,21 @@ for (const t of graded) {
     let wf = '';
     try { wf = execFileSync('git', ['-C', clone, 'branch', '--format=%(refname:short)'], { encoding: 'utf8' }).split('\n').find((b) => b.startsWith('wf/')) || ''; } catch (e) { /* clone broken */ }
     let cell = { task: t.id, run: r, secs, engaged: !!wf, resolved: false, f2p: { passed: 0, total: 0 } };
+    let grade = null;
     if (timedOut) cell.reason = 'timeout';
     else if (!wf) cell.reason = 'no-conductor-engagement';
     else {
       const diffPath = join(work, tag + '.diff');
       writeFileSync(diffPath, execFileSync('git', ['-C', clone, 'diff', t.sha, wf], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
       const g = spawnSync('node', [join(HERE, 'swe-grade.mjs'), '--task', t.id, '--diff', diffPath], { encoding: 'utf8' });
-      writeFileSync(join(work, tag + '.grade'), g.stdout || '{}');
-      try { const gj = JSON.parse(g.stdout); cell.resolved = !!gj.resolved; cell.f2p = gj.f2p || cell.f2p; cell.p2p = gj.p2p; } catch (e) { cell.reason = 'grade-parse-error'; }
+      try { grade = JSON.parse(g.stdout); cell.resolved = !!grade.resolved; cell.f2p = grade.f2p || cell.f2p; cell.p2p = grade.p2p; }
+      catch (e) { grade = null; cell.reason = 'grade-parse-error'; writeFileSync(join(work, tag + '.grade.stdout'), g.stdout || ''); }
     }
+    // EVERY cell leaves a .grade record — non-engaged and timed-out ones included, carrying the
+    // MEASURED `engaged` flag and the reason. Writing it only on the engaged path is what made
+    // non-engagement structurally invisible to swe-score's --cells reconstruction: no file meant no
+    // row, so a rebuilt scorecard could only ever report 100% engagement.
+    writeFileSync(join(work, tag + '.grade'), JSON.stringify({ ...(grade || {}), ...cell }));
     cells.push(cell);
     console.log(`${cell.resolved ? 'RESOLVED' : 'failed (' + (cell.reason || 'unresolved') + ')'} f2p=${cell.f2p.passed}/${cell.f2p.total} ${secs}s`);
   }

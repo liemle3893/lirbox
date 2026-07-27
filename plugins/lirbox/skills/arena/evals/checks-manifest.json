@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "Expectation manifest for the frozen acceptance-checks under evals/checks/.",
+    "Enforced by scripts/evals-all.mjs on every push and PR — a check on disk but not listed here is",
+    "an UNGUARDED check and fails the gate, both directions.",
+    "",
+    "expect 'green' = a past item whose fix must not regress. MUST exit 0.",
+    "expect 'red'   = a known-failing check: an open concern or an in-flight item. MUST exit 0 or 1,",
+    "                 never >=2 (>=2 is harness rot: the check failed to run). A 'red' check that",
+    "                 turns GREEN does not fail the gate; it prints a promote-me notice.",
+    "",
+    "LOCKED (evals/**): a fixer may never edit this file — otherwise the loop could flip a regressing",
+    "check to 'red' and escape its own fence."
+  ],
+  "checks": {
+    "engagement-measured-not-assumed": {
+      "expect": "green",
+      "note": "The scoreboard reported engagement it never measured: swe-score's loadCells() hardcoded engaged:true, and swe-run only wrote a .grade file on the engaged path, so non-engagement could not survive a --cells rebuild. Fixed by reading `engaged` off the grade record (absent = UNKNOWN, keeps the † marker) and by writing a record for every cell. Guards both directions: a measured non-engaged cell must count as non-engaged, and a legacy record must never be promoted to measured."
+    }
+  }
+}

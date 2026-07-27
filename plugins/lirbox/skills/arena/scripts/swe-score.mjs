@@ -13,8 +13,10 @@
  *
  * Usage:
  *   node swe-score.mjs --cells <dir> --name <label> --config '<json>' [--filter <substr>]
- *       # <dir> holds per-cell "<task>--….grade" JSON files (swe-grade output); --filter selects a
+ *       # <dir> holds per-cell "<task>--….grade" JSON files (swe-run output); --filter selects a
  *       # config's files by substring. Writes docs/arena/scores/<label>.json and refreshes the index.
+ *       # Engagement is read from each record's `engaged` flag; a record without one stays UNKNOWN
+ *       # (rendered †) — it is never promoted to "engaged" just because the file exists.
  *   node swe-score.mjs --index          # regenerate docs/arena/scores/README.md from all scorecards
  *   node swe-score.mjs --fingerprint    # print the current suite fingerprint
  */
@@ -27,7 +29,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..', '..', '..', '..');
 const SUITE = join(REPO, 'plugins', 'lirbox', 'skills', 'conductor', 'arena', 'suite.json');
 const TASKS_DIR = join(REPO, 'plugins', 'lirbox', 'skills', 'conductor', 'arena', 'tasks');
-const SCORES = join(REPO, 'docs', 'arena', 'scores');
+// Test seam: checks render a scoreboard into a scratch dir instead of mutating docs/.
+const SCORES = process.env.ARENA_SCORES_DIR ? resolve(process.env.ARENA_SCORES_DIR) : join(REPO, 'docs', 'arena', 'scores');
 
 function arg(name, def) { const i = process.argv.indexOf('--' + name); const v = process.argv[i + 1]; return i > -1 ? (v && !v.startsWith('--') ? v : true) : def; }
 
@@ -57,29 +60,54 @@ export function wilson95(k, n) {
   return [Math.max(0, centre - half), Math.min(1, centre + half)].map((x) => Math.round(x * 1000) / 1000);
 }
 
+// --- engagement is TRI-STATE: true / false / null (never measured) ---
+// A cell's engagement must never be inferred from the fact that a record exists. Legacy `.grade`
+// files were written only on the engaged path, so reconstructing from them and calling every cell
+// engaged reports a construction artifact as a measurement. `engagedMeasured` marks cells whose
+// engagement was actually READ off the grade record; swe-run cells (no `file` key) always measured
+// it; anything else is UNKNOWN and renders with the † "assumed, not measured" marker.
+export function cellEngagement(cell) {
+  if (cell.engaged === false) return false;                            // explicit — never an artifact
+  if (cell.engagedMeasured === true) return cell.engaged === true;     // --cells, read from the record
+  if (cell.file === undefined && cell.engaged === true) return true;   // swe-run cell: measured inline
+  return null;                                                         // unknown: assumed, not measured
+}
+
 // --- scorecard from cell grade records ---
 export function computeScore(cells) {
   const total = cells.length;
   const resolved = cells.filter((c) => c.resolved).length;
   const f2pPassed = cells.reduce((a, c) => a + (c.f2p?.passed || 0), 0);
   const f2pTotal = cells.reduce((a, c) => a + (c.f2p?.total || 0), 0);
-  const engaged = cells.filter((c) => c.engaged !== false).length;
+  // Unknown counts toward the engagement numerator exactly as before (so recorded cards keep their
+  // numbers), but engagementMeasured says how much of that number was actually measured.
+  const engaged = cells.filter((c) => cellEngagement(c) !== false).length;
+  const engagementMeasured = cells.filter((c) => cellEngagement(c) !== null).length;
   return {
     resolved, total,
     rate: total ? Math.round((resolved / total) * 1000) / 1000 : 0,
     wilson95: wilson95(resolved, total),
     f2pPassed, f2pTotal,
     engagementRate: total ? Math.round((engaged / total) * 1000) / 1000 : 0,
+    engagementMeasured,
   };
 }
 
-function loadCells(dir, filter) {
+export function loadCells(dir, filter) {
   const cells = [];
   for (const f of readdirSync(dir).sort()) {
     if (!f.endsWith('.grade')) continue;
     if (filter && !f.includes(filter)) continue;
     const g = JSON.parse(readFileSync(join(dir, f), 'utf8'));
-    cells.push({ task: g.task, file: basename(f), engaged: true, resolved: !!g.resolved, f2p: g.f2p, p2p: g.p2p });
+    // Engagement is READ, never assumed. swe-run writes `engaged` into every grade record; a legacy
+    // record carries none, and stays null (unknown) rather than being promoted to a measurement.
+    const measured = typeof g.engaged === 'boolean';
+    cells.push({
+      task: g.task, file: basename(f),
+      engaged: measured ? g.engaged : null, ...(measured ? { engagedMeasured: true } : {}),
+      resolved: !!g.resolved, f2p: g.f2p, p2p: g.p2p,
+      ...(g.reason ? { reason: g.reason } : {}),
+    });
   }
   return cells;
 }
@@ -93,14 +121,14 @@ function renderIndex() {
     const cmp = c.suiteHash === cur.hash ? '' : ' ⚠️stale-suite';
     const ci = c.score.wilson95.map((x) => Math.round(x * 100) + '%').join('–');
     // Engagement is derived from the stored cells (exact counts, and it backfills every recorded
-    // card) — never from score.engagementRate, which is a rounded rate. Cards built by --cells come
-    // from .grade files, which only exist where the skill engaged: their engagement is assumed, not
-    // measured, so mark them (†) rather than let a construction artifact read as a 100% result.
+    // card) — never from score.engagementRate, which is a rounded rate. Any cell whose engagement
+    // was never measured (cellEngagement === null) marks the whole row (†), so a construction
+    // artifact can never read as a measured result.
     const cells = c.cells || [];
-    const eng = cells.filter((x) => x.engaged !== false).length;
-    const assumed = cells.length > 0 && cells.every((x) => x.file !== undefined);
+    const eng = cells.filter((x) => cellEngagement(x) !== false).length;
+    const assumed = cells.some((x) => cellEngagement(x) === null);
     const engaged = cells.length ? `${eng}/${c.score.total}${assumed ? '†' : ''}` : '?';
-    const condRes = !cells.length ? '?' : eng ? `${cells.filter((x) => x.engaged !== false && x.resolved).length}/${eng}` : '-';
+    const condRes = !cells.length ? '?' : eng ? `${cells.filter((x) => cellEngagement(x) !== false && x.resolved).length}/${eng}` : '-';
     const cfg = `${c.config.model || '?'} / ${c.config.effort || '?'}${c.config.pluginDir ? ' / ' + c.config.pluginDir : ''}`;
     const headline = `**${c.score.resolved}/${c.score.total} (${Math.round(c.score.rate * 100)}%)**`;
     return `| ${c.name} | ${c.date} | \`${c.suiteHash}\`${cmp} | ${cfg} | ${headline} | ${ci} | ${engaged} | ${condRes} | ${c.score.f2pPassed}/${c.score.f2pTotal} |`;
@@ -141,9 +169,12 @@ is the noise source and any A-vs-B gap smaller than that spread is unreadable.
 |---|---|---|---|---|---|---|---|---|
 ${rows.join('\n')}
 
-† engagement assumed, not measured: the row was built from \`.grade\` files (\`--cells\`), which exist
-only for cells that engaged — non-engaged cells leave no grade and never enter the denominator. Only
-\`swe-run.mjs\` rows measure engagement. **F2P tests** is pooled over all cells, so non-engaged cells
+† engagement assumed, not measured: the row contains at least one cell whose engagement was never
+recorded. Those rows were built (\`--cells\`) from \`.grade\` files written back when only ENGAGED cells
+produced one — a non-engaged cell left no grade, so it never entered the denominator and its
+non-engagement is structurally invisible. \`swe-run.mjs\` now writes a grade record for every cell
+carrying its measured \`engaged\` flag, so rows built either way measure engagement; a † means the
+underlying files predate that. **F2P tests** is pooled over all cells, so non-engaged cells
 contribute 0/0 and vanish from it — it says nothing about engagement either.
 
 Produce a new row: \`node plugins/lirbox/skills/arena/scripts/swe-run.mjs --name <label> --model <m> --effort <e> [--plugin-dir <lirbox-checkout>] [--runs N]\`
