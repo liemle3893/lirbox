@@ -1,0 +1,18 @@
+[task]
+name = "lirbox/feedback__scrub-and-shape"
+version = "1.0.0"
+description = "feedback skill task: scrub-and-shape"
+
+[metadata]
+skill = "feedback"
+
+[environment]
+cpus = 2
+memory_mb = 2048
+build_timeout_sec = 900
+
+[agent]
+timeout_sec = 1800
+
+[verifier]
+timeout_sec = 300
