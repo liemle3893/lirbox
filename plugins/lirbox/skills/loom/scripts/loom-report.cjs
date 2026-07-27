@@ -78,11 +78,12 @@ for (const t of st.trace || []) {
 out.push('');
 
 const carry = st.carry || {};
-if (Object.keys(carry).length) {
+const carried = Object.entries(carry)
+  .filter(([, c]) => Object.keys(c || {}).length)
+  .map(([node, c]) => `  ${node}: ${JSON.stringify(c)}`);
+if (carried.length) {
   out.push('CARRIED FORWARD');
-  for (const [node, c] of Object.entries(carry)) {
-    if (Object.keys(c || {}).length) out.push(`  ${node}: ${JSON.stringify(c)}`);
-  }
+  out.push(...carried);
   out.push('');
 }
 

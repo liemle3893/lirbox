@@ -1598,6 +1598,22 @@ async function main() {
     assert.ok(!/undefined#/.test(out), 'must not render literal undefined');
   });
 
+  test('CARRIED FORWARD header is absent when nothing carries', () => {
+    // An operator cannot tell "nothing was carried" from "carry data disappeared" if
+    // the header prints with no rows. Same family as the three cases in 1b19037.
+    // Both `{"carry": {}}` and `{"carry": {"Implement": {}}}` mean no data carries
+    // and must render identically.
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-carry-'));
+    fs.mkdirSync(path.join(d, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.loom', 'state', 'nocarry.json'), JSON.stringify({
+      workflow: 'nocarry', status: 'running', cursor: 'A', visits: { A: 1 },
+      graph: { nodes: [{ id: 'A' }], edges: [], invariants: {} },
+      trace: [], carry: { Implement: {} } }));
+    const out = execFileSync('node', [REPORT, 'nocarry'], { cwd: d }).toString();
+    assert.ok(!/CARRIED FORWARD/.test(out),
+      'bare header with no rows must not appear; an operator cannot tell what is missing');
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }
