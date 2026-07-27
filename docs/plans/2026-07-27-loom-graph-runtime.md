@@ -2784,7 +2784,7 @@ Run every checkable DoD criterion's check FILE against the worktree BEFORE any w
 
 Add `"discriminates"` to the node's schema properties as `{ "type": "boolean" }` and to `required`.
 
-Because the seed changed, re-stamp its `lockedHash`:
+Because the seed changed, re-stamp its `lockedHash`. **Expect the value to be unchanged** — only `Review` and `DoDGate` are locked, and `DoDBaseline` is not, so editing its prompt cannot move the fingerprint. The re-stamp is defensive, and printing the same hash back (`fnv1a:e2a2731d`) means it worked, not that it failed:
 
 ```bash
 cd plugins/lirbox/skills/loom/scripts && node -e "
