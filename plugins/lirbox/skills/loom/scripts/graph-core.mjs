@@ -227,6 +227,35 @@ function validateGraph(next, prev, cursor) {
     }
   }
 
+  // A gate's FAILURE edge must return to the gate.
+  //
+  // Structural dominance proves every path VISITS a gate. It does not prove a FAILING
+  // gate cannot carry the run onward: `DoDGate --fail--> Done` visits DoDGate on every
+  // path and still reaches the terminal with the gate unsatisfied. Same for
+  // `--fail--> PR`. That is a bypass, and it is the subtle sibling of deleting the gate.
+  //
+  // So for every gate G and every out-edge G->X carrying a failure predicate, require
+  // that G still dominates the terminal FROM X — you cannot get to the end without
+  // coming back through the gate. This permits every legitimate reshaping (splice a
+  // Spike in, loop back to Plan, self-loop bounded by visitCaps) and forbids exactly
+  // the shape where failure leads forward.
+  //
+  // This is a VALIDATION rule, not a locking rule. Locking failure edges instead would
+  // silently shadow spliced nodes — applyPatchTo appends and pickEdge takes the first
+  // match, so a parallel edge validates and is never selected.
+  for (const gate of inv.mustCross || []) {
+    if (!idSet.has(gate)) continue;
+    for (const e of next.edges) {
+      if (e.from !== gate) continue;
+      if (!(e.when && e.when.eq === false)) continue;
+      if (!idSet.has(e.to)) continue;
+      if (!dominates(next, gate, next.terminal, e.to)) {
+        v.push(gate + ' failure edge -> ' + e.to + ' can reach ' + next.terminal
+          + ' without re-crossing ' + gate);
+      }
+    }
+  }
+
   // Positional dominance — from the CURSOR, over gates not yet satisfied.
   // Required because a back-edge admits start -> DoDGate -> Implement -> terminal:
   // structurally dominated, yet the remaining path never re-crosses the failed gate.

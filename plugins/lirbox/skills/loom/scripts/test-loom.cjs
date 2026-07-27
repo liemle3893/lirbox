@@ -337,6 +337,40 @@ async function main() {
     assert.ok(v.some(m => /unreachable|locked/.test(m)));
   });
 
+  test('REJECT: a gate failure edge that leads to the terminal', () => {
+    // Dominance proves the gate is VISITED, not that it PASSED. Without this rule a
+    // failing gate could route straight to the end — a bypass that leaves the gate
+    // on every path, so the dominance check stays silent.
+    const next = core.applyPatchTo(LOCKED, {
+      removeEdges: [{ from: 'DoDGate', to: 'Implement' }],
+      addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: false } }],
+    });
+    const v = core.validateGraph(next, LOCKED, null);
+    assert.ok(v.some((m) => /failure edge/.test(m)),
+      `a failing gate must not reach the terminal, got ${JSON.stringify(v)}`);
+  });
+
+  test('ACCEPT: a gate failure edge that loops back through the gate', () => {
+    // Every legitimate reshaping of the failure path must still pass: splice a node in,
+    // route to an earlier node, or self-loop (bounded by visitCaps).
+    for (const [label, patch] of [
+      ['splice a Spike', {
+        removeEdges: [{ from: 'DoDGate', to: 'Implement' }],
+        addNodes: [{ id: 'Spike', kind: 'work' }],
+        addEdges: [{ from: 'DoDGate', to: 'Spike', when: { field: 'passed', eq: false } },
+                   { from: 'Spike', to: 'Implement', when: 'always' }],
+      }],
+      ['self-loop', {
+        removeEdges: [{ from: 'DoDGate', to: 'Implement' }],
+        addEdges: [{ from: 'DoDGate', to: 'DoDGate', when: { field: 'passed', eq: false } }],
+      }],
+    ]) {
+      const next = core.applyPatchTo(LOCKED, patch);
+      assert.ok(!core.validateGraph(next, LOCKED, null).some((m) => /failure edge/.test(m)),
+        `${label} is legitimate failure-path reshaping and must be accepted`);
+    }
+  });
+
   test('REJECT: a dead-end node with no outgoing edge', () => {
     // Reachable, not the terminal, nowhere to go. The interpreter would throw on arrival;
     // this catches it before the run starts.
