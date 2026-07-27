@@ -263,8 +263,6 @@ async function main() {
     assert.strictEqual(n.kind, 'work', 'unrelated fields must survive the merge');
   });
 
-  section('validateGraph — malicious patch fixtures');
-
   // The approved baseline: DoDGate and Review are locked and must dominate PR.
   const LOCKED = (() => {
     const g = JSON.parse(JSON.stringify(G));
@@ -278,6 +276,28 @@ async function main() {
     g.invariants.lockedHash = core.lockedFingerprint(g);
     return g;
   })();
+
+  test('applyPatchTo output does not alias the caller\'s patch object', () => {
+    // A shallow merge in updateNodes leaves nested values shared with the patch, so a
+    // caller mutating its own patch afterwards silently mutates an approved graph
+    // without it ever passing back through validateGraph.
+    const nested = { retries: 3, notes: ['a'] };
+    const out = core.applyPatchTo(LOCKED, { updateNodes: [{ id: 'Implement', config: nested }] });
+    const node = out.nodes.find((n) => n.id === 'Implement');
+    assert.notStrictEqual(node.config, nested, 'returned graph aliases the patch object');
+    nested.notes.push('mutated later');
+    assert.deepStrictEqual(node.config.notes, ['a'],
+      'mutating the caller\'s patch changed the already-returned graph');
+  });
+
+  test('applyPatchTo ignores non-array patch fields', () => {
+    const out = core.applyPatchTo(LOCKED, { addNodes: 'not-an-array', removeNodes: 42 });
+    assert.deepStrictEqual(out.nodes.map((n) => n.id).sort(),
+      LOCKED.nodes.map((n) => n.id).sort(),
+      'a non-array patch field must be ignored, not iterated character-by-character');
+  });
+
+  section('validateGraph — malicious patch fixtures');
 
   test('the approved graph validates against itself', () => {
     assert.deepStrictEqual(core.validateGraph(LOCKED, LOCKED, null), []);
@@ -396,6 +416,48 @@ async function main() {
     const v = core.validateGraph(next, LOCKED,
       { node: 'Implement', unsatisfiedGates: ['DoDGate'] });
     assert.ok(v.length > 0, 'positional check must reject the shortcut');
+  });
+
+  test('REJECT: renaming the node the run is standing on', () => {
+    // The positional check keys off cursor.node. Delete-and-re-add it under a new id with
+    // identical shape and the check has nothing to anchor to — so it must FAIL CLOSED.
+    // Structural dominance cannot catch this: renaming a mid-graph node leaves every path
+    // from `start` intact. Needs a graph where the cursor sits PAST the gate on a fail
+    // branch whose downstream edges are unlocked, so the locked fingerprint stays valid.
+    const G3 = {
+      start: 'Setup', terminal: 'PR',
+      nodes: [{ id: 'Setup' }, { id: 'A' }, { id: 'Gate', locked: true },
+              { id: 'B' }, { id: 'C' }, { id: 'PR' }],
+      edges: [
+        { from: 'Setup', to: 'A', when: 'always' },
+        { from: 'A', to: 'Gate', when: 'always' },
+        { from: 'Gate', to: 'PR', when: { field: 'passed', eq: true }, locked: true },
+        { from: 'Gate', to: 'B', when: { field: 'passed', eq: false }, locked: true },
+        { from: 'B', to: 'C', when: 'always' },
+        { from: 'C', to: 'PR', when: 'always' },
+      ],
+      invariants: { mustCross: ['Gate'], visitCaps: { '*': 3 }, nodeBudget: 40 },
+    };
+    G3.invariants.lockedHash = core.lockedFingerprint(G3);
+    const cursor = { node: 'C', unsatisfiedGates: ['Gate'] };
+
+    // Baseline: unchanged graph is already correctly rejected from this position.
+    assert.ok(core.validateGraph(G3, G3, cursor).length > 0,
+      'baseline positional violation should fire before the rename');
+
+    const renamed = core.applyPatchTo(G3, {
+      removeNodes: ['C'], addNodes: [{ id: 'C2' }],
+      addEdges: [{ from: 'B', to: 'C2', when: 'always' },
+                 { from: 'C2', to: 'PR', when: 'always' }],
+    });
+    assert.strictEqual(core.lockedFingerprint(renamed), G3.invariants.lockedHash,
+      'fixture is only meaningful if the lock check stays silent');
+    const v = core.validateGraph(renamed, G3, cursor);
+    assert.ok(v.length > 0,
+      'renaming the cursor node silently skipped positional dominance — the run can now ' +
+      'reach the terminal without recrossing an unsatisfied gate');
+    assert.ok(v.some((m) => /cursor node C was removed/.test(m)),
+      `expected an explicit cursor-removal violation, got ${JSON.stringify(v)}`);
   });
 
   test('ACCEPT: a gate already satisfied need not dominate from the cursor', () => {

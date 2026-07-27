@@ -128,20 +128,30 @@ function applyPatchTo(graph, patch) {
   const g = JSON.parse(JSON.stringify(graph));
   const p = patch || {};
 
-  const rmN = new Set(p.removeNodes || []);
+  // Patch fields arrive as JSON produced by a worker or a browser. A non-array here (a
+  // bare string, say) would be iterated character-by-character by for...of, manufacturing
+  // garbage entries. Anything that isn't an array becomes empty.
+  const arr = (x) => (Array.isArray(x) ? x : []);
+  // Every value taken FROM the patch is deep-cloned on the way in. A shallow merge leaves
+  // the returned graph aliasing the caller's patch object, so a caller that later reuses
+  // or mutates that object would silently mutate an already-approved graph without it
+  // ever passing back through validateGraph.
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+
+  const rmN = new Set(arr(p.removeNodes));
   if (rmN.size) {
     g.nodes = g.nodes.filter((n) => !rmN.has(n.id));
     g.edges = g.edges.filter((e) => !rmN.has(e.from) && !rmN.has(e.to));
   }
-  const rmE = new Set((p.removeEdges || []).map((e) => e.from + '→' + e.to));
+  const rmE = new Set(arr(p.removeEdges).map((e) => e.from + '→' + e.to));
   if (rmE.size) g.edges = g.edges.filter((e) => !rmE.has(e.from + '→' + e.to));
 
-  for (const u of p.updateNodes || []) {
+  for (const u of arr(p.updateNodes)) {
     const i = g.nodes.findIndex((n) => n.id === u.id);
-    if (i >= 0) g.nodes[i] = Object.assign({}, g.nodes[i], u);
+    if (i >= 0) g.nodes[i] = Object.assign({}, g.nodes[i], clone(u));
   }
-  for (const n of p.addNodes || []) g.nodes.push(JSON.parse(JSON.stringify(n)));
-  for (const e of p.addEdges || []) g.edges.push(JSON.parse(JSON.stringify(e)));
+  for (const n of arr(p.addNodes)) g.nodes.push(clone(n));
+  for (const e of arr(p.addEdges)) g.edges.push(clone(e));
   return g;
 }
 
@@ -211,12 +221,23 @@ function validateGraph(next, prev, cursor) {
   // Positional dominance — from the CURSOR, over gates not yet satisfied.
   // Required because a back-edge admits start -> DoDGate -> Implement -> terminal:
   // structurally dominated, yet the remaining path never re-crosses the failed gate.
-  if (cursor && cursor.node && idSet.has(cursor.node)) {
-    for (const gate of cursor.unsatisfiedGates || []) {
-      if (!idSet.has(gate)) continue;
-      if (!dominates(next, gate, next.terminal, cursor.node)) {
-        v.push(gate + ' is unsatisfied but no longer dominates ' + next.terminal
-          + ' from ' + cursor.node);
+  if (cursor && cursor.node) {
+    // FAIL CLOSED. A cursor node missing from `next` is not "nothing to check" — it is the
+    // patch erasing the very identity this check needs. Rename the node the run is standing
+    // on (same shape, same reachability, nothing locked touched) and a permissive guard
+    // skips positional dominance entirely, letting the run's real position reach the
+    // terminal without recrossing the gate that just failed. Structural dominance does NOT
+    // catch it, because renaming a mid-graph node leaves every path from `start` intact.
+    if (!idSet.has(cursor.node)) {
+      v.push('cursor node ' + cursor.node + ' was removed by this patch — a run may not '
+        + 'delete or rename the node it is currently executing');
+    } else {
+      for (const gate of cursor.unsatisfiedGates || []) {
+        if (!idSet.has(gate)) continue;
+        if (!dominates(next, gate, next.terminal, cursor.node)) {
+          v.push(gate + ' is unsatisfied but no longer dominates ' + next.terminal
+            + ' from ' + cursor.node);
+        }
       }
     }
   }
