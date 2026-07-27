@@ -1,3 +1,8 @@
+# Secrets — never tracked. Harbor reads this via --env-file.
+.env
+.env.*
+!.env.example
+
 # OS / editor junk
 .DS_Store
 *.swp
