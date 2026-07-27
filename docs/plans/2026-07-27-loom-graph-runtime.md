@@ -1046,6 +1046,7 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     let i = 0;
     const n = src.length;
     const stack = [{ mode: 'code', depth: 0, interp: false }];
+    let prev = '';   // last significant char emitted in code mode — decides regex vs divide
 
     while (i < n) {
       const top = stack[stack.length - 1];
@@ -1053,10 +1054,10 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
 
       if (top.mode === 'tmpl') {
         if (c === '\\') { i += 2; continue; }                 // escaped char in template text
-        if (c === '`') { stack.pop(); out += '""'; i++; continue; }
+        if (c === '`') { stack.pop(); out += '""'; prev = '"'; i++; continue; }
         if (c === '$' && c2 === '{') {                         // live interpolation -> code
           stack.push({ mode: 'code', depth: 0, interp: true });
-          out += ' '; i += 2; continue;
+          out += ' '; prev = ''; i += 2; continue;
         }
         i++; continue;                                         // literal text -> dropped
       }
@@ -1067,20 +1068,45 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
         while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
         i += 2; continue;
       }
+      // Regex literal. Without this, a regex containing `}`, a backtick, or a quote is
+      // read as code and derails the mode stack — `/}/` inside an interpolation popped it
+      // early, and a backtick inside a regex opened a phantom template — hiding every
+      // forbidden primitive after it. All three were real FALSE NEGATIVES.
+      // A `/` opens a regex only in expression position; otherwise it is division.
+      // The body is DATA (it cannot execute), so it is blanked — the point is only that
+      // its contents must not be mistaken for a string, template, or closing brace.
+      if (c === '/' && (prev === '' || '=(,:[!&|?{};+-*%~^<>'.includes(prev))) {
+        i++;
+        let inClass = false;
+        while (i < n) {
+          const d = src[i];
+          if (d === '\\') { i += 2; continue; }
+          if (d === '[') inClass = true;
+          else if (d === ']') inClass = false;
+          else if (d === '/' && !inClass) { i++; break; }
+          else if (d === '\n') break;        // unterminated — bail, don't swallow the file
+          i++;
+        }
+        while (i < n && /[gimsuyd]/.test(src[i])) i++;         // flags
+        out += '""'; prev = '"';
+        continue;
+      }
       if (c === "'" || c === '"') {
         const q = c; i++;
         while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; }
-        i++; out += '""'; continue;
+        i++; out += '""'; prev = '"'; continue;
       }
       if (c === '`') { stack.push({ mode: 'tmpl' }); i++; continue; }
       if (top.interp) {
-        if (c === '{') { top.depth++; out += c; i++; continue; }
+        if (c === '{') { top.depth++; out += c; prev = c; i++; continue; }
         if (c === '}') {
-          if (top.depth === 0) { stack.pop(); out += ' '; i++; continue; }
-          top.depth--; out += c; i++; continue;
+          if (top.depth === 0) { stack.pop(); out += ' '; prev = ''; i++; continue; }
+          top.depth--; out += c; prev = c; i++; continue;
         }
       }
-      out += c; i++;
+      out += c;
+      if (!/\s/.test(c)) prev = c;
+      i++;
     }
     return out;
   };
@@ -1140,6 +1166,20 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
       '/* mentions `export { ... }; without closing */',
       'const bad = `real: ${Math.random()}`',
     ].join('\n')), 'stray backtick in a block comment');
+
+    // Regex literals — three false negatives found by attacking the tokenizer directly.
+    assert.ok(caught('const x = `${ s.replace(/}/, "") + Date.now() }`'),
+      'a regex containing } must not pop the interpolation early');
+    assert.ok(caught('const r = /`/; const t = Date.now()'),
+      'a backtick inside a regex must not open a phantom template literal');
+    assert.ok(caught('const r = /"/; const t = Date.now()'),
+      'a quote inside a regex must not open a phantom string');
+    assert.ok(caught('const r = /[/]/; const t = Date.now()'),
+      'a / inside a regex char class does not end the regex');
+
+    // ...and division must NOT be mistaken for a regex, or everything after it vanishes.
+    assert.ok(caught('const a = b / c; const t = Date.now()'), 'division is not a regex');
+    assert.ok(caught('const a = (x) / 2; const r = Math.random()'), 'division after a paren');
   });
 
   test('the tokenizer still ignores prose and data', () => {
@@ -1155,6 +1195,8 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
       'a placeholder NAMED crypto must not false-positive');
     assert.ok(clean('const s = "use fs. and Date.now()"'), 'forbidden words in a string');
     assert.ok(clean('const s = "${Date.now()}"'), 'interpolation-looking text in a plain string');
+    assert.ok(clean('const r = /Date\\.now\\(/; const x = 1'),
+      'a forbidden pattern inside a regex body is data, not a call');
   });
 
   test('prose inside a template literal still does not false-positive', () => {
