@@ -2537,6 +2537,24 @@ The server spawned in Task 6's section is still needed here, so **first move the
     assert.ok(/readOnly|readonly/.test(editorJs));
   });
 
+  test('the read-only transition re-renders, not just the version change', () => {
+    // readOnly gates the Save button at click time, so saves are always refused during a
+    // run. But draggable/deletable are computed in toFlow, which only re-runs when `tick`
+    // changes — so rerender() must fire on the running/readOnly TRANSITION. Gating it on a
+    // graph-version diff alone left the canvas looking editable during a run that hadn't
+    // patched the graph yet.
+    assert.ok(/if \(running !== readOnly\) \{ readOnly = running; rerender\(\); \}/.test(editorJs),
+      'the readOnly transition must call rerender(), or the canvas keeps showing editable nodes');
+  });
+
+  test('fromFlow drops edges whose endpoints were deleted', () => {
+    // Do not depend on React Flow cascading edge removal when a node is deleted. It
+    // documents that it does, but nothing here can execute the UI to confirm it, and a
+    // dangling edge would surface to the user as a confusing "edge from unknown node" 422.
+    assert.ok(/\.filter\(\(fe\) => keep\.has\(fe\.source\) && keep\.has\(fe\.target\)\)/.test(editorJs),
+      'fromFlow must filter edges against the surviving node set itself');
+  });
+
   test('every dynamic value in renderPanel is escaped before innerHTML', () => {
     // Node ids and kinds come from a planner worker's graphPatch — LLM-generated text.
     // Unescaped, an id containing markup executes inside the page that IS the human
@@ -2681,10 +2699,18 @@ function fromFlow(flowNodes, flowEdges) {
   }
   const keep = new Set(flowNodes.map((n) => n.id));
   next.nodes = next.nodes.filter((n) => keep.has(n.id));
-  next.edges = flowEdges.map((fe) => {
-    const prior = graph.edges.find((e) => e.from === fe.source && e.to === fe.target);
-    return prior || { from: fe.source, to: fe.target, when: 'always' };
-  });
+  next.edges = flowEdges
+    // Drop edges whose endpoints no longer exist, rather than trusting React Flow to have
+    // cascaded the removal when a node was deleted. It documents that it does — but nothing
+    // in this environment can execute the UI to confirm it fires in this exact setup, and
+    // relying on unverifiable library behaviour for a correctness property is the wrong
+    // trade when the guard is one filter. Without it a dangling edge reaches validateGraph
+    // and the user gets a confusing "edge from unknown node" 422 instead of a clean save.
+    .filter((fe) => keep.has(fe.source) && keep.has(fe.target))
+    .map((fe) => {
+      const prior = graph.edges.find((e) => e.from === fe.source && e.to === fe.target);
+      return prior || { from: fe.source, to: fe.target, when: 'always' };
+    });
   return next;
 }
 
@@ -2748,7 +2774,14 @@ function startPolling(rerender) {
   setInterval(async () => {
     const st = await (await fetch('/state')).json();
     const running = st.status === 'running';
-    if (running !== readOnly) { readOnly = running; }
+    // Re-render on the TRANSITION, not only when the graph version moves. `readOnly`
+    // gates the Save button at click time, so saves are refused immediately either way —
+    // but the per-node draggable/deletable props are computed in toFlow, which only re-runs
+    // when `tick` changes. Gating rerender() on a version diff alone meant a run that
+    // starts without an immediate graph patch left the canvas looking editable: nodes still
+    // dragged and deleted locally while the code's own comment claims "once it starts the
+    // editor is a viewer". Nothing persisted, but the UI lied about being locked.
+    if (running !== readOnly) { readOnly = running; rerender(); }
     if (running) {
       setStatus(`running — at ${st.cursor} · visits ${JSON.stringify(st.visits || {})}`);
       const live = await (await fetch('/graph')).json();
