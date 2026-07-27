@@ -18,7 +18,15 @@ const rows = [];
 for (const f of fs.readdirSync(dir)) {
   if (!f.endsWith('.json')) continue;
   let st;
-  try { st = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
+  try { st = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); }
+  catch {
+    // Do NOT skip. A run whose state will not parse still EXISTS, and silently omitting it
+    // tells the operator "no loom runs" when something is in fact broken — the listing lies by
+    // omission at exactly the moment it is being consulted.
+    rows.push({ name: f.replace(/\.json$/, ''), status: 'UNREADABLE',
+      cursor: '?', visits: '?', port: '-' });
+    continue;
+  }
   if (!all && st.status === 'complete') continue;
   rows.push({
     name: st.workflow || f.replace(/\.json$/, ''),

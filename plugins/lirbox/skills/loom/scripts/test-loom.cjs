@@ -1492,6 +1492,34 @@ async function main() {
       `a non-running run with a port must be flagged, got: ${out}`);
   });
 
+  test('a corrupt state file reports readably, not as a stack trace', () => {
+    // An operator hitting this is mid-incident. Compare against the missing-run path,
+    // which already says "no such run: <path>" — a raw JSON parser dump is a regression
+    // in usability from a sibling error path in the same script.
+    const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-bad-'));
+    fs.mkdirSync(path.join(bad, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(bad, '.loom', 'state', 'broken.json'), '{not json');
+    let out = '';
+    try { execFileSync('node', [REPORT, 'broken'], { cwd: bad, stdio: 'pipe' }); }
+    catch (e) { out = (e.stderr || '').toString(); }
+    assert.ok(/not readable JSON/.test(out), `expected a readable message, got: ${out}`);
+    assert.ok(/broken/.test(out), 'the message must name the run');
+    assert.ok(!/^\s+at /m.test(out), 'must not dump a stack trace at an operator');
+  });
+
+  test('list-runs surfaces an unreadable run instead of hiding it', () => {
+    // Silently skipping an unparseable state file makes a BROKEN run invisible — the
+    // listing reports "no loom runs" while something is in fact damaged. Lying by
+    // omission is worse here than showing a row with an honest "UNREADABLE" status.
+    const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-bad2-'));
+    fs.mkdirSync(path.join(bad, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(bad, '.loom', 'state', 'broken.json'), '{not json');
+    const out = execFileSync('node', [LIST], { cwd: bad }).toString();
+    assert.ok(!/no loom runs/.test(out), 'a broken run must not read as "no runs"');
+    assert.ok(/broken/.test(out) && /UNREADABLE/.test(out),
+      `expected the run listed as UNREADABLE, got: ${out}`);
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }

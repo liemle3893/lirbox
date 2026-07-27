@@ -15,7 +15,16 @@ if (!name) { console.error('usage: loom-report.cjs <name>'); process.exit(1); }
 
 const p = path.join(process.cwd(), '.loom', 'state', `${name}.json`);
 if (!fs.existsSync(p)) { console.error(`no such run: ${p}`); process.exit(1); }
-const st = JSON.parse(fs.readFileSync(p, 'utf8'));
+let st;
+try { st = JSON.parse(fs.readFileSync(p, 'utf8')); }
+catch (e) {
+  // An operator hitting this is mid-incident. A raw JSON parser stack trace tells them
+  // nothing actionable; name the file and what is wrong with it.
+  console.error(`state file for run '${name}' is not readable JSON: ${p}`);
+  console.error(`  ${e.message}`);
+  console.error('  the run may still be recoverable — inspect the file before deleting it');
+  process.exit(1);
+}
 
 const out = [];
 out.push(`loom run: ${st.workflow}`);
