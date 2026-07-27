@@ -153,6 +153,11 @@ timeout_sec = 300
 
 // --- main -------------------------------------------------------------------
 mkdirSync(OUT, { recursive: true });
+// A full build is AUTHORITATIVE: wipe tasks/ so a deleted declaration takes its built copy with
+// it. Per-task rmSync alone cannot do this — the orphan simply never gets rebuilt and lingers,
+// which is invisible to the drift gate (nothing changes on rebuild). A --skill build is scoped,
+// so it must not touch other skills' tasks.
+if (!ONLY) rmSync(join(OUT, 'tasks'), { recursive: true, force: true });
 console.log(`skills catalog: ${buildCatalog()} skill(s) pruned into ${OUT}/skills`);
 
 const skills = (ONLY ? [ONLY] : readdirSync(SKILLS))

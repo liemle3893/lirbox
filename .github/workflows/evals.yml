@@ -36,6 +36,22 @@ jobs:
       - name: Regression gate
         run: node scripts/evals-all.mjs --fast
 
+      # .harbor/tasks is tracked for PR-diff visibility but fully DERIVED from each skill's
+      # harbor/tasks/ declaration. Edit a declaration without rebuilding and the tracked task
+      # silently grades against the old version. A gate for exactly this existed once and was
+      # dropped; this is it, restored at repo level rather than under any one skill's evals.
+      - name: Harbor tasks in sync
+        run: |
+          node scripts/harbor-build.mjs >/dev/null
+          drift=$(git status --porcelain .harbor/tasks)
+          if [ -n "$drift" ]; then
+            echo "GATE RED — .harbor/tasks is stale. Run: node scripts/harbor-build.mjs"
+            echo "$drift"
+            git --no-pager diff -- .harbor/tasks
+            exit 1
+          fi
+          echo "GATE GREEN — .harbor/tasks matches its declarations"
+
   # Generator regression nets (scripts/test-*.cjs). Slower — arena's clones fixture bundles and
   # runs their npm suites — so it is a separate job and does not hold up the fast gate.
   nets:

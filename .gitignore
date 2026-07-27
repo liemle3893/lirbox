@@ -20,11 +20,20 @@ docs/superpowers/
 .improve/
 .arena/
 
-# Harbor: TASKS ARE TRACKED (.harbor/tasks) — they are first-class content, hand-tunable
-# (resource caps, network policy, artifacts) and reviewed in PRs. Only the injected skill
-# CATALOG is generated: it is a verbatim copy of plugins/lirbox/skills minus eval material,
-# so tracking it would duplicate 1.4M of already-tracked files and drift on every skill edit.
+# Harbor: TASKS ARE TRACKED (.harbor/tasks) — not because they are hand-edited (they are NOT;
+# hand-tuning lives upstream in skills/<skill>/harbor/tasks/<id>/task.toml and is merged by
+# scripts/harbor-build.mjs) but so a reviewer sees the exact task the agent is graded against in
+# the PR diff. Being derived AND tracked, they can go stale: the `Harbor tasks in sync` step in
+# .github/workflows/evals.yml rebuilds and fails on any drift. Never edit .harbor/tasks by hand.
+#
+# The injected skill CATALOG is generated and NOT tracked: it is a verbatim copy of
+# plugins/lirbox/skills minus eval material, so tracking it would duplicate 1.4M of
+# already-tracked files and drift on every skill edit.
 .harbor/skills/
+
+# Harbor run output (`harbor run` writes jobs/<job>/<trial>/ with agent logs, verifier
+# results and artifacts). Runtime, per-run, often large — never committed.
+jobs/
 
 # Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
 implementation-notes/
