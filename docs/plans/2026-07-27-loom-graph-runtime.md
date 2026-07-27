@@ -3557,27 +3557,50 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
 const core = await import(join(SCRIPTS, 'graph-core.mjs'));
 
-const conductorBody = (src) => src
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/^[ \t]*\/\/.*$/gm, '')
-  .replace(/`(?:[^`\\]|\\.)*`/g, '""')
-  .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-  .replace(/"(?:[^"\\]|\\.)*"/g, '""');
-
-const liveInterpolations = (src) => {
-  let count = 0, i = 0;
-  while (i < src.length) {
-    if (src[i] === '`') {
-      i++;
-      while (i < src.length && src[i] !== '`') {
-        if (src[i] === '\\') { i += 2; continue; }
-        if (src[i] === '$' && src[i + 1] === '{') count++;
-        i++;
+// ONE tokenizer — must stay identical to the one in scripts/test-loom.cjs.
+// Three earlier approaches failed: blank-whole hid interpolations; regex-extract
+// could not tell escaped from live and died on nested braces; whole-blanking plus a
+// separate comment-blind character walk let TWO parsers disagree, so one unpaired
+// backtick in a comment hid a real Date.now() from both.
+const conductorBody = (src) => {
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  const stack = [{ mode: 'code', depth: 0, interp: false }];
+  while (i < n) {
+    const top = stack[stack.length - 1];
+    const c = src[i], c2 = src[i + 1];
+    if (top.mode === 'tmpl') {
+      if (c === '\\') { i += 2; continue; }
+      if (c === '`') { stack.pop(); out += '""'; i++; continue; }
+      if (c === '$' && c2 === '{') {
+        stack.push({ mode: 'code', depth: 0, interp: true });
+        out += ' '; i += 2; continue;
+      }
+      i++; continue;
+    }
+    if (c === '/' && c2 === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+    if (c === '/' && c2 === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2; continue;
+    }
+    if (c === "'" || c === '"') {
+      const q = c; i++;
+      while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; }
+      i++; out += '""'; continue;
+    }
+    if (c === '`') { stack.push({ mode: 'tmpl' }); i++; continue; }
+    if (top.interp) {
+      if (c === '{') { top.depth++; out += c; i++; continue; }
+      if (c === '}') {
+        if (top.depth === 0) { stack.pop(); out += ' '; i++; continue; }
+        top.depth--; out += c; i++; continue;
       }
     }
-    i++;
+    out += c; i++;
   }
-  return count;
+  return out;
 };
 
 const FORBIDDEN = [
@@ -3610,8 +3633,9 @@ const src = readFileSync(out, 'utf8');
 
 ok(!FORBIDDEN.some(([, re]) => re.test(conductorBody(src))),
   'no false positive on prose in comments and node prompts');
-ok(liveInterpolations(src) === 0,
-  'emitted conductor contains no LIVE template-literal interpolation');
+ok(FORBIDDEN.every(([, re]) => !re.test(conductorBody(
+  '// see the `unclosed markdown code span\nconst bad = `real: ${1}`'))),
+  'a stray backtick in a comment does not shift template parity (control: no forbidden code)');
 
 for (const [label, code] of [
   ['Date.now', 'const t = Date.now()'], ['Math.random', 'const r = Math.random()'],
@@ -3622,8 +3646,15 @@ for (const [label, code] of [
   ok(FORBIDDEN.some(([, re]) => re.test(tampered)), `scan still catches injected ${label}`);
 }
 
-ok(liveInterpolations('const x = `${f({a:1})}`') === 1, 'detector sees nested-brace interpolation');
-ok(liveInterpolations('const p = `a \\${escaped} b`') === 0, 'detector ignores escaped placeholders');
+// The three shapes that defeated earlier approaches must all be CAUGHT.
+ok(FORBIDDEN.some(([, re]) => re.test(conductorBody('const x = `${f({a: Date.now()})}`'))),
+  'nested-brace interpolation is scanned');
+ok(FORBIDDEN.some(([, re]) => re.test(conductorBody(
+  '// stray ` tick\nconst bad = `real: ${Date.now()}`'))),
+  'stray backtick in a comment cannot hide a live interpolation');
+// And an escaped placeholder named crypto must NOT false-positive.
+ok(!FORBIDDEN.some(([, re]) => re.test(conductorBody('const p = `\\${crypto}`'))),
+  'escaped placeholder named crypto stays clean');
 
 if (bad) { console.error(`\npurity-scan-has-teeth: ${bad} failed`); process.exit(1); }
 console.log('purity-scan-has-teeth: ok');
