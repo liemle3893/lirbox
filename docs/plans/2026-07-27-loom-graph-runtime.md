@@ -4663,6 +4663,20 @@ try {
     post({ baseVersion: g.version, graph: mk('RaceB') })]);
   ok([a, b].sort().join(',') === '200,409',
     `exactly one concurrent save wins and the loser is told (got ${a},${b})`);
+
+  // THE SERVER'S RE-VALIDATION IS THE ENFORCEMENT FOR THE BROWSER PATH, AND NOTHING
+  // ELSE FREEZES IT. graph-server.mjs says so in a comment ("the editor's lock badges
+  // are a courtesy; this is the enforcement") — a comment is not a fence. Measured:
+  // deleting validateGraph + the 422 from the server leaves ALL NINE checks green,
+  // and a POST of `Implement -> <terminal>` on `always` is then accepted 200 and
+  // written to disk, which is the graph scaffold-loom.cjs generates the run from.
+  const bypass = mk('Bypass');
+  bypass.edges.push({ from: 'Implement', to: bypass.terminal, when: 'always' });
+  ok(await post({ baseVersion: 1, graph: bypass }) === 422,
+    'the server REJECTS a gate-bypassing graph (422), not just a stale one (409)');
+  const onDisk = JSON.parse(readFileSync(join(root, '.loom', 'e.graph.json'), 'utf8'));
+  ok(!onDisk.edges.some((e) => e.from === 'Implement' && e.to === onDisk.terminal),
+    'the rejected bypass edge was NOT written to disk');
 } finally { srv.kill(); }
 
 if (bad) { console.error(`\nserver-no-lost-update: ${bad} failed`); process.exit(1); }
@@ -4689,8 +4703,19 @@ const html = readFileSync(join(EDITOR, 'index.html'), 'utf8');
 let bad = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
 
-const panel = js.slice(js.indexOf('function renderPanel'));
-const body = panel.slice(0, panel.indexOf('`;') + 2);
+// ANCHORS FIRST. Every assertion below is computed from indexOf/slice, and an
+// extraction that MISSES yields an empty result that reads as a clean one.
+// Rename renderPanel and: indexOf returns -1, slice(-1) gives the last character,
+// the second indexOf returns -1, `body` becomes ONE CHARACTER, `raw` is empty, and
+// the XSS fence on the human approval gate reports PASS while scanning nothing.
+// Measured: an ordinary renderPanel -> drawPanel refactor left this check at exit 0.
+const i = js.indexOf('function renderPanel');
+ok(i >= 0, 'found renderPanel in editor.js (anchor for the panel scan)');
+const panel = js.slice(i);
+const j = panel.indexOf('`;');
+ok(j >= 0, 'found the panel template literal (anchor for the interpolation scan)');
+const body = panel.slice(0, j + 2);
+ok(body.length > 200, `panel body looks substantive (got ${body.length} chars)`);
 const raw = [...body.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1].trim())
   .filter((e) => !/^locked \?/.test(e)).filter((e) => !/^esc\(/.test(e));
 ok(raw.length === 0, `no unescaped interpolation reaches innerHTML (found ${JSON.stringify(raw)})`);
