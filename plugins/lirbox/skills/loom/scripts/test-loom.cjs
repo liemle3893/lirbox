@@ -351,6 +351,40 @@ async function main() {
     assert.deepStrictEqual(core.validateGraph(next, LOCKED, null), []);
   });
 
+  section('validateGraph — invariants are the approved contract');
+
+  test('REJECT: emptying mustCross to bypass every gate', () => {
+    // The full-bypass attack. Locked nodes and edges are untouched, so the fingerprint
+    // still matches; the added edge is unlocked; and with mustCross emptied there would
+    // be nothing left to check. Reading invariants from `prev` is what stops this.
+    const attack = JSON.parse(JSON.stringify(LOCKED));
+    attack.invariants.mustCross = [];
+    attack.edges.push({ from: 'Implement', to: 'PR', when: 'always' });
+    const v = core.validateGraph(attack, LOCKED, null);
+    assert.ok(v.length > 0, 'a graph reaching the terminal without crossing any gate was ACCEPTED');
+    assert.ok(v.some((m) => /dominates/.test(m)),
+      `expected a dominance violation from prev's mustCross, got ${JSON.stringify(v)}`);
+    assert.ok(v.some((m) => /invariants were modified/.test(m)),
+      'the invariant substitution itself must also be reported');
+  });
+
+  test('REJECT: raising nodeBudget in the submitted graph', () => {
+    const attack = JSON.parse(JSON.stringify(LOCKED));
+    attack.invariants.nodeBudget = 9999;
+    for (let i = 0; i < 12; i++) {
+      attack.nodes.push({ id: `Pad${i}`, kind: 'work' });
+      attack.edges.push({ from: 'Implement', to: `Pad${i}`, when: 'always' });
+    }
+    const v = core.validateGraph(attack, LOCKED, null);
+    assert.ok(v.some((m) => /budget/.test(m)),
+      `prev's nodeBudget (10) must govern, not the submitted 9999 — got ${JSON.stringify(v)}`);
+  });
+
+  test('pre-approval, the graph may still declare its own invariants', () => {
+    // With no prior graph there is nothing to be frozen against, so seeding works.
+    assert.deepStrictEqual(core.validateGraph(LOCKED, null, null), []);
+  });
+
   section('validateGraph — positional dominance');
 
   test('REJECT: cursor past an unsatisfied gate with no way back to it', () => {
