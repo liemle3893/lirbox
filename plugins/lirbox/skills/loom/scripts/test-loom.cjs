@@ -337,17 +337,29 @@ async function main() {
     assert.ok(v.some(m => /unreachable|locked/.test(m)));
   });
 
-  test('REJECT: a gate failure edge that leads to the terminal', () => {
-    // Dominance proves the gate is VISITED, not that it PASSED. Without this rule a
-    // failing gate could route straight to the end — a bypass that leaves the gate
-    // on every path, so the dominance check stays silent.
-    const next = core.applyPatchTo(LOCKED, {
-      removeEdges: [{ from: 'DoDGate', to: 'Implement' }],
-      addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: false } }],
-    });
-    const v = core.validateGraph(next, LOCKED, null);
-    assert.ok(v.some((m) => /failure edge/.test(m)),
-      `a failing gate must not reach the terminal, got ${JSON.stringify(v)}`);
+  test('REJECT: any non-passing gate edge that leads onward', () => {
+    // Dominance proves the gate is VISITED, not that it PASSED. Each of these leaves the
+    // gate on every path — so the dominance check stays silent — while letting a run that
+    // did not pass reach the terminal.
+    for (const [label, patch] of [
+      ['failure edge rerouted onward', {
+        removeEdges: [{ from: 'DoDGate', to: 'Implement' }],
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: false } }],
+      }],
+      // An appended `always` edge is the same bypass with a different predicate: pass and
+      // fail still route correctly, but every OFF-SHAPE result falls through to it — which
+      // also defeats Task 4's hard-fail, since pickEdge now finds a match.
+      ['appended always-edge to the terminal', {
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: 'always' }],
+      }],
+      ['appended edge with an unrelated predicate', {
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'n', gt: 0 } }],
+      }],
+    ]) {
+      const v = core.validateGraph(core.applyPatchTo(LOCKED, patch), LOCKED, null);
+      assert.ok(v.some((m) => /non-passing edge/.test(m)),
+        `${label} is a bypass and must be rejected, got ${JSON.stringify(v)}`);
+    }
   });
 
   test('ACCEPT: a gate failure edge that loops back through the gate', () => {
@@ -366,7 +378,7 @@ async function main() {
       }],
     ]) {
       const next = core.applyPatchTo(LOCKED, patch);
-      assert.ok(!core.validateGraph(next, LOCKED, null).some((m) => /failure edge/.test(m)),
+      assert.ok(!core.validateGraph(next, LOCKED, null).some((m) => /non-passing edge/.test(m)),
         `${label} is legitimate failure-path reshaping and must be accepted`);
     }
   });
