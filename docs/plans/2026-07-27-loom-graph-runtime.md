@@ -3881,8 +3881,10 @@ git commit -m "feat(loom): skill entry point, references, and marketplace wiring
 The repo requires Tier 2 to ship a skill: `evals/floor/`, `evals/checks/`, `evals/checks-manifest.json`, green under `node scripts/evals-all.mjs --fast`. The **floor** is characterization ("this must not break"); the **checks** are frozen acceptance fences for past fixes. This task freezes the five Critical defects found while building loom, so none can silently return.
 
 **Files:**
+- Create: `plugins/lirbox/skills/loom/evals/run.mjs`  ← **the floor ENTRY POINT; without it nothing runs the floor**
 - Create: `plugins/lirbox/skills/loom/evals/floor/00-structure.test.mjs`
 - Create: `plugins/lirbox/skills/loom/evals/floor/01-net.test.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/floor/02-checks-manifest.test.mjs`
 - Create: `plugins/lirbox/skills/loom/evals/checks/gate-dominance-not-bypassable.check.mjs`
 - Create: `plugins/lirbox/skills/loom/evals/checks/cursor-rename-fails-closed.check.mjs`
 - Create: `plugins/lirbox/skills/loom/evals/checks/interpreter-no-terminal-fallback.check.mjs`
@@ -3914,7 +3916,39 @@ ls scripts/evals-all.mjs scripts/harbor-port.mjs 2>&1   # confirm the tooling ar
 
 If the rebase conflicts, resolve in favour of `main` for `CLAUDE.md` and repo-level `scripts/`, and in favour of this branch for everything under `plugins/lirbox/skills/loom/`. Re-run the net before continuing. If `harbor-port.mjs` is now present, **Task 12 is unblocked** — it was deferred only because that tooling did not exist on this branch.
 
-- [ ] **Step 1: Write the floor tests**
+**Measured state as of dispatch (verify again — do not trust this paragraph):** `origin/main` was already an ancestor of this branch, so the rebase was a **no-op**; `scripts/evals-all.mjs` was present; `scripts/harbor-port.mjs` was **absent**; and the Tier-2 policy text was **not yet** in this worktree's `CLAUDE.md`. None of that blocks this task — the gate runner exists, which is all the evals need. So:
+
+- A no-op rebase is an expected outcome, not a failure. Say which you got.
+- If `grep "Tier 2" CLAUDE.md` finds nothing, **proceed anyway** and note it. The policy text is documentation of a requirement this task already implements; its absence does not change a single file you write.
+- If `harbor-port.mjs` is still absent, Task 12 stays deferred. Do not attempt it and do not create the file.
+
+Report what you actually observed for each of the four, rather than reporting the step as done.
+
+- [ ] **Step 1: Write the floor runner FIRST**
+
+**Read this before writing anything.** `scripts/evals-all.mjs:86` resolves a skill's floor as
+`evals/run.mjs` — that exact path, and nothing else. It never reads `evals/floor/` directly. And
+`evals-all.mjs:101` runs the floor only `if (hasFloor)`; there is **no failure branch for a
+missing floor**. So a skill that ships `evals/floor/*.test.mjs` with no `evals/run.mjs` gets its
+floor silently skipped and the gate still prints `GATE GREEN`.
+
+That is the worst possible failure for this task: the fence exists, reads correctly, passes
+review, and never runs. It also makes loom un-improvable — `whetstone`'s floor command is
+`node plugins/lirbox/skills/<skill>/evals/run.mjs`, so without it there is nothing to revert
+against. Every other skill in this repo ships both (`conductor`, `prospector`, `whetstone`,
+`arena` — check any of them).
+
+Create `plugins/lirbox/skills/loom/evals/run.mjs`, modeled on
+`plugins/lirbox/skills/conductor/evals/run.mjs` (read it — do not invent a different shape):
+it reads `evals/floor/`, runs every `*.test.mjs` in sorted order via `execFileSync` with
+`stdio: 'inherit'`, exits 1 if any fail, and — importantly — **exits 1 if the floor directory is
+empty or unreadable**, because a floor with no tests is not a floor. It must NOT run anything
+under `evals/checks/`; those are acceptance fences run one at a time by the gate and the
+whetstone loop, and running them here would make the floor red on baseline by design.
+
+Header it `// Locked (evals/**): improvement loops may NEVER edit this file.`
+
+- [ ] **Step 2: Write the floor tests**
 
 `evals/floor/00-structure.test.mjs`:
 
@@ -3978,16 +4012,77 @@ try {
 }
 ```
 
-- [ ] **Step 2: Run the floor and confirm it passes**
+`evals/floor/02-checks-manifest.test.mjs`:
 
-```bash
-node plugins/lirbox/skills/loom/evals/floor/00-structure.test.mjs
-node plugins/lirbox/skills/loom/evals/floor/01-net.test.mjs
+```js
+// FLOOR (characterization) — every check on disk is listed in checks-manifest.json.
+// scripts/evals-all.mjs enforces this repo-wide, but the floor runs STANDALONE under the
+// whetstone loop, where evals-all.mjs is not in the loop. Without this test a new check
+// could be added and left unguarded for the whole of an improvement run.
+// PASSES on baseline.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, basename, resolve } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const EVALS = resolve(HERE, '..');
+const checksDir = join(EVALS, 'checks');
+const manifestPath = join(EVALS, 'checks-manifest.json');
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS floor: ${m}`); } else { console.error(`FAIL floor: ${m}`); bad++; } };
+
+ok(existsSync(manifestPath), 'evals/checks-manifest.json exists');
+if (!existsSync(manifestPath)) { console.error('\n02-checks-manifest: 1 assertion(s) failed'); process.exit(1); }
+
+const onDisk = existsSync(checksDir)
+  ? readdirSync(checksDir).filter((f) => f.endsWith('.check.mjs')).map((f) => basename(f, '.check.mjs')).sort()
+  : [];
+ok(onDisk.length > 0, 'at least one frozen check exists');
+
+let manifest;
+try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); }
+catch (e) { console.error(`FAIL floor: checks-manifest.json is not valid JSON: ${e.message}`); process.exit(1); }
+
+const listed = Object.keys((manifest && manifest.checks) || {}).sort();
+const unlisted = onDisk.filter((c) => !listed.includes(c));
+const phantom = listed.filter((c) => !onDisk.includes(c));
+ok(unlisted.length === 0, `every check is listed (unguarded: ${unlisted.join(', ') || 'none'})`);
+ok(phantom.length === 0, `no manifest entry lacks a file (phantom: ${phantom.join(', ') || 'none'})`);
+
+for (const [name, spec] of Object.entries((manifest && manifest.checks) || {})) {
+  ok(spec && ['green', 'red'].includes(spec.expect), `${name}: expect is "green" or "red"`);
+}
+
+if (bad) { console.error(`\n02-checks-manifest: ${bad} assertion(s) failed`); process.exit(1); }
+console.log('02-checks-manifest: ok');
 ```
 
-Expected: both print `ok`, exit 0.
+- [ ] **Step 3: Run the floor THROUGH THE RUNNER**
 
-- [ ] **Step 3: Write the five frozen checks**
+Run the entry point, not the individual files — running the tests directly proves they pass but
+proves nothing about whether anything will ever invoke them, which is the exact defect this step
+exists to catch:
+
+```bash
+node plugins/lirbox/skills/loom/evals/run.mjs
+```
+
+Expected: `Floor GREEN: all 3 characterization test(s) passed.`, exit 0. **If it reports fewer
+than 3, the runner is not discovering every floor file — fix that before continuing.**
+
+Then confirm the repo gate actually sees loom's floor, which is the thing that was silently
+missing:
+
+```bash
+node scripts/evals-all.mjs --list
+```
+
+Expected: a `── loom` row reading `floor: run.mjs`. If it says `floor: (none)`, `evals/run.mjs`
+is misnamed or misplaced and loom's floor is not gated — stop and fix it.
+
+- [ ] **Step 4: Write the five frozen checks**
 
 Each check reproduces one Critical found during this build and asserts it stays fixed. Each is standalone: exit 0 = green, exit 1 = the defect is back.
 
@@ -4337,7 +4432,7 @@ if (bad) { console.error(`\ndod-check-hash-lock: ${bad} failed`); process.exit(1
 console.log('dod-check-hash-lock: ok');
 ```
 
-- [ ] **Step 3b: Write the four later-Critical checks**
+- [ ] **Step 4b: Write the four later-Critical checks**
 
 The five checks above freeze the Criticals found in Tasks 1–5. Four more were found afterwards, in Tasks 5–8, and they need fences too — a suite that freezes half a run's findings implies the other half is covered.
 
@@ -4543,7 +4638,7 @@ if (bad) { console.error(`\neditor-escapes-approval-gate: ${bad} failed`); proce
 console.log('editor-escapes-approval-gate: ok');
 ```
 
-- [ ] **Step 4: Write the manifest**
+- [ ] **Step 5: Write the manifest**
 
 `evals/checks-manifest.json` — a check missing from this file fails the gate, because an unlisted check is an unguarded check:
 
@@ -4573,7 +4668,7 @@ console.log('editor-escapes-approval-gate: ok');
 }
 ```
 
-- [ ] **Step 5: Run every check individually, then the repo gate**
+- [ ] **Step 6: Run every check individually, then the repo gate**
 
 ```bash
 for f in plugins/lirbox/skills/loom/evals/checks/*.check.mjs; do
@@ -4584,7 +4679,7 @@ node scripts/evals-all.mjs --fast
 
 Expected: all five print `ok` and exit 0; the repo gate is green.
 
-- [ ] **Step 6: Prove each check can actually fail**
+- [ ] **Step 7: Prove each check can actually fail**
 
 A check that cannot go red is not a fence. For each, temporarily break the thing it guards and confirm the check exits 1, then restore. Do this in a scratch copy — **never** commit a broken source file:
 
@@ -4600,7 +4695,7 @@ node plugins/lirbox/skills/loom/evals/checks/gate-dominance-not-bypassable.check
 
 Repeat the same pattern for the other four (restore the silent terminal fallback in `scaffold-loom.cjs`; restore the permissive `idSet.has(cursor.node)` guard; blank template literals in a way that hides an injected primitive; drop the sha comparison in `dod-freeze.mjs`). Record the observed exit codes in your report. Confirm `git status` is clean afterwards.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add plugins/lirbox/skills/loom/evals/
