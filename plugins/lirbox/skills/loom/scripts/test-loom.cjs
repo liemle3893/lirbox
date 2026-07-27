@@ -267,10 +267,11 @@ async function main() {
   const LOCKED = (() => {
     const g = JSON.parse(JSON.stringify(G));
     for (const n of g.nodes) if (n.id === 'DoDGate' || n.id === 'Review') n.locked = true;
+    // MIRROR THE SEEDS: only a gate's PASSING edge is locked.
     for (const e of g.edges) {
-      // Lock all passing edges (eq === true) of mustCross gates, and all edges from DoDGate.
-      if ((e.from === 'Review' || e.from === 'DoDGate') && e.when && e.when.eq === true) e.locked = true;
-      if (e.from === 'DoDGate') e.locked = true;
+      if ((e.from === 'DoDGate' || e.from === 'Review') && e.when && e.when.eq === true) {
+        e.locked = true;
+      }
     }
     g.invariants = {
       mustCross: ['Review', 'DoDGate'],
@@ -330,7 +331,7 @@ async function main() {
 
   test('REJECT: deleting a locked edge', () => {
     const next = core.applyPatchTo(LOCKED, {
-      removeEdges: [{ from: 'DoDGate', to: 'Implement' }] });
+      removeEdges: [{ from: 'DoDGate', to: 'PR' }] });
     assert.ok(core.validateGraph(next, LOCKED, null).some(m => /locked/.test(m)));
   });
 
