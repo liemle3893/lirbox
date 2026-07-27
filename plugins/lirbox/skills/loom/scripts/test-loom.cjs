@@ -985,6 +985,119 @@ async function main() {
     assert.ok(d.invariants.mustCross.includes('DoDGate'));
   });
 
+  section('graph server');
+
+  const { spawn } = require('child_process');
+  const SERVER = path.join(__dirname, 'graph-server.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-root-'));
+  fs.mkdirSync(path.join(root, '.loom', 'state'), { recursive: true });
+  const seedGraph = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+  fs.writeFileSync(path.join(root, '.loom', 'srv.graph.json'), JSON.stringify(seedGraph));
+  fs.writeFileSync(path.join(root, '.loom', 'state', 'srv.json'),
+    JSON.stringify({ workflow: 'srv', status: 'running', cursor: 'Implement', visits: { Implement: 2 } }));
+
+  const proc = spawn('node', [SERVER, '--name', 'srv', '--root', root, '--port', '0']);
+  const port = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('server did not start in 5s')), 5000);
+    proc.stdout.on('data', (b) => {
+      const m = /LOOM_SERVER_PORT=(\d+)/.exec(b.toString());
+      if (m) { clearTimeout(t); resolve(Number(m[1])); }
+    });
+    proc.stderr.on('data', (b) => process.stderr.write(b));
+  });
+  const base = `http://127.0.0.1:${port}`;
+  const get = async (p) => { const r = await fetch(base + p); return { status: r.status, body: await r.json() }; };
+  const post = async (p, o) => {
+    const r = await fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(o) });
+    return { status: r.status, body: await r.json() };
+  };
+
+  const rGraph = await get('/graph');
+  test('GET /graph returns the current graph', () => {
+    assert.strictEqual(rGraph.status, 200);
+    assert.strictEqual(rGraph.body.terminal, 'Done');
+  });
+
+  const rState = await get('/state');
+  test('GET /state returns run state', () => {
+    assert.strictEqual(rState.status, 200);
+    assert.strictEqual(rState.body.cursor, 'Implement');
+  });
+
+  const rCore = await fetch(base + '/graph-core.mjs');
+  test('GET /graph-core.mjs serves the shared validator to the browser', async () => {
+    assert.strictEqual(rCore.status, 200);
+    assert.ok(/javascript/.test(rCore.headers.get('content-type')));
+    assert.ok((await rCore.text()).includes('function validateGraph'),
+      'the editor must receive the same validator the conductor inlines');
+  });
+
+  test('only the three known paths are served; everything else 404s', async () => {
+    // NOTE: `new URL()` normalises ".." BEFORE the router sees it, so a traversal-shaped
+    // request arrives as an already-collapsed pathname. `/editor.js/../../../graph-core.mjs`
+    // therefore becomes `/graph-core.mjs` — a legitimate route that correctly returns 200.
+    // The real guarantee is that the router serves a fixed allow-list and nothing else, so
+    // that is what this asserts. (`serveStatic`'s prefix check is defence in depth; the
+    // routes only ever hand it two literal strings.)
+    for (const p of ['/editor.js/../../package.json', '/../../../etc/passwd',
+                     '/graph-server.mjs', '/seeds/delivery.json', '/nope']) {
+      const r = await fetch(base + p);
+      assert.strictEqual(r.status, 404, `${p} must not be served, got ${r.status}`);
+    }
+  });
+
+  test('a traversal that collapses onto a real route is still only that route', async () => {
+    const r = await fetch(base + '/editor.js/../../../graph-core.mjs');
+    assert.strictEqual(r.status, 200);
+    assert.ok((await r.text()).includes('function validateGraph'),
+      'it resolved to /graph-core.mjs, which is intentionally public to the editor');
+  });
+
+  const bypass = core.applyPatchTo(seedGraph, {
+    addEdges: [{ from: 'Implement', to: 'Done', when: 'always' }] });
+  const rBad = await post('/graph', bypass);
+  test('POST /graph rejects a gate bypass with 422 and reasons', () => {
+    assert.strictEqual(rBad.status, 422);
+    assert.ok(Array.isArray(rBad.body.violations) && rBad.body.violations.length);
+    assert.ok(rBad.body.violations.some((m) => /dominates/.test(m)));
+  });
+
+  test('a rejected POST does not touch the stored graph', () => {
+    const onDisk = JSON.parse(fs.readFileSync(path.join(root, '.loom', 'srv.graph.json'), 'utf8'));
+    assert.ok(!onDisk.edges.some((e) => e.from === 'Implement' && e.to === 'Done'));
+  });
+
+  const okGraph = core.applyPatchTo(seedGraph, {
+    addNodes: [{ id: 'Migrate', kind: 'work', prompt: 'run the migration' }],
+    addEdges: [{ from: 'Migrate', to: 'Implement', when: 'always' }] });
+  okGraph.edges.unshift({ from: 'Plan', to: 'Migrate', when: 'always' });
+  const rOk = await post('/graph', okGraph);
+  test('POST /graph accepts a valid graph and bumps the version', () => {
+    assert.strictEqual(rOk.status, 200);
+    assert.strictEqual(rOk.body.version, (seedGraph.version || 0) + 1);
+  });
+
+  const rAction = await post('/action', { action: 'replan', comments: [{ node: 'Implement', text: 'split this' }] });
+  test('POST /action writes the action file', () => {
+    assert.strictEqual(rAction.status, 200);
+    const a = JSON.parse(fs.readFileSync(path.join(root, '.loom', 'srv.action.json'), 'utf8'));
+    assert.strictEqual(a.action, 'replan');
+    assert.strictEqual(a.comments[0].node, 'Implement');
+  });
+
+  test('POST /action rejects an unknown action', async () => {
+    const r = await post('/action', { action: 'rm-rf' });
+    assert.strictEqual(r.status, 400);
+  });
+
+  test('the server binds loopback only', () => {
+    const srcText = fs.readFileSync(SERVER, 'utf8');
+    assert.ok(/'127\.0\.0\.1'|"127\.0\.0\.1"/.test(srcText),
+      'the server must bind 127.0.0.1 explicitly, never 0.0.0.0');
+  });
+
+  proc.kill();
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }
