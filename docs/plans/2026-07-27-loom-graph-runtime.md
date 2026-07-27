@@ -3334,6 +3334,24 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
   test('list-runs shows the run, status and cursor', () => {
     assert.ok(/demo/.test(listOut) && /running/.test(listOut) && /Implement/.test(listOut));
   });
+
+  test('list-runs does not cry wolf about a running run\'s port', () => {
+    // The fixture's run is `running` with a recorded port — that port is legitimate, not
+    // stale. Warning on any port at all would put a "stale server" notice beside every
+    // healthy run, and a warning that always fires teaches people to ignore it.
+    assert.ok(!/stale editor server/.test(listOut),
+      'a running run must not be reported as a stale server');
+
+    // ...and a genuinely stale one must still be surfaced.
+    const staleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-stale-'));
+    fs.mkdirSync(path.join(staleRoot, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(staleRoot, '.loom', 'state', 'dead.json'), JSON.stringify({
+      workflow: 'dead', status: 'failed', cursor: 'Implement', visits: { Implement: 1 }, port: 7391,
+    }));
+    const out = execFileSync('node', [LIST], { cwd: staleRoot }).toString();
+    assert.ok(/stale editor server/.test(out) && /dead/.test(out) && /7391/.test(out),
+      `a non-running run with a port must be flagged, got: ${out}`);
+  });
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -3455,9 +3473,14 @@ for (const r of rows) {
   process.stdout.write(
     `${pad(r.name, 24)}${pad(r.status, 20)}${pad(r.cursor, 16)}${pad(r.visits, 7)}${r.port}\n`);
 }
-if (rows.some((r) => r.port !== '-')) {
-  process.stdout.write('\nA PORT on a non-running row is a stale editor server: kill it with\n');
-  process.stdout.write('  lsof -ti tcp:<port> | xargs kill\n');
+// Only warn when a port belongs to a run that is NOT running — that is the stale case.
+// Firing on any port at all would put a "stale server" warning beside every healthy run,
+// and a warning that always fires teaches people to ignore it.
+const stale = rows.filter((r) => r.port !== '-' && r.status !== 'running');
+if (stale.length) {
+  process.stdout.write(`\n${stale.length} stale editor server(s) — the run is not running but a port is recorded:\n`);
+  for (const r of stale) process.stdout.write(`  ${r.name} (port ${r.port})\n`);
+  process.stdout.write('  kill with: lsof -ti tcp:<port> | xargs kill\n');
 }
 ```
 
