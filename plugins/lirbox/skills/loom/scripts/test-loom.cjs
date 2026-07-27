@@ -1552,6 +1552,52 @@ async function main() {
     assert.ok(!/REJECTED: *$/m.test(noWhy), 'must not print a bare trailing colon');
   });
 
+  test('RESUME warning is present on a healthy run', () => {
+    // The PATCHED graph clause was buried. Now it must be elevated and separated.
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-resume-'));
+    fs.mkdirSync(path.join(d, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.loom', 'state', 'health.json'), JSON.stringify({
+      workflow: 'health', status: 'running', cursor: 'A', visits: { A: 1 },
+      graph: { nodes: [{ id: 'A' }], edges: [], invariants: {} }, trace: [] }));
+    const out = execFileSync('node', [REPORT, 'health'], { cwd: d }).toString();
+    assert.ok(/PASS THE PATCHED GRAPH/.test(out), 'RESUME must warn about the PATCHED graph');
+    assert.ok(/NEVER THE SEED/.test(out), 'must contrast with the seed');
+    assert.ok(/Re-seeding discards every accepted patch/.test(out),
+      'must state the consequence of getting it wrong');
+  });
+
+  test('RESUME command is absent when cursor is missing', () => {
+    // When the cursor is outside the graph, the report says "NOT resumable" and must not
+    // then hand the operator a command that throws. The section exists but the instructions
+    // are a refusal.
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-ghostresume-'));
+    fs.mkdirSync(path.join(d, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.loom', 'state', 'ghost.json'), JSON.stringify({
+      workflow: 'ghost', status: 'running', cursor: 'GHOST', visits: { A: 1 },
+      graph: { nodes: [{ id: 'A' }], edges: [], invariants: {} }, trace: [] }));
+    const out = execFileSync('node', [REPORT, 'ghost'], { cwd: d }).toString();
+    assert.ok(/NOT AVAILABLE/.test(out), 'RESUME section must show refusal for missing cursor');
+    assert.ok(/NOT resumable/.test(out), 'earlier section must have already flagged it');
+    assert.ok(!/Workflow\(\{/.test(out), 'must not print the Workflow instruction');
+    assert.ok(/Fix the cursor or the graph/.test(out),
+      'refusal must explain the problem');
+  });
+
+  test('unnamed node in trace degrades legibly', () => {
+    // Pathological input: a trace entry with no `node` field. Must not render as
+    // literal "undefined#1" — that reads as a bug in the report, not as an anomaly
+    // being reported.
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-unname-'));
+    fs.mkdirSync(path.join(d, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.loom', 'state', 'unname.json'), JSON.stringify({
+      workflow: 'unname', status: 'running', cursor: 'A', visits: { A: 1 },
+      graph: { nodes: [{ id: 'A' }], edges: [], invariants: {} },
+      trace: [{ visit: 1, verdict: true, to: 'B' }] }));
+    const out = execFileSync('node', [REPORT, 'unname'], { cwd: d }).toString();
+    assert.ok(/\(unnamed node\)#1/.test(out), 'missing node must show as (unnamed node)');
+    assert.ok(!/undefined#/.test(out), 'must not render literal undefined');
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }

@@ -26,6 +26,14 @@ catch (e) {
   process.exit(1);
 }
 
+const capsOf = (st) =>
+  (st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {};
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+// Mirrors capFor() in graph-core.mjs. hasOwnProperty, not `??`: an explicitly-null cap
+// must display as what the runtime will enforce, not fall through to the default.
+const capOf = (caps, node) =>
+  has(caps, node) ? caps[node] : has(caps, '*') ? caps['*'] : 3;
+
 const out = [];
 out.push(`loom run: ${st.workflow}`);
 out.push(`status:   ${st.status}${st.finishedAt ? ` (finished ${st.finishedAt})` : ''}`);
@@ -43,9 +51,9 @@ out.push(`graph:    v${st.graphVersion || 0}, ${(st.graph && st.graph.nodes || [
 out.push('');
 
 out.push('VISITS');
+const caps = capsOf(st);
 for (const [node, n] of Object.entries(st.visits || {})) {
-  const cap = ((st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {})[node]
-    ?? ((st.graph && st.graph.invariants && st.graph.invariants.visitCaps) || {})['*'] ?? 3;
+  const cap = capOf(caps, node);
   // Flag reaching the cap, not merely being revisited: a run that stopped here almost
   // certainly stopped BECAUSE of it, and making the operator notice the two numbers match
   // is exactly the kind of omission that wastes incident time.
@@ -56,14 +64,15 @@ out.push('');
 
 out.push('PATH');
 for (const t of st.trace || []) {
+  const where = `${t.node ?? '(unnamed node)'}#${t.visit ?? '?'}`;
   if (t.patch === 'rejected') {
     const why = (t.violations || []).join('; ') || '(no reason recorded in state)';
-    out.push(`  ${t.node}#${t.visit}  PATCH REJECTED: ${why}`);
+    out.push(`  ${where}  PATCH REJECTED: ${why}`);
   } else if (t.patch === 'accepted') {
-    out.push(`  ${t.node}#${t.visit}  patch accepted -> graph v${t.version}`);
+    out.push(`  ${where}  patch accepted -> graph v${t.version}`);
   } else {
     const v = t.verdict === true ? 'pass' : t.verdict === false ? 'FAIL' : '-';
-    out.push(`  ${t.node}#${t.visit}  ${v.padEnd(5)} -> ${t.to}`);
+    out.push(`  ${where}  ${v.padEnd(5)} -> ${t.to}`);
   }
 }
 out.push('');
@@ -78,7 +87,18 @@ if (Object.keys(carry).length) {
 }
 
 out.push('RESUME');
-out.push(`  Workflow({ scriptPath: ".loom/${name}.js", args: <the graph/visits/results/carry/trace/cursor`);
-out.push(`             fields of .loom/state/${name}.json — the PATCHED graph, not the seed> })`);
+if (cursorMissing) {
+  out.push('  NOT AVAILABLE — the cursor above is not a node in the stored graph, so there');
+  out.push('  is no valid node to resume from. Fix the cursor or the graph in the state file');
+  out.push('  first; any resume attempted as stored throws "unknown node" immediately.');
+} else {
+  out.push('  *** PASS THE PATCHED GRAPH FROM THE STATE FILE — NEVER THE SEED. ***');
+  out.push('      Re-seeding discards every accepted patch and every visit count: the run');
+  out.push('      restarts from the original graph and the work already done is lost.');
+  out.push('');
+  out.push(`  Workflow({ scriptPath: ".loom/${name}.js",`);
+  out.push('             args: <the graph/visits/results/carry/trace/cursor fields');
+  out.push(`                    of .loom/state/${name}.json> })`);
+}
 
 process.stdout.write(out.join('\n') + '\n');
