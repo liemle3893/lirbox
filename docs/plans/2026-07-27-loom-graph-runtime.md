@@ -2207,6 +2207,28 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line. Note t
       'the rejected save must report the current version so the client can retry');
   });
 
+  test('POST /graph refuses a bare graph body — no opt-out from the version check', async () => {
+    // A bare body used to be accepted "for compatibility", which meant any client could
+    // skip the concurrency check entirely. Measured before this was closed: two bare
+    // bodies raced, both got 200, and one edit vanished. A guard with a supported
+    // bypass is not a guard.
+    const current = (await get('/graph')).body;
+    const bare = await post('/graph', current);           // the graph, unwrapped
+    assert.strictEqual(bare.status, 400, 'a bare graph body must be refused');
+
+    // These shapes each used to slip past the check; all must now be refused.
+    for (const bad of [
+      { graph: current },                                  // baseVersion missing
+      { baseVersion: null, graph: current },
+      { baseVersion: String(current.version), graph: current },
+      { baseVersion: current.version },                    // graph missing
+    ]) {
+      const r = await post('/graph', bad);
+      assert.strictEqual(r.status, 400,
+        `expected 400 for ${JSON.stringify(Object.keys(bad))}, got ${r.status}`);
+    }
+  });
+
   test('an oversized body gets a readable 413, not a socket reset', async () => {
     const huge = JSON.stringify({ baseVersion: 0, graph: { pad: 'x'.repeat(5e6) } });
     let status = null, err = null;
@@ -2357,10 +2379,23 @@ const server = http.createServer(async (req, res) => {
       // The client must declare which version it edited from; a stale base is 409.
       // `baseVersion` travels alongside the graph rather than inside it, so it can
       // never be confused with the server-owned `version` field.
-      const { baseVersion, graph: next } = (body && body.graph)
-        ? body
-        : { baseVersion: undefined, graph: body };   // legacy shape: graph posted bare
-      if (baseVersion !== undefined && baseVersion !== prevVersion) {
+      //
+      // THE WRAPPER IS MANDATORY. An earlier revision accepted a bare graph body for
+      // "compatibility" — which was simply a documented way to opt out of this check.
+      // Measured: two bare bodies raced, both returned 200, and one edit vanished.
+      // A guard with a supported bypass is not a guard. There is exactly one client
+      // (the editor in Task 7) and we control it, so requiring the wrapper costs
+      // nothing. Note `typeof baseVersion === 'number'` also rejects a missing key,
+      // `null`, and a numeric string, each of which would otherwise skip the check.
+      if (!body || typeof body !== 'object' || !body.graph
+          || typeof body.baseVersion !== 'number') {
+        return send(res, 400, {
+          error: 'POST /graph requires { baseVersion: <number>, graph: { ... } }',
+          hint: 'GET /graph first and send its `version` back as baseVersion',
+        });
+      }
+      const { baseVersion, graph: next } = body;
+      if (baseVersion !== prevVersion) {
         return send(res, 409, {
           error: 'stale base version',
           yourBaseVersion: baseVersion,
