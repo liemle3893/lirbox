@@ -854,6 +854,15 @@ async function main() {
       }
     });
 
+    test(`${profile}: every out-edge of every mustCross gate is locked`, () => {
+      for (const g of seed.invariants.mustCross) {
+        const outEdges = seed.edges.filter((e) => e.from === g);
+        for (const e of outEdges) {
+          assert.ok(e.locked, `gate ${g} has an unlocked out-edge to ${e.to}`);
+        }
+      }
+    });
+
     test(`${profile}: lockedHash is present and correct`, () => {
       assert.strictEqual(seed.invariants.lockedHash, core.lockedFingerprint(seed));
     });

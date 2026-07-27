@@ -238,7 +238,8 @@
       },
       "carry": [
         "findings"
-      ]
+      ],
+      "locked": true
     },
     {
       "from": "Review",
@@ -246,7 +247,8 @@
       "when": {
         "field": "passed",
         "eq": true
-      }
+      },
+      "locked": true
     },
     {
       "from": "DoDGate",
@@ -285,6 +287,6 @@
       "Implement": 4
     },
     "nodeBudget": 40,
-    "lockedHash": "fnv1a:e2a2731d"
+    "lockedHash": "fnv1a:f374c7a4"
   }
 }
