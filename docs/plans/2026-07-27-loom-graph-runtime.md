@@ -1020,24 +1020,71 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
   // loom differs in one respect: conductor slices from `const NAME`, which for loom would
   // skip the inlined graph-core FUNCTIONS — those are executing code and must stay scanned.
   // So strip comments and blank every string/template literal instead, keeping all real code.
-  const conductorBody = (src) => src
-    .replace(/\/\*[\s\S]*?\*\//g, '')        // block comments (graph-core's prose header)
-    .replace(/^[ \t]*\/\/.*$/gm, '')         // line comments
-    // Template literals are blanked WHOLE. That is only safe because a separate
-    // invariant — `liveInterpolations`, asserted below — proves the emitted conductor
-    // contains no LIVE interpolation at all.
-    //
-    // Do NOT try to scan inside interpolations with a regex. An earlier attempt
-    // extracted `${...}` bodies and had two real defects: it could not distinguish an
-    // escaped `\${crypto}` (inert placeholder data) from a live `${crypto}`, so a
-    // future placeholder happening to be named `crypto` would false-positive; and
-    // `[^{}]*` cannot match across nested braces, so `${f({a:1})}` extracted NOTHING
-    // and hid its contents completely — reopening the exact blind spot it was meant
-    // to close. Regex cannot parse JavaScript. Prove there is no code in here, then
-    // blank freely.
-    .replace(/`(?:[^`\\]|\\.)*`/g, '""')
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''")     // single-quoted strings
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""');    // double-quoted strings (GRAPH_V0 node prompts)
+  // ONE tokenizer, single pass, explicit mode stack. Returns executing code only:
+  // comments dropped, string and template-literal TEXT dropped, template
+  // INTERPOLATIONS kept as code.
+  //
+  // Three earlier attempts failed, and the progression is the lesson:
+  //   1. Regex chain blanking template literals WHOLE — hid executing code inside a
+  //      real `${...}`.
+  //   2. Regex extracting `${...}` bodies — could not tell an escaped `\${crypto}`
+  //      (inert placeholder data) from a live one, and `[^{}]*` could not match across
+  //      nested braces, so `${f({a:1})}` extracted nothing.
+  //   3. Whole-blanking PLUS a separate `liveInterpolations` character walk to prove
+  //      nothing live was inside. Two functions parsing JavaScript by different rules
+  //      DISAGREED: the walk did not strip comments first, so a single unpaired
+  //      backtick in a comment — an ordinary markdown slip like "see the `foo function"
+  //      — shifted its open/close parity and made it report 0 while a real
+  //      `${Date.now()}` existed. The scan then blanked that literal away on the
+  //      strength of the false proof. `node --check` cannot help: an unpaired backtick
+  //      inside a comment is syntactically inert.
+  //
+  // The fix is not a fourth heuristic. It is refusing to have two parsers: one pass
+  // that understands comments, strings and templates together, so nothing can disagree.
+  const codeOnly = (src) => {
+    let out = '';
+    let i = 0;
+    const n = src.length;
+    const stack = [{ mode: 'code', depth: 0, interp: false }];
+
+    while (i < n) {
+      const top = stack[stack.length - 1];
+      const c = src[i], c2 = src[i + 1];
+
+      if (top.mode === 'tmpl') {
+        if (c === '\\') { i += 2; continue; }                 // escaped char in template text
+        if (c === '`') { stack.pop(); out += '""'; i++; continue; }
+        if (c === '$' && c2 === '{') {                         // live interpolation -> code
+          stack.push({ mode: 'code', depth: 0, interp: true });
+          out += ' '; i += 2; continue;
+        }
+        i++; continue;                                         // literal text -> dropped
+      }
+
+      if (c === '/' && c2 === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+      if (c === '/' && c2 === '*') {
+        i += 2;
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+        i += 2; continue;
+      }
+      if (c === "'" || c === '"') {
+        const q = c; i++;
+        while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; }
+        i++; out += '""'; continue;
+      }
+      if (c === '`') { stack.push({ mode: 'tmpl' }); i++; continue; }
+      if (top.interp) {
+        if (c === '{') { top.depth++; out += c; i++; continue; }
+        if (c === '}') {
+          if (top.depth === 0) { stack.pop(); out += ' '; i++; continue; }
+          top.depth--; out += c; i++; continue;
+        }
+      }
+      out += c; i++;
+    }
+    return out;
+  };
+  const conductorBody = codeOnly;
 
   const FORBIDDEN = [
     ['require(', /\brequire\s*\(/],
@@ -1074,44 +1121,40 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     }
   });
 
-  // Counts LIVE (unescaped) `${` interpolations inside template literals.
-  // A character walk, deliberately not a regex: escape state and nested braces are
-  // exactly what a regex gets wrong here, and both produced real defects when tried.
-  const liveInterpolations = (src) => {
-    let count = 0, i = 0;
-    while (i < src.length) {
-      if (src[i] === '`') {
-        i++;
-        while (i < src.length && src[i] !== '`') {
-          if (src[i] === '\\') { i += 2; continue; }   // escaped char — consume both
-          if (src[i] === '$' && src[i + 1] === '{') count++;
-          i++;
-        }
-      }
-      i++;
-    }
-    return count;
-  };
+  test('the tokenizer sees code the previous three approaches missed', () => {
+    // Each entry is a shape that defeated an earlier attempt. No separate invariant
+    // is needed now: the tokenizer reads interpolations as code directly.
+    const F = FORBIDDEN;
+    const caught = (src) => F.some(([, re]) => re.test(conductorBody(src)));
 
-  test('the emitted conductor contains no LIVE template-literal interpolation', () => {
-    // THE invariant that licenses blanking template literals whole. esc() converts
-    // every `${` in prompt data to `\${`, so nothing executable should live inside a
-    // backtick literal. If this ever fails, the purity scan has a blind spot and
-    // whoever introduced the interpolation must extend the scan to cover it —
-    // do NOT simply delete this test.
-    assert.strictEqual(liveInterpolations(emitted), 0,
-      'a live ${...} appeared inside a template literal — the purity scan blanks those '
-      + 'whole and can no longer see the code inside. Extend the scan before proceeding.');
+    assert.ok(caught('const x = `a ${Date.now()} b`'), 'live interpolation');
+    assert.ok(caught('const x = `${f({a: Date.now()})}`'), 'nested braces');
+    assert.ok(caught('const x = `${ `${Date.now()}` }`'), 'nested template in interpolation');
+    // The parity bug: one unpaired backtick in a comment used to hide everything after it.
+    assert.ok(caught([
+      '// see the `unclosed markdown code span',
+      'const legit = `safe, no interpolation`',
+      'const bad = `real: ${Date.now()}`',
+    ].join('\n')), 'stray backtick in a line comment must not shift template parity');
+    assert.ok(caught([
+      '/* mentions `export { ... }; without closing */',
+      'const bad = `real: ${Math.random()}`',
+    ].join('\n')), 'stray backtick in a block comment');
   });
 
-  test('the live-interpolation detector actually detects', () => {
-    // The invariant above is worthless if the detector cannot fire. Includes the two
-    // shapes that defeated the earlier regex approach.
-    assert.strictEqual(liveInterpolations('const p = `a \\${escaped} b`'), 0);
-    assert.strictEqual(liveInterpolations('const x = `a ${Date.now()} b`'), 1);
-    assert.strictEqual(liveInterpolations('const x = `${f({a:1})}`'), 1, 'nested braces');
-    assert.strictEqual(liveInterpolations('const x = `${ {a: 1} }`'), 1, 'nested object');
-    assert.strictEqual(liveInterpolations('const x = `\\${safe} ${live}`'), 1, 'mixed');
+  test('the tokenizer still ignores prose and data', () => {
+    const F = FORBIDDEN;
+    const clean = (src) => !F.some(([, re]) => re.test(conductorBody(src)));
+
+    assert.ok(clean('// never call Date.now() or Math.random()'), 'prose in a line comment');
+    assert.ok(clean('/*\n * no Date.now(), no Math.random(), no crypto.\n */'),
+      "graph-core's own prose header");
+    assert.ok(clean('const t = `do not use Date.now() here`'), 'prose in template text');
+    assert.ok(clean('const p = `NODE: \\${nodeId} visit \\${visit}`'), 'escaped placeholders');
+    assert.ok(clean('const p = `\\${crypto}`'),
+      'a placeholder NAMED crypto must not false-positive');
+    assert.ok(clean('const s = "use fs. and Date.now()"'), 'forbidden words in a string');
+    assert.ok(clean('const s = "${Date.now()}"'), 'interpolation-looking text in a plain string');
   });
 
   test('prose inside a template literal still does not false-positive', () => {
