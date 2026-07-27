@@ -88,11 +88,42 @@ async function main() {
     assert.strictEqual(core.dominates(G, 'DoDGate', 'PR', 'Implement'), true);
   });
 
-  test('positional: a gate already behind the cursor no longer dominates', () => {
-    // Cursor sits at Implement having arrived via DoDGate:fail. Review is upstream
-    // of the cursor, so the remaining path need not cross it — this is exactly the
-    // case structural dominance alone gets wrong.
-    assert.strictEqual(core.dominates(G, 'Review', 'PR', 'Implement'), false);
+  test('positional: in G, Review DOES dominate PR from Implement', () => {
+    // Implement's only out-edge is to Review, so every path Implement -> PR crosses
+    // it. Dominance is a property of the graph, never of execution history — a gate
+    // the run happens to have already passed still dominates if the topology says so.
+    assert.strictEqual(core.dominates(G, 'Review', 'PR', 'Implement'), true);
+  });
+
+  // The case where positional dominance genuinely diverges from structural needs a
+  // graph in which the cursor can reach the terminal WITHOUT re-crossing the gate.
+  // G has no such shape; this is the spec's start -> Gate -> B -> terminal scenario.
+  //   Setup -> A -> Gate -> PR
+  //                 Gate -> B -> PR      (B reaches PR directly)
+  const G2 = {
+    start: 'Setup', terminal: 'PR',
+    nodes: [{ id: 'Setup' }, { id: 'A' }, { id: 'Gate' }, { id: 'B' }, { id: 'PR' }],
+    edges: [
+      { from: 'Setup', to: 'A', when: 'always' },
+      { from: 'A', to: 'Gate', when: 'always' },
+      { from: 'Gate', to: 'PR', when: { field: 'passed', eq: true } },
+      { from: 'Gate', to: 'B', when: { field: 'passed', eq: false } },
+      { from: 'B', to: 'PR', when: 'always' },
+    ],
+  };
+
+  test('positional: Gate dominates PR from start (structural)', () => {
+    assert.strictEqual(core.dominates(G2, 'Gate', 'PR', 'Setup'), true);
+  });
+
+  test('positional: Gate does NOT dominate PR from B', () => {
+    // B reaches PR directly. Structural dominance from `start` still holds, so this
+    // is precisely the gap the positional check exists to close.
+    assert.strictEqual(core.dominates(G2, 'Gate', 'PR', 'B'), false);
+  });
+
+  test('positional: Gate still dominates PR from A', () => {
+    assert.strictEqual(core.dominates(G2, 'Gate', 'PR', 'A'), true);
   });
 
   test('a gate dominates itself', () => {

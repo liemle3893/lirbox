@@ -35,14 +35,16 @@ function reachable(graph, from, skip) {
 // True when EVERY path from `from` to `target` crosses `gate`.
 // Proof by deletion: remove the gate; if the target is still reachable, some path
 // avoided it. O(V+E) per gate.
-// Loom optimization: gates that are not immediate predecessors of the target
-// are considered upstream and don't dominate (since path history already crossed them).
+//
+// This is the WHOLE definition. Do not add heuristics on top of it — in particular,
+// do not restrict it to immediate predecessors of `target`: a gate two hops from the
+// terminal (Review -> DoDGate -> PR) dominates just as strongly as one hop, and such
+// a restriction makes every multi-hop gate report a false violation.
+// Dominance is a property of the GRAPH, never of execution history. "This gate was
+// already passed" is expressed by leaving it out of `unsatisfiedGates` at the call
+// site (see validateGraph in Task 3) — never by weakening this function.
 function dominates(graph, gate, target, from) {
   if (gate === target) return true;
-  // Only immediate predecessors of target can dominate
-  const immediatePredecessors = new Set();
-  for (const e of graph.edges) if (e.to === target) immediatePredecessors.add(e.from);
-  if (!immediatePredecessors.has(gate)) return false;
   return !reachable(graph, from, [gate]).has(target);
 }
 
