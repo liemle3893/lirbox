@@ -267,7 +267,11 @@ async function main() {
   const LOCKED = (() => {
     const g = JSON.parse(JSON.stringify(G));
     for (const n of g.nodes) if (n.id === 'DoDGate' || n.id === 'Review') n.locked = true;
-    for (const e of g.edges) if (e.from === 'DoDGate') e.locked = true;
+    for (const e of g.edges) {
+      // Lock all passing edges (eq === true) of mustCross gates, and all edges from DoDGate.
+      if ((e.from === 'Review' || e.from === 'DoDGate') && e.when && e.when.eq === true) e.locked = true;
+      if (e.from === 'DoDGate') e.locked = true;
+    }
     g.invariants = {
       mustCross: ['Review', 'DoDGate'],
       visitCaps: { '*': 3, Implement: 4 },
@@ -354,6 +358,14 @@ async function main() {
       }],
       ['appended edge with an unrelated predicate', {
         addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'n', gt: 0 } }],
+      }],
+      // A minted pass edge cannot carry `locked: true`, but without the lock check it
+      // would be exempted even on an unrelated field.
+      ['minted pass edge on an unrelated field', {
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'anythingAtAll', eq: true } }],
+      }],
+      ['minted pass edge reusing the real field', {
+        addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: true } }],
       }],
     ]) {
       const v = core.validateGraph(core.applyPatchTo(LOCKED, patch), LOCKED, null);
