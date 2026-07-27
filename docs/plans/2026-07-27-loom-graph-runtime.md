@@ -277,7 +277,7 @@ export { outEdges, reachable, dominates };
 node plugins/lirbox/skills/loom/scripts/test-loom.cjs
 ```
 
-Expected: PASS — 12 `ok` lines, `all green`.
+Expected: PASS — `all green` and exit 0. (For reference the suite has 13 tests at this point: 4 under `reachable`, 9 under `dominates` — but the exit code is the gate, not the count.)
 
 - [ ] **Step 5: Commit**
 
