@@ -4264,8 +4264,16 @@ writeFileSync(gf, JSON.stringify(g));
 execFileSync('node', [join(SCRIPTS, 'scaffold-loom.cjs'), '--name', 'c',
   '--graph', gf, '--out', out, '--force'], { stdio: 'pipe' });
 const src = readFileSync(out, 'utf8');
-ok(!/edge \? edge\.to : graph\.terminal/.test(src), 'no silent terminal fallback in the conductor');
-ok(/no edge matched at/.test(src), 'conductor hard-fails on an unmatched result');
+// POSITIVE STRUCTURAL assertions, not greps. A NEGATIVE grep forbids only the one
+// spelling someone thought to write down: `edge?.to ?? graph.terminal` reintroduces the
+// Critical and sails past it. And matching 'no edge matched at' anywhere in the file is
+// satisfied by a COMMENT — it never establishes that a throw is on the code path.
+// Verified: with the old pair, deleting the throw and writing the fallback in new syntax
+// left this check GREEN.
+  ok(/if \(!edge\) \{[\s\S]{0,600}?throw new Error\(\s*'no edge matched at/.test(src),
+    'the unmatched-result throw is on the code path, not just a string in the file');
+ok(/const nextNode = edge\.to\b/.test(src),
+    'nextNode is assigned unconditionally from the matched edge — no fallback expression');
 
 // 2. The behaviour: off-shape results must match NO edge, so the interpreter throws.
 const P = {
