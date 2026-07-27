@@ -1614,6 +1614,48 @@ async function main() {
       'bare header with no rows must not appear; an operator cannot tell what is missing');
   });
 
+  section('skill packaging');
+
+  const skillPath = path.join(__dirname, '..', 'SKILL.md');
+  const skill = fs.readFileSync(skillPath, 'utf8');
+
+  test('frontmatter has name and a trigger description', () => {
+    // `^name: loom$` with /m — NOT `\nname:`, which requires a blank line after the
+    // opening `---` and so fails against correct frontmatter. Verified both ways.
+    assert.ok(/^---\n/.test(skill), 'file must open with frontmatter');
+    assert.ok(/^name: loom$/m.test(skill));
+    assert.ok(/\ndescription: /.test(skill));
+    const desc = /\ndescription: ["']?([^\n]+)/.exec(skill)[1];
+    assert.ok(desc.length > 120, 'the description is the TRIGGER — make it specific');
+  });
+
+  test('declares the tools it actually uses', () => {
+    for (const t of ['Read', 'Write', 'Bash', 'Workflow', 'AskUserQuestion']) {
+      assert.ok(new RegExp(`- ${t}\\b`).test(skill), `allowed-tools missing ${t}`);
+    }
+  });
+
+  test('documents the resume-restores-structure rule', () => {
+    assert.ok(/patched graph/i.test(skill),
+      'SKILL.md must state that resume restores the patched graph');
+  });
+
+  test('states the never-auto-merge rule', () => {
+    assert.ok(/never auto-?merge/i.test(skill));
+  });
+
+  test('references exist and are linked', () => {
+    for (const f of ['graph-spec.md', 'invariants.md']) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', 'references', f)), `${f} missing`);
+      assert.ok(skill.includes(f), `SKILL.md never links ${f}`);
+    }
+  });
+
+  test('.loom/ is gitignored', () => {
+    const gi = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', '..', '.gitignore'), 'utf8');
+    assert.ok(/^\.loom\/?$/m.test(gi), '.loom/ must be gitignored — it is runtime scratch');
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }

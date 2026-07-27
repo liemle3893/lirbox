@@ -15,6 +15,9 @@ docs/superpowers/
 .improve/
 .arena/
 
+# Build-time scratch left by loom (graph, state, checks, editor action files)
+.loom/
+
 # Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
 implementation-notes/
 
