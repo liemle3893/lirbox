@@ -3212,6 +3212,499 @@ git commit -m "feat(loom): skill entry point, references, and marketplace wiring
 
 ---
 
+### Task 11: Tier 2 evals — floor, checks, manifest
+
+The repo requires Tier 2 to ship a skill: `evals/floor/`, `evals/checks/`, `evals/checks-manifest.json`, green under `node scripts/evals-all.mjs --fast`. The **floor** is characterization ("this must not break"); the **checks** are frozen acceptance fences for past fixes. This task freezes the five Critical defects found while building loom, so none can silently return.
+
+**Files:**
+- Create: `plugins/lirbox/skills/loom/evals/floor/00-structure.test.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/floor/01-net.test.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/gate-dominance-not-bypassable.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/cursor-rename-fails-closed.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/interpreter-no-terminal-fallback.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/purity-scan-has-teeth.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks/dod-check-hash-lock.check.mjs`
+- Create: `plugins/lirbox/skills/loom/evals/checks-manifest.json`
+
+**Interfaces:**
+- Consumes: everything from Tasks 1–10.
+- Produces: a suite green under `node scripts/evals-all.mjs --fast`.
+
+**`evals/**` is LOCKED** — improvement loops may never edit it. Every file says so in its header, matching `prospector`'s convention. That lock is the point: a loop that could edit its own fence could escape it.
+
+- [ ] **Step 0: Rebase onto main FIRST**
+
+The three-tier release policy (and the Harbor tooling Task 12 needs) lands on `main` separately from this branch. Pick it up before writing any evals, so this task is built against the real policy rather than a snapshot of it:
+
+```bash
+git fetch origin
+git rebase origin/main
+node plugins/lirbox/skills/loom/scripts/test-loom.cjs   # must still exit 0 after the rebase
+grep -n "Tier 2" CLAUDE.md                              # confirm the policy is now present
+ls scripts/evals-all.mjs scripts/harbor-port.mjs 2>&1   # confirm the tooling arrived
+```
+
+If the rebase conflicts, resolve in favour of `main` for `CLAUDE.md` and repo-level `scripts/`, and in favour of this branch for everything under `plugins/lirbox/skills/loom/`. Re-run the net before continuing. If `harbor-port.mjs` is now present, **Task 12 is unblocked** — it was deferred only because that tooling did not exist on this branch.
+
+- [ ] **Step 1: Write the floor tests**
+
+`evals/floor/00-structure.test.mjs`:
+
+```js
+// FLOOR (characterization) — SKILL.md is structurally a valid skill.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, basename, resolve } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SKILL_DIR = resolve(HERE, '..', '..');
+const dir = basename(SKILL_DIR);
+const fm = (readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf8').match(/^---\n([\s\S]*?)\n---/) || [, ''])[1];
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS floor: ${m}`); } else { console.error(`FAIL floor: ${m}`); bad++; } };
+
+ok(!!fm, 'SKILL.md opens with a frontmatter block');
+ok(/^name:\s*\S/m.test(fm), 'frontmatter declares name');
+ok(/^description:\s*\S/m.test(fm), 'frontmatter declares a non-empty description');
+const nameMatch = fm.match(/^name:\s*"?([A-Za-z0-9_-]+)"?/m);
+ok(!!nameMatch && nameMatch[1] === dir, `name matches the skill directory (${dir})`);
+
+for (const f of ['graph-core.mjs', 'scaffold-loom.cjs', 'graph-server.mjs',
+                 'dod-freeze.mjs', 'loom-report.cjs', 'list-runs.cjs', 'test-loom.cjs']) {
+  ok(existsSync(join(SKILL_DIR, 'scripts', f)), `scripts/${f} exists`);
+}
+for (const f of ['graph-spec.md', 'invariants.md']) {
+  ok(existsSync(join(SKILL_DIR, 'references', f)), `references/${f} exists`);
+}
+for (const f of ['lite.json', 'delivery.json']) {
+  ok(existsSync(join(SKILL_DIR, 'scripts', 'seeds', f)), `scripts/seeds/${f} exists`);
+}
+
+if (bad) { console.error(`\n00-structure: ${bad} assertion(s) failed`); process.exit(1); }
+console.log('00-structure: ok');
+```
+
+`evals/floor/01-net.test.mjs`:
+
+```js
+// FLOOR (characterization) — the regression net is GREEN.
+// Runs scripts/test-loom.cjs, which pins all graph math, the generator, the emitted
+// interpreter's shape, the server routes, the DoD freezing, and the report scripts.
+// PASSES on baseline.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const NET = resolve(HERE, '..', '..', 'scripts', 'test-loom.cjs');
+
+try {
+  execFileSync('node', [NET], { stdio: 'inherit' });
+  console.log('01-net: ok (test-loom.cjs green)');
+} catch {
+  console.error('01-net: FAIL — scripts/test-loom.cjs did not pass');
+  process.exit(1);
+}
+```
+
+- [ ] **Step 2: Run the floor and confirm it passes**
+
+```bash
+node plugins/lirbox/skills/loom/evals/floor/00-structure.test.mjs
+node plugins/lirbox/skills/loom/evals/floor/01-net.test.mjs
+```
+
+Expected: both print `ok`, exit 0.
+
+- [ ] **Step 3: Write the five frozen checks**
+
+Each check reproduces one Critical found during this build and asserts it stays fixed. Each is standalone: exit 0 = green, exit 1 = the defect is back.
+
+`evals/checks/gate-dominance-not-bypassable.check.mjs`:
+
+```js
+// CHECK — validateGraph must read invariants from the APPROVED graph, never from the
+// graph under validation. Reading them from `next` was a full bypass: submit
+// mustCross: [] plus an unlocked bypass edge and validation returned [] while the
+// terminal was reachable crossing no gate.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const core = await import(resolve(HERE, '..', '..', 'scripts', 'graph-core.mjs'));
+
+const APPROVED = {
+  start: 'Setup', terminal: 'Done',
+  nodes: [{ id: 'Setup' }, { id: 'Implement' }, { id: 'Review', locked: true },
+          { id: 'DoDGate', locked: true }, { id: 'PR' }, { id: 'Done' }],
+  edges: [
+    { from: 'Setup', to: 'Implement', when: 'always' },
+    { from: 'Implement', to: 'Review', when: 'always' },
+    { from: 'Review', to: 'Implement', when: { field: 'passed', eq: false } },
+    { from: 'Review', to: 'DoDGate', when: { field: 'passed', eq: true } },
+    { from: 'DoDGate', to: 'Implement', when: { field: 'passed', eq: false }, locked: true },
+    { from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: true }, locked: true },
+    { from: 'PR', to: 'Done', when: 'always' },
+  ],
+  invariants: { mustCross: ['Review', 'DoDGate'], visitCaps: { '*': 3 }, nodeBudget: 40 },
+};
+APPROVED.invariants.lockedHash = core.lockedFingerprint(APPROVED);
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
+
+ok(core.validateGraph(APPROVED, APPROVED, null).length === 0, 'approved graph validates clean');
+
+const attack = JSON.parse(JSON.stringify(APPROVED));
+attack.invariants.mustCross = [];
+attack.edges.push({ from: 'Implement', to: 'Done', when: 'always' });
+const v = core.validateGraph(attack, APPROVED, null);
+ok(v.length > 0, 'emptying mustCross + unlocked bypass edge is REJECTED');
+ok(v.some((m) => /dominates/.test(m)), "prev's mustCross still governs");
+ok(core.reachable(attack, 'Setup', ['DoDGate']).has('Done'),
+  'fixture is only meaningful if the bypass really reaches the terminal');
+
+const budget = JSON.parse(JSON.stringify(APPROVED));
+budget.invariants.nodeBudget = 9999;
+for (let i = 0; i < 60; i++) {
+  budget.nodes.push({ id: `P${i}` });
+  budget.edges.push({ from: 'Implement', to: `P${i}`, when: 'always' });
+}
+ok(core.validateGraph(budget, APPROVED, null).some((m) => /budget/.test(m)),
+  "prev's nodeBudget governs, not the submitted one");
+
+if (bad) { console.error(`\ngate-dominance-not-bypassable: ${bad} failed`); process.exit(1); }
+console.log('gate-dominance-not-bypassable: ok');
+```
+
+`evals/checks/cursor-rename-fails-closed.check.mjs`:
+
+```js
+// CHECK — positional dominance must FAIL CLOSED when a patch removes the node the run
+// is standing on. A permissive guard let a rename skip the positional check entirely
+// while the locked fingerprint stayed valid and structural dominance still held.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const core = await import(resolve(HERE, '..', '..', 'scripts', 'graph-core.mjs'));
+
+const G = {
+  start: 'Setup', terminal: 'PR',
+  nodes: [{ id: 'Setup' }, { id: 'A' }, { id: 'Gate', locked: true },
+          { id: 'B' }, { id: 'C' }, { id: 'PR' }],
+  edges: [
+    { from: 'Setup', to: 'A', when: 'always' },
+    { from: 'A', to: 'Gate', when: 'always' },
+    { from: 'Gate', to: 'PR', when: { field: 'passed', eq: true }, locked: true },
+    { from: 'Gate', to: 'B', when: { field: 'passed', eq: false }, locked: true },
+    { from: 'B', to: 'C', when: 'always' },
+    { from: 'C', to: 'PR', when: 'always' },
+  ],
+  invariants: { mustCross: ['Gate'], visitCaps: { '*': 3 }, nodeBudget: 40 },
+};
+G.invariants.lockedHash = core.lockedFingerprint(G);
+const cursor = { node: 'C', unsatisfiedGates: ['Gate'] };
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
+
+ok(core.validateGraph(G, G, cursor).length > 0, 'baseline positional violation fires from C');
+
+const renamed = core.applyPatchTo(G, {
+  removeNodes: ['C'], addNodes: [{ id: 'C2' }],
+  addEdges: [{ from: 'B', to: 'C2', when: 'always' }, { from: 'C2', to: 'PR', when: 'always' }],
+});
+ok(core.lockedFingerprint(renamed) === G.invariants.lockedHash,
+  'fixture is only meaningful if the lock check stays silent');
+const v = core.validateGraph(renamed, G, cursor);
+ok(v.length > 0, 'renaming the cursor node is REJECTED');
+ok(v.some((m) => /cursor node C was removed/.test(m)), 'explicit cursor-removal violation');
+
+if (bad) { console.error(`\ncursor-rename-fails-closed: ${bad} failed`); process.exit(1); }
+console.log('cursor-rename-fails-closed: ok');
+```
+
+`evals/checks/interpreter-no-terminal-fallback.check.mjs`:
+
+```js
+// CHECK — the emitted interpreter must HARD-FAIL on an unmatched result, never route to
+// the terminal. `edge ? edge.to : graph.terminal` skipped every remaining gate on any
+// off-shape agent result: 6 of 8 plausible shapes reached the terminal, no patch needed.
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
+const core = await import(join(SCRIPTS, 'graph-core.mjs'));
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
+
+// 1. The generated conductor must not contain the fallback, and must contain the throw.
+const g = {
+  name: 'c', goal: 'c', start: 'S', terminal: 'D',
+  nodes: [{ id: 'S', kind: 'work', prompt: 'go' },
+          { id: 'G', kind: 'gate', locked: true, prompt: 'judge' }, { id: 'D', kind: 'terminal' }],
+  edges: [{ from: 'S', to: 'G', when: 'always' },
+          { from: 'G', to: 'D', when: { field: 'passed', eq: true }, locked: true },
+          { from: 'G', to: 'S', when: { field: 'passed', eq: false }, locked: true }],
+  invariants: { mustCross: ['G'], visitCaps: { '*': 3 }, nodeBudget: 20 },
+};
+g.invariants.lockedHash = core.lockedFingerprint(g);
+const tmp = mkdtempSync(join(tmpdir(), 'loom-check-'));
+const gf = join(tmp, 'g.json'), out = join(tmp, 'c.js');
+writeFileSync(gf, JSON.stringify(g));
+execFileSync('node', [join(SCRIPTS, 'scaffold-loom.cjs'), '--name', 'c',
+  '--graph', gf, '--out', out, '--force'], { stdio: 'pipe' });
+const src = readFileSync(out, 'utf8');
+ok(!/edge \? edge\.to : graph\.terminal/.test(src), 'no silent terminal fallback in the conductor');
+ok(/no edge matched at/.test(src), 'conductor hard-fails on an unmatched result');
+
+// 2. The behaviour: off-shape results must match NO edge, so the interpreter throws.
+const P = {
+  start: 'Setup', terminal: 'PR',
+  nodes: [{ id: 'Setup' }, { id: 'GateA' }, { id: 'GateB' }, { id: 'PR' }],
+  edges: [
+    { from: 'Setup', to: 'GateA', when: 'always' },
+    { from: 'GateA', to: 'GateB', when: { field: 'passed', eq: true } },
+    { from: 'GateA', to: 'Setup', when: { field: 'passed', eq: false } },
+    { from: 'GateB', to: 'PR', when: { field: 'passed', eq: true } },
+    { from: 'GateB', to: 'Setup', when: { field: 'passed', eq: false } },
+  ],
+};
+for (const r of [{ passed: 'true' }, { passed: 1 }, {}, { verdict: true }, null, { ok: true }]) {
+  ok(core.pickEdge(P, 'GateA', r) === null, `off-shape result matches no edge: ${JSON.stringify(r)}`);
+}
+ok(core.pickEdge(P, 'GateA', { passed: true }).to === 'GateB', 'well-formed pass still routes');
+ok(core.pickEdge(P, 'GateA', { passed: false }).to === 'Setup', 'well-formed fail still routes');
+
+// 3. Dead ends are rejected at validation, before a run can start.
+const dead = core.applyPatchTo(g, { addNodes: [{ id: 'Dead' }],
+  addEdges: [{ from: 'S', to: 'Dead', when: { field: 'q', eq: 1 } }] });
+ok(core.validateGraph(dead, g, null).some((m) => /dead-end/.test(m)), 'dead-end node rejected');
+
+if (bad) { console.error(`\ninterpreter-no-terminal-fallback: ${bad} failed`); process.exit(1); }
+console.log('interpreter-no-terminal-fallback: ok');
+```
+
+`evals/checks/purity-scan-has-teeth.check.mjs`:
+
+```js
+// CHECK — the restricted-layer scan must stay scoped AND keep its teeth, and the emitted
+// conductor must contain no LIVE template-literal interpolation (the invariant that
+// licenses blanking template literals whole).
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
+const core = await import(join(SCRIPTS, 'graph-core.mjs'));
+
+const conductorBody = (src) => src
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^[ \t]*\/\/.*$/gm, '')
+  .replace(/`(?:[^`\\]|\\.)*`/g, '""')
+  .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+  .replace(/"(?:[^"\\]|\\.)*"/g, '""');
+
+const liveInterpolations = (src) => {
+  let count = 0, i = 0;
+  while (i < src.length) {
+    if (src[i] === '`') {
+      i++;
+      while (i < src.length && src[i] !== '`') {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '$' && src[i + 1] === '{') count++;
+        i++;
+      }
+    }
+    i++;
+  }
+  return count;
+};
+
+const FORBIDDEN = [
+  ['require(', /\brequire\s*\(/], ['Date.now', /\bDate\.now\s*\(/],
+  ['new Date', /\bnew Date\b/], ['Math.random', /\bMath\.random\s*\(/],
+  ['crypto', /\bcrypto\b/], ['fs.', /\bfs\s*\./],
+];
+
+let bad = 0;
+const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
+
+// Node prompts deliberately name forbidden primitives as PROSE — must not false-positive.
+const g = {
+  name: 's', goal: 's', start: 'S', terminal: 'D',
+  nodes: [{ id: 'S', kind: 'work', prompt: 'Do not use fs. or Date.now() or crypto here.' },
+          { id: 'G', kind: 'gate', locked: true, prompt: 'Judge. Math.random() in prose.' },
+          { id: 'D', kind: 'terminal' }],
+  edges: [{ from: 'S', to: 'G', when: 'always' },
+          { from: 'G', to: 'D', when: { field: 'passed', eq: true }, locked: true },
+          { from: 'G', to: 'S', when: { field: 'passed', eq: false }, locked: true }],
+  invariants: { mustCross: ['G'], visitCaps: { '*': 3 }, nodeBudget: 20 },
+};
+g.invariants.lockedHash = core.lockedFingerprint(g);
+const tmp = mkdtempSync(join(tmpdir(), 'loom-scan-'));
+const gf = join(tmp, 'g.json'), out = join(tmp, 's.js');
+writeFileSync(gf, JSON.stringify(g));
+execFileSync('node', [join(SCRIPTS, 'scaffold-loom.cjs'), '--name', 's',
+  '--graph', gf, '--out', out, '--force'], { stdio: 'pipe' });
+const src = readFileSync(out, 'utf8');
+
+ok(!FORBIDDEN.some(([, re]) => re.test(conductorBody(src))),
+  'no false positive on prose in comments and node prompts');
+ok(liveInterpolations(src) === 0,
+  'emitted conductor contains no LIVE template-literal interpolation');
+
+for (const [label, code] of [
+  ['Date.now', 'const t = Date.now()'], ['Math.random', 'const r = Math.random()'],
+  ['require', 'const x = require("fs")'], ['fs.', 'fs.writeFileSync(a, b)'],
+  ['new Date', 'const d = new Date()'], ['crypto', 'const h = crypto.createHash("sha256")'],
+]) {
+  const tampered = conductorBody(src.replace('const NAME =', code + '\nconst NAME ='));
+  ok(FORBIDDEN.some(([, re]) => re.test(tampered)), `scan still catches injected ${label}`);
+}
+
+ok(liveInterpolations('const x = `${f({a:1})}`') === 1, 'detector sees nested-brace interpolation');
+ok(liveInterpolations('const p = `a \\${escaped} b`') === 0, 'detector ignores escaped placeholders');
+
+if (bad) { console.error(`\npurity-scan-has-teeth: ${bad} failed`); process.exit(1); }
+console.log('purity-scan-has-teeth: ok');
+```
+
+`evals/checks/dod-check-hash-lock.check.mjs`:
+
+```js
+// CHECK — DoD check files must be sha256-locked, so weakening the thing a check runs is
+// DETECTED rather than rewarded. Also: baseline defaults to "red" (a criterion already
+// met before the work cannot discriminate it).
+// Locked (evals/**): improvement loops may NEVER edit this file.
+import { mkdtempSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FREEZE = resolve(HERE, '..', '..', 'scripts', 'dod-freeze.mjs');
+const m = await import(FREEZE);
+
+const tmp = mkdtempSync(join(tmpdir(), 'loom-dod-'));
+const dodPath = join(tmp, 'dod.json');
+const checksDir = join(tmp, 'checks');
+writeFileSync(dodPath, JSON.stringify({ criteria: [
+  { id: 'c1', text: 'behaviour holds', tier: 'checkable',
+    script: '#!/usr/bin/env bash\nexit 1\n' },
+  { id: 'c2', text: 'suite still passes', tier: 'checkable', baseline: 'green-ok',
+    script: '#!/usr/bin/env bash\nexit 0\n' },
+] }));
+execFileSync('node', [FREEZE, '--dod', dodPath, '--checks-dir', checksDir], { stdio: 'pipe' });
+const frozen = JSON.parse(readFileSync(dodPath, 'utf8'));
+
+let bad = 0;
+const ok = (c, msg) => { if (c) { console.log(`PASS ${msg}`); } else { console.error(`FAIL ${msg}`); bad++; } };
+
+const c1 = frozen.criteria.find((c) => c.id === 'c1');
+ok(/^sha256:[0-9a-f]{64}$/.test(c1.checkSha), 'check file carries a sha256 lock');
+ok(c1.script === undefined, 'inline script was moved to a file, not duplicated');
+ok(c1.baseline === 'red', 'baseline defaults to red');
+ok(frozen.criteria.find((c) => c.id === 'c2').baseline === 'green-ok', 'green-ok waiver preserved');
+ok(m.verifyChecks(frozen, tmp).every((r) => r.ok), 'untouched checks verify');
+
+writeFileSync(join(checksDir, 'c1.sh'), '#!/usr/bin/env bash\nexit 0\n');
+const weakened = m.verifyChecks(frozen, tmp).find((r) => r.id === 'c1');
+ok(weakened.ok === false && /sha|hash|modified/i.test(weakened.reason),
+  'a WEAKENED check file is detected');
+
+unlinkSync(join(checksDir, 'c2.sh'));
+const deleted = m.verifyChecks(frozen, tmp).find((r) => r.id === 'c2');
+ok(deleted.ok === false && /missing/i.test(deleted.reason), 'a DELETED check file is detected');
+
+if (bad) { console.error(`\ndod-check-hash-lock: ${bad} failed`); process.exit(1); }
+console.log('dod-check-hash-lock: ok');
+```
+
+- [ ] **Step 4: Write the manifest**
+
+`evals/checks-manifest.json` — a check missing from this file fails the gate, because an unlisted check is an unguarded check:
+
+```json
+{
+  "_comment": [
+    "Expectation manifest for loom's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern). MUST exit 0 or 1.",
+    "",
+    "A check file missing from this manifest FAILS the gate.",
+    "LOCKED (evals/**): improvement loops may never edit this file."
+  ],
+  "checks": {
+    "gate-dominance-not-bypassable": { "expect": "green" },
+    "cursor-rename-fails-closed": { "expect": "green" },
+    "interpreter-no-terminal-fallback": { "expect": "green" },
+    "purity-scan-has-teeth": { "expect": "green" },
+    "dod-check-hash-lock": { "expect": "green" }
+  }
+}
+```
+
+- [ ] **Step 5: Run every check individually, then the repo gate**
+
+```bash
+for f in plugins/lirbox/skills/loom/evals/checks/*.check.mjs; do
+  echo "--- $f"; node "$f" || echo "RED: $f"
+done
+node scripts/evals-all.mjs --fast
+```
+
+Expected: all five print `ok` and exit 0; the repo gate is green.
+
+- [ ] **Step 6: Prove each check can actually fail**
+
+A check that cannot go red is not a fence. For each, temporarily break the thing it guards and confirm the check exits 1, then restore. Do this in a scratch copy — **never** commit a broken source file:
+
+```bash
+cp plugins/lirbox/skills/loom/scripts/graph-core.mjs /tmp/graph-core.bak
+# invariants bypass: read invariants from `next` again
+sed -i '' 's|const inv = (prev \&\& prev.invariants) ? prev.invariants : (next.invariants || {});|const inv = next.invariants || {};|' \
+  plugins/lirbox/skills/loom/scripts/graph-core.mjs
+node plugins/lirbox/skills/loom/evals/checks/gate-dominance-not-bypassable.check.mjs; echo "exit=$? (want 1)"
+cp /tmp/graph-core.bak plugins/lirbox/skills/loom/scripts/graph-core.mjs
+node plugins/lirbox/skills/loom/evals/checks/gate-dominance-not-bypassable.check.mjs; echo "exit=$? (want 0)"
+```
+
+Repeat the same pattern for the other four (restore the silent terminal fallback in `scaffold-loom.cjs`; restore the permissive `idSet.has(cursor.node)` guard; blank template literals in a way that hides an injected primitive; drop the sha comparison in `dod-freeze.mjs`). Record the observed exit codes in your report. Confirm `git status` is clean afterwards.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add plugins/lirbox/skills/loom/evals/
+git commit -m "test(loom): tier-2 evals — floor plus five frozen Critical fences
+
+Freezes every Critical found while building loom: the invariants bypass, the
+cursor-rename bypass, the interpreter's terminal fallback, the purity scan's
+teeth, and the DoD check hash lock. Each was a real defect that shipped green
+under the previous test suite."
+```
+
+---
+
 ## Post-Plan: End-to-End Acceptance
 
 Run these against a real repository after Task 10. They are the spec's §10 run-level criteria and none of them is covered by the unit net.
