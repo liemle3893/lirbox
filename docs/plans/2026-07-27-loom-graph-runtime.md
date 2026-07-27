@@ -4108,8 +4108,14 @@ const APPROVED = {
     { from: 'Setup', to: 'Implement', when: 'always' },
     { from: 'Implement', to: 'Review', when: 'always' },
     { from: 'Review', to: 'Implement', when: { field: 'passed', eq: false } },
-    { from: 'Review', to: 'DoDGate', when: { field: 'passed', eq: true } },
-    { from: 'DoDGate', to: 'Implement', when: { field: 'passed', eq: false }, locked: true },
+    // LOCK THE PASSING EDGE, LEAVE THE FAILING EDGE UNLOCKED — same convention as the
+    // seeds. The non-passing-edge rule exempts only `locked && when.eq === true`, so an
+    // UNLOCKED pass edge is treated as a bypass and correctly rejected; and a LOCKED fail
+    // edge silently shadows any node spliced onto the fail path. Getting this backwards
+    // makes the fixture itself invalid — verified: it yields
+    // "Review non-passing edge -> DoDGate can reach Done without re-crossing Review".
+    { from: 'Review', to: 'DoDGate', when: { field: 'passed', eq: true }, locked: true },
+    { from: 'DoDGate', to: 'Implement', when: { field: 'passed', eq: false } },
     { from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: true }, locked: true },
     { from: 'PR', to: 'Done', when: 'always' },
   ],
