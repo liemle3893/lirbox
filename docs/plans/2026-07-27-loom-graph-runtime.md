@@ -3335,6 +3335,34 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     assert.ok(/demo/.test(listOut) && /running/.test(listOut) && /Implement/.test(listOut));
   });
 
+  test('a corrupt state file reports readably, not as a stack trace', () => {
+    // An operator hitting this is mid-incident. Compare against the missing-run path,
+    // which already says "no such run: <path>" — a raw JSON parser dump is a regression
+    // in usability from a sibling error path in the same script.
+    const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-bad-'));
+    fs.mkdirSync(path.join(bad, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(bad, '.loom', 'state', 'broken.json'), '{not json');
+    let out = '';
+    try { execFileSync('node', [REPORT, 'broken'], { cwd: bad, stdio: 'pipe' }); }
+    catch (e) { out = (e.stderr || '').toString(); }
+    assert.ok(/not readable JSON/.test(out), `expected a readable message, got: ${out}`);
+    assert.ok(/broken/.test(out), 'the message must name the run');
+    assert.ok(!/^\s+at /m.test(out), 'must not dump a stack trace at an operator');
+  });
+
+  test('list-runs surfaces an unreadable run instead of hiding it', () => {
+    // Silently skipping an unparseable state file makes a BROKEN run invisible — the
+    // listing reports "no loom runs" while something is in fact damaged. Lying by
+    // omission is worse here than showing a row with an honest "UNREADABLE" status.
+    const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'loom-bad2-'));
+    fs.mkdirSync(path.join(bad, '.loom', 'state'), { recursive: true });
+    fs.writeFileSync(path.join(bad, '.loom', 'state', 'broken.json'), '{not json');
+    const out = execFileSync('node', [LIST], { cwd: bad }).toString();
+    assert.ok(!/no loom runs/.test(out), 'a broken run must not read as "no runs"');
+    assert.ok(/broken/.test(out) && /UNREADABLE/.test(out),
+      `expected the run listed as UNREADABLE, got: ${out}`);
+  });
+
   test('list-runs does not cry wolf about a running run\'s port', () => {
     // The fixture's run is `running` with a recorded port — that port is legitimate, not
     // stale. Warning on any port at all would put a "stale server" notice beside every
@@ -3384,7 +3412,16 @@ if (!name) { console.error('usage: loom-report.cjs <name>'); process.exit(1); }
 
 const p = path.join(process.cwd(), '.loom', 'state', `${name}.json`);
 if (!fs.existsSync(p)) { console.error(`no such run: ${p}`); process.exit(1); }
-const st = JSON.parse(fs.readFileSync(p, 'utf8'));
+let st;
+try { st = JSON.parse(fs.readFileSync(p, 'utf8')); }
+catch (e) {
+  // An operator hitting this is mid-incident. A raw JSON parser stack trace tells them
+  // nothing actionable; name the file and what is wrong with it.
+  console.error(`state file for run '${name}' is not readable JSON: ${p}`);
+  console.error(`  ${e.message}`);
+  console.error('  the run may still be recoverable — inspect the file before deleting it');
+  process.exit(1);
+}
 
 const out = [];
 out.push(`loom run: ${st.workflow}`);
@@ -3454,7 +3491,15 @@ const rows = [];
 for (const f of fs.readdirSync(dir)) {
   if (!f.endsWith('.json')) continue;
   let st;
-  try { st = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
+  try { st = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); }
+  catch {
+    // Do NOT skip. A run whose state will not parse still EXISTS, and silently omitting it
+    // tells the operator "no runs" when something is in fact broken — the listing lies by
+    // omission at exactly the moment it is being consulted.
+    rows.push({ name: f.replace(/\.json$/, ''), status: 'UNREADABLE',
+      cursor: '?', visits: '?', port: '-' });
+    continue;
+  }
   if (!all && st.status === 'complete') continue;
   rows.push({
     name: st.workflow || f.replace(/\.json$/, ''),
