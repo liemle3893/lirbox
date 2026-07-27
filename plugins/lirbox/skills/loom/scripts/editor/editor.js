@@ -161,17 +161,30 @@ function App() {
   }, h(RF.Background, null), h(RF.Controls, null));
 }
 
+// Escape EVERY dynamic value before it reaches innerHTML.
+//
+// Node ids and kinds are not trusted input. They arrive from a planner worker's
+// graphPatch — LLM-generated text — so an id like
+//   <img src=x onerror="fetch('/action',{method:'POST',body:'{\"action\":\"approve\"}'})">
+// would execute inside the page that IS the human approval gate, with access to the
+// loopback server. That converts a weird or prompt-injected planner output into
+// "approve the graph without a human", defeating the control point the whole design
+// rests on. Escaping only `prompt` (as an earlier revision did) is not enough.
+const esc = (v) => String(v == null ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 function renderPanel() {
   if (!selected) return;
   const n = selected;
   const cap = capFor(graph, n.id);
   const locked = !!n.locked;
   $('detail').innerHTML = `
-    <h3>${n.id} <small>${n.kind || 'work'}${locked ? ' 🔒 locked' : ''}</small></h3>
-    <label>Visit cap<br><input id="cap" type="number" min="0" value="${cap}"
+    <h3>${esc(n.id)} <small>${esc(n.kind || 'work')}${locked ? ' 🔒 locked' : ''}</small></h3>
+    <label>Visit cap<br><input id="cap" type="number" min="0" value="${esc(cap)}"
       ${locked ? 'disabled' : ''}></label>
     <label>Prompt<br><textarea id="prompt" ${locked ? 'disabled' : ''}>${
-      (n.prompt || '').replace(/</g, '&lt;')}</textarea></label>
+      esc(n.prompt)}</textarea></label>
     <label>Comment for the replanner<br><textarea id="comment"
       placeholder="e.g. this needs a schema migration before it runs"></textarea></label>
     <button id="addComment">Add comment</button>

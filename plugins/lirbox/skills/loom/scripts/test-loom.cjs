@@ -1232,6 +1232,25 @@ async function main() {
     assert.ok(/readOnly|readonly/.test(editorJs));
   });
 
+  test('every dynamic value in renderPanel is escaped before innerHTML', () => {
+    // Node ids and kinds come from a planner worker's graphPatch — LLM-generated text.
+    // Unescaped, an id containing markup executes inside the page that IS the human
+    // approval gate, with access to the loopback server. Escaping only `prompt` (an
+    // earlier revision) left id and kind raw.
+    const panel = editorJs.slice(editorJs.indexOf('function renderPanel'));
+    const body = panel.slice(0, panel.indexOf('`;') + 2);
+    const raw = [...body.matchAll(/\$\{([^}]+)\}/g)]
+      .map((m) => m[1].trim())
+      // A ternary emitting only fixed literals is not a dynamic value.
+      .filter((e) => !/^locked \?/.test(e))
+      .filter((e) => !/^esc\(/.test(e));
+    assert.deepStrictEqual(raw, [],
+      `unescaped interpolation(s) reaching innerHTML: ${JSON.stringify(raw)}`);
+    assert.ok(/const esc = \(v\) =>/.test(editorJs), 'the esc() helper must exist');
+    assert.ok(/replace\(\/&\/g, '&amp;'\)/.test(editorJs),
+      'esc must escape & first, or the other replacements double-encode');
+  });
+
   test('writes per-node visit caps into invariants, not onto the node', () => {
     assert.ok(/invariants\.visitCaps|visitCaps\[/.test(editorJs),
       'visit caps have exactly one home: invariants.visitCaps');
