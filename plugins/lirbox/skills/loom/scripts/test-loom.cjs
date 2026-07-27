@@ -1090,6 +1090,57 @@ async function main() {
     assert.strictEqual(r.status, 400);
   });
 
+  test('POST /graph rejects a stale baseVersion with 409', async () => {
+    // Optimistic concurrency. Without it, two valid concurrent saves both return 200
+    // and one is silently discarded — the client is told it succeeded while its work
+    // is gone. Measured before the fix: both posts got 200, only the later survived.
+    const current = (await get('/graph')).body;
+    const edited = JSON.parse(JSON.stringify(current));
+    edited.nodes.push({ id: 'Stale', kind: 'work', prompt: 'x' });
+    edited.edges.push({ from: 'Implement', to: 'Stale', when: { field: 'k', eq: 1 } });
+    edited.edges.push({ from: 'Stale', to: 'Implement', when: 'always' });
+
+    const stale = await post('/graph', { baseVersion: current.version - 1, graph: edited });
+    assert.strictEqual(stale.status, 409, 'a stale base version must be rejected');
+    assert.strictEqual(stale.body.currentVersion, current.version);
+
+    const fresh = await post('/graph', { baseVersion: current.version, graph: edited });
+    assert.strictEqual(fresh.status, 200, 'the correct base version must be accepted');
+    assert.strictEqual(fresh.body.version, current.version + 1);
+  });
+
+  test('concurrent saves cannot silently lose an edit', async () => {
+    const base = (await get('/graph')).body;
+    const mk = (id) => {
+      const g = JSON.parse(JSON.stringify(base));
+      g.nodes.push({ id, kind: 'work', prompt: 'x' });
+      g.edges.push({ from: 'Implement', to: id, when: { field: 'k', eq: 1 } });
+      g.edges.push({ from: id, to: 'Implement', when: 'always' });
+      return { baseVersion: base.version, graph: g };
+    };
+    const [a, b] = await Promise.all([post('/graph', mk('RaceA')), post('/graph', mk('RaceB'))]);
+    const codes = [a.status, b.status].sort();
+    assert.deepStrictEqual(codes, [200, 409],
+      `exactly one concurrent save may win; got ${JSON.stringify(codes)}`);
+    // And the loser must be told, not silently dropped.
+    const loser = a.status === 409 ? a : b;
+    assert.ok(loser.body.currentVersion !== undefined,
+      'the rejected save must report the current version so the client can retry');
+  });
+
+  test('an oversized body gets a readable 413, not a socket reset', async () => {
+    const huge = JSON.stringify({ baseVersion: 0, graph: { pad: 'x'.repeat(5e6) } });
+    let status = null, err = null;
+    try {
+      const r = await fetch(base + '/graph', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: huge });
+      status = r.status;
+    } catch (e) { err = e; }
+    assert.strictEqual(status, 413, `expected a 413 the client can read, got ${status ?? err}`);
+    // ...and the server must still be healthy afterwards.
+    assert.strictEqual((await get('/graph')).status, 200, 'server must survive an oversized body');
+  });
+
   test('the server binds loopback only', () => {
     const srcText = fs.readFileSync(SERVER, 'utf8');
     assert.ok(/'127\.0\.0\.1'|"127\.0\.0\.1"/.test(srcText),
