@@ -49,6 +49,26 @@ try {
     post({ baseVersion: g.version, graph: mk('RaceB') })]);
   ok([a, b].sort().join(',') === '200,409',
     `exactly one concurrent save wins and the loser is told (got ${a},${b})`);
+
+  // THE SERVER'S RE-VALIDATION IS THE ENFORCEMENT FOR THE BROWSER PATH, AND NOTHING
+  // ELSE FREEZES IT. graph-server.mjs says so in a comment ("the editor's lock badges
+  // are a courtesy; this is the enforcement") — a comment is not a fence. Measured:
+  // deleting validateGraph + the 422 from the server leaves ALL NINE checks green,
+  // and a POST of `Implement -> <terminal>` on `always` is then accepted 200 and
+  // written to disk, which is the graph scaffold-loom.cjs generates the run from.
+  //
+  // Read the current version back rather than hardcoding it: the race above always
+  // leaves the server at version 1 today, but a hardcoded baseVersion here would make
+  // this assertion silently degrade into a second 409 test — passing without ever
+  // exercising 422 — the moment anything above it changes what version is current.
+  const currentVersion = (await (await fetch(`${base}/graph`)).json()).version;
+  const bypass = mk('Bypass');
+  bypass.edges.push({ from: 'Implement', to: bypass.terminal, when: 'always' });
+  ok(await post({ baseVersion: currentVersion, graph: bypass }) === 422,
+    'the server REJECTS a gate-bypassing graph (422), not just a stale one (409)');
+  const onDisk = JSON.parse(readFileSync(join(root, '.loom', 'e.graph.json'), 'utf8'));
+  ok(!onDisk.edges.some((e) => e.from === 'Implement' && e.to === onDisk.terminal),
+    'the rejected bypass edge was NOT written to disk');
 } finally { srv.kill(); }
 
 if (bad) { console.error(`\nserver-no-lost-update: ${bad} failed`); process.exit(1); }

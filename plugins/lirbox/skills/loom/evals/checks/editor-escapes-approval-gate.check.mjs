@@ -15,8 +15,19 @@ const html = readFileSync(join(EDITOR, 'index.html'), 'utf8');
 let bad = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
 
-const panel = js.slice(js.indexOf('function renderPanel'));
-const body = panel.slice(0, panel.indexOf('`;') + 2);
+// ANCHORS FIRST. Every assertion below is computed from indexOf/slice, and an
+// extraction that MISSES yields an empty result that reads as a clean one.
+// Rename renderPanel and: indexOf returns -1, slice(-1) gives the last character,
+// the second indexOf returns -1, `body` becomes ONE CHARACTER, `raw` is empty, and
+// the XSS fence on the human approval gate reports PASS while scanning nothing.
+// Measured: an ordinary renderPanel -> drawPanel refactor left this check at exit 0.
+const i = js.indexOf('function renderPanel');
+ok(i >= 0, 'found renderPanel in editor.js (anchor for the panel scan)');
+const panel = js.slice(i);
+const j = panel.indexOf('`;');
+ok(j >= 0, 'found the panel template literal (anchor for the interpolation scan)');
+const body = panel.slice(0, j + 2);
+ok(body.length > 200, `panel body looks substantive (got ${body.length} chars)`);
 const raw = [...body.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1].trim())
   .filter((e) => !/^locked \?/.test(e)).filter((e) => !/^esc\(/.test(e));
 ok(raw.length === 0, `no unescaped interpolation reaches innerHTML (found ${JSON.stringify(raw)})`);
