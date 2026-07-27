@@ -1023,12 +1023,19 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
   const conductorBody = (src) => src
     .replace(/\/\*[\s\S]*?\*\//g, '')        // block comments (graph-core's prose header)
     .replace(/^[ \t]*\/\/.*$/gm, '')         // line comments
-    // Template literals: blank the TEXT but KEEP the ${...} expressions. A real
-    // interpolation is executing code — blanking it whole would hide a forbidden
-    // primitive inside one, silently disarming the scan for any future generator edit
-    // that introduces a genuine interpolation into the emitted conductor.
-    .replace(/`((?:[^`\\]|\\.)*)`/g, (_m, inner) =>
-      '"" ' + [...inner.matchAll(/\$\{([^{}]*)\}/g)].map((x) => x[1]).join('; '))
+    // Template literals are blanked WHOLE. That is only safe because a separate
+    // invariant — `liveInterpolations`, asserted below — proves the emitted conductor
+    // contains no LIVE interpolation at all.
+    //
+    // Do NOT try to scan inside interpolations with a regex. An earlier attempt
+    // extracted `${...}` bodies and had two real defects: it could not distinguish an
+    // escaped `\${crypto}` (inert placeholder data) from a live `${crypto}`, so a
+    // future placeholder happening to be named `crypto` would false-positive; and
+    // `[^{}]*` cannot match across nested braces, so `${f({a:1})}` extracted NOTHING
+    // and hid its contents completely — reopening the exact blind spot it was meant
+    // to close. Regex cannot parse JavaScript. Prove there is no code in here, then
+    // blank freely.
+    .replace(/`(?:[^`\\]|\\.)*`/g, '""')
     .replace(/'(?:[^'\\]|\\.)*'/g, "''")     // single-quoted strings
     .replace(/"(?:[^"\\]|\\.)*"/g, '""');    // double-quoted strings (GRAPH_V0 node prompts)
 
@@ -1067,14 +1074,44 @@ Insert into `test-loom.cjs` before the final `process.stdout.write` line:
     }
   });
 
-  test('the scan sees inside real template-literal interpolations', () => {
-    // Blanking a template literal WHOLE would hide executing code in a ${...}.
-    // Not reachable today (esc() escapes every ${ in prompt data) but it would
-    // silently disarm the scan the first time a genuine interpolation is added.
-    const injected = emitted.replace('const NAME =',
-      'const leak = `prefix ${Date.now()} suffix`\nconst NAME =');
-    assert.ok(FORBIDDEN.some(([, re]) => re.test(conductorBody(injected))),
-      'a forbidden primitive inside a real interpolation was invisible to the scan');
+  // Counts LIVE (unescaped) `${` interpolations inside template literals.
+  // A character walk, deliberately not a regex: escape state and nested braces are
+  // exactly what a regex gets wrong here, and both produced real defects when tried.
+  const liveInterpolations = (src) => {
+    let count = 0, i = 0;
+    while (i < src.length) {
+      if (src[i] === '`') {
+        i++;
+        while (i < src.length && src[i] !== '`') {
+          if (src[i] === '\\') { i += 2; continue; }   // escaped char — consume both
+          if (src[i] === '$' && src[i + 1] === '{') count++;
+          i++;
+        }
+      }
+      i++;
+    }
+    return count;
+  };
+
+  test('the emitted conductor contains no LIVE template-literal interpolation', () => {
+    // THE invariant that licenses blanking template literals whole. esc() converts
+    // every `${` in prompt data to `\${`, so nothing executable should live inside a
+    // backtick literal. If this ever fails, the purity scan has a blind spot and
+    // whoever introduced the interpolation must extend the scan to cover it —
+    // do NOT simply delete this test.
+    assert.strictEqual(liveInterpolations(emitted), 0,
+      'a live ${...} appeared inside a template literal — the purity scan blanks those '
+      + 'whole and can no longer see the code inside. Extend the scan before proceeding.');
+  });
+
+  test('the live-interpolation detector actually detects', () => {
+    // The invariant above is worthless if the detector cannot fire. Includes the two
+    // shapes that defeated the earlier regex approach.
+    assert.strictEqual(liveInterpolations('const p = `a \\${escaped} b`'), 0);
+    assert.strictEqual(liveInterpolations('const x = `a ${Date.now()} b`'), 1);
+    assert.strictEqual(liveInterpolations('const x = `${f({a:1})}`'), 1, 'nested braces');
+    assert.strictEqual(liveInterpolations('const x = `${ {a: 1} }`'), 1, 'nested object');
+    assert.strictEqual(liveInterpolations('const x = `\\${safe} ${live}`'), 1, 'mixed');
   });
 
   test('prose inside a template literal still does not false-positive', () => {
