@@ -156,11 +156,42 @@ async function main() {
     assert.strictEqual(core.dominates(G, 'DoDGate', 'PR', 'Implement'), true);
   });
 
-  test('positional: a gate already behind the cursor no longer dominates', () => {
-    // Cursor sits at Implement having arrived via DoDGate:fail. Review is upstream
-    // of the cursor, so the remaining path need not cross it — this is exactly the
-    // case structural dominance alone gets wrong.
-    assert.strictEqual(core.dominates(G, 'Review', 'PR', 'Implement'), false);
+  test('positional: in G, Review DOES dominate PR from Implement', () => {
+    // Implement's only out-edge is to Review, so every path Implement -> PR crosses
+    // it. Dominance is a property of the graph, never of execution history — a gate
+    // the run happens to have already passed still dominates if the topology says so.
+    assert.strictEqual(core.dominates(G, 'Review', 'PR', 'Implement'), true);
+  });
+
+  // The case where positional dominance genuinely diverges from structural needs a
+  // graph in which the cursor can reach the terminal WITHOUT re-crossing the gate.
+  // G has no such shape; this is the spec's start -> Gate -> B -> terminal scenario.
+  //   Setup -> A -> Gate -> PR
+  //                 Gate -> B -> PR      (B reaches PR directly)
+  const G2 = {
+    start: 'Setup', terminal: 'PR',
+    nodes: [{ id: 'Setup' }, { id: 'A' }, { id: 'Gate' }, { id: 'B' }, { id: 'PR' }],
+    edges: [
+      { from: 'Setup', to: 'A', when: 'always' },
+      { from: 'A', to: 'Gate', when: 'always' },
+      { from: 'Gate', to: 'PR', when: { field: 'passed', eq: true } },
+      { from: 'Gate', to: 'B', when: { field: 'passed', eq: false } },
+      { from: 'B', to: 'PR', when: 'always' },
+    ],
+  };
+
+  test('positional: Gate dominates PR from start (structural)', () => {
+    assert.strictEqual(core.dominates(G2, 'Gate', 'PR', 'Setup'), true);
+  });
+
+  test('positional: Gate does NOT dominate PR from B', () => {
+    // B reaches PR directly. Structural dominance from `start` still holds, so this
+    // is precisely the gap the positional check exists to close.
+    assert.strictEqual(core.dominates(G2, 'Gate', 'PR', 'B'), false);
+  });
+
+  test('positional: Gate still dominates PR from A', () => {
+    assert.strictEqual(core.dominates(G2, 'Gate', 'PR', 'A'), true);
   });
 
   test('a gate dominates itself', () => {
@@ -224,6 +255,14 @@ function reachable(graph, from, skip) {
 // True when EVERY path from `from` to `target` crosses `gate`.
 // Proof by deletion: remove the gate; if the target is still reachable, some path
 // avoided it. O(V+E) per gate.
+//
+// This is the WHOLE definition. Do not add heuristics on top of it — in particular,
+// do not restrict it to immediate predecessors of `target`: a gate two hops from the
+// terminal (Review -> DoDGate -> PR) dominates just as strongly as one hop, and such
+// a restriction makes every multi-hop gate report a false violation.
+// Dominance is a property of the GRAPH, never of execution history. "This gate was
+// already passed" is expressed by leaving it out of `unsatisfiedGates` at the call
+// site (see validateGraph in Task 3) — never by weakening this function.
 function dominates(graph, gate, target, from) {
   if (gate === target) return true;
   return !reachable(graph, from, [gate]).has(target);
@@ -238,7 +277,7 @@ export { outEdges, reachable, dominates };
 node plugins/lirbox/skills/loom/scripts/test-loom.cjs
 ```
 
-Expected: PASS — 9 `ok` lines, `all green`.
+Expected: PASS — 12 `ok` lines, `all green`.
 
 - [ ] **Step 5: Commit**
 
