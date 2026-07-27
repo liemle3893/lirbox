@@ -28,7 +28,7 @@
     {
       "id": "DoDBaseline",
       "kind": "work",
-      "prompt": "Run every checkable DoD criterion's check FILE against the worktree BEFORE any work. For each: verify the file's sha256 matches its frozen checkSha, then run it and record met (exit 0) / unmet (non-zero) / error (could not run). Measure only — fix nothing. A criterion whose baseline is \"red\" but which is already MET cannot discriminate this run's work: report discriminates=false and FAIL the run, because a check that was green before the work began proves nothing about the work. Criteria explicitly marked baseline \"green-ok\" are regression guards and are expected to be MET — they never fail the run. A sha mismatch is a hard failure.",
+      "prompt": "Run every checkable DoD criterion's check FILE against the worktree BEFORE any work. For each: verify the file's sha256 matches its frozen checkSha, then run it and record met (exit 0) / unmet (non-zero) / error (could not run). Measure only — fix nothing. A criterion whose baseline is \"red\" but which is already MET cannot discriminate this run's work: report discriminates=false, because a check that was green before the work began proves nothing about the work. You do not need to do anything else to stop the run — this node's only outgoing edge requires discriminates=true, so reporting false matches no edge and the interpreter hard-fails with \"no edge matched at DoDBaseline\". Report honestly; the graph enforces the consequence. Criteria explicitly marked baseline \"green-ok\" are regression guards and are expected to be MET — they never fail the run. A sha mismatch is a hard failure.",
       "model": "haiku",
       "schema": {
         "type": "object",
@@ -221,7 +221,10 @@
     {
       "from": "DoDBaseline",
       "to": "Plan",
-      "when": "always"
+      "when": {
+        "field": "discriminates",
+        "eq": true
+      }
     },
     {
       "from": "Plan",

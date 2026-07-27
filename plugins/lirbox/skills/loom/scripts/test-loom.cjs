@@ -1372,6 +1372,17 @@ async function main() {
     assert.ok(/checkSha|sha256/.test(n.prompt));
   });
 
+  test('delivery: a non-discriminating baseline structurally stops the run', () => {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'seeds', 'delivery.json'), 'utf8'));
+    const e = d.edges.find((x) => x.from === 'DoDBaseline' && x.to === 'Plan');
+    assert.ok(e, 'DoDBaseline -> Plan edge missing');
+    assert.deepStrictEqual(e.when, { field: 'discriminates', eq: true },
+      'edge must require discriminates=true; unconditional edges leave reporting false consequence-free');
+    assert.strictEqual(core.matches(e.when, { discriminates: true }), true);
+    assert.strictEqual(core.matches(e.when, { discriminates: false }), false);
+    assert.strictEqual(core.matches(e.when, {}), false, 'missing field must not match');
+  });
+
   process.stdout.write(`\n${failures ? `${failures} FAILURE(S)` : 'all green'}\n`);
   process.exit(failures ? 1 : 0);
 }
