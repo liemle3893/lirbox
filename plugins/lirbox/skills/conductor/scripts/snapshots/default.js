@@ -209,7 +209,6 @@ test -d "${WORKTREE}" && echo OK`,
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
-  await checkpoint('Setup')
 }
 
 phase('Work')

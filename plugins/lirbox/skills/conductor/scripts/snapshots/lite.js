@@ -219,7 +219,6 @@ test -d "${WORKTREE}" && echo OK`,
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
-  await checkpoint('Setup')
 }
 
 phase('DoDBaseline')
@@ -254,7 +253,6 @@ Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase A
       schema: { type: 'object', additionalProperties: false, required: ["goal"], properties: {"title":{"type":"string"},"goal":{"type":"string"},"acceptanceCriteria":{"type":"array","items":{"type":"string"}}} } },
   )
   done.add('Brief')
-  await checkpoint('Brief')
 }
 
 phase('Work')
@@ -549,7 +547,6 @@ If a PR for this branch already exists, return its URL instead of erroring.`,
       schema: { type: 'object', additionalProperties: false, required: ["prUrl"], properties: {"prUrl":{"type":"string"}} } },
   )
   done.add('PR')
-  await checkpoint('PR')
 }
 
 phase('TicketUpdate')
@@ -566,7 +563,6 @@ Linear: use the Linear MCP update/comment tools instead, ONLY if connected.`,
       schema: { type: 'object', additionalProperties: false, required: ["updated"], properties: {"updated":{"type":"boolean"},"transition":{"type":"string"}} } },
   )
   done.add('TicketUpdate')
-  await checkpoint('TicketUpdate')
 }
 
 return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }

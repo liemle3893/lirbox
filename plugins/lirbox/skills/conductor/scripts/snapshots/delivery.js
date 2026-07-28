@@ -224,7 +224,6 @@ test -d "${WORKTREE}" && echo OK`,
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
-  await checkpoint('Setup')
 }
 
 phase('DoDBaseline')
@@ -259,7 +258,6 @@ Use ToolSearch to load the tracker tools, then fetch verbatim (do NOT rephrase A
       schema: { type: 'object', additionalProperties: false, required: ["goal"], properties: {"title":{"type":"string"},"goal":{"type":"string"},"acceptanceCriteria":{"type":"array","items":{"type":"string"}}} } },
   )
   done.add('Brief')
-  await checkpoint('Brief')
 }
 
 phase('RED')
@@ -419,7 +417,6 @@ VERIFY (GREEN): run the full relevant test suite for the changes on ${BRANCH} vs
   )
   if (!results.verify || !results.verify.green) throw new Error('Verify failed: not green — ' + (results.verify && (results.verify.failing || []).join(', ')))
   done.add('Verify')
-  await checkpoint('Verify')
 }
 
 phase('PathGap')
@@ -541,7 +538,6 @@ RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branc
   )
   if (!results.reVerify || !results.reVerify.green) throw new Error('ReVerify failed: regression after improve/simplify — ' + (results.reVerify && (results.reVerify.regressions || []).join(', ')))
   done.add('ReVerify')
-  await checkpoint('ReVerify')
 }
 
 phase('DocsGate')
@@ -698,7 +694,6 @@ If a PR for this branch already exists, return its URL instead of erroring.`,
       schema: { type: 'object', additionalProperties: false, required: ["prUrl"], properties: {"prUrl":{"type":"string"}} } },
   )
   done.add('PR')
-  await checkpoint('PR')
 }
 
 phase('TicketUpdate')
@@ -715,7 +710,6 @@ Linear: use the Linear MCP update/comment tools instead, ONLY if connected.`,
       schema: { type: 'object', additionalProperties: false, required: ["updated"], properties: {"updated":{"type":"boolean"},"transition":{"type":"string"}} } },
   )
   done.add('TicketUpdate')
-  await checkpoint('TicketUpdate')
 }
 
 return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }

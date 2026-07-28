@@ -10,35 +10,44 @@
 // worktree add plus a symlink, DoDBaseline runs N commands, PR pushes and calls gh, and Brief /
 // TicketUpdate are guarded no-ops (`if (!TICKET) log(...)`) on any non-ticket run.
 //
-// Frozen contract (see the backlog item text):
-//   1. The front matter merges — Setup + DoDBaseline + Brief become ONE phase. They consume none
-//      of each other's output (Brief hits the tracker and never touches the worktree).
-//   2. ReVerify is folded into the code-quality gate's exit condition rather than being its own
-//      phase: CodeGate already cannot pass without buildExit === 0 (the build-evidence contract),
-//      so a separate phase re-proves what the prior gate just proved.
-//   3. The delivery profile emits at most 9 `await checkpoint(` calls (a checkpoint exists to avoid
-//      re-running EXPENSIVE work; a seconds-cheap idempotent phase does not need one).
-// NOT asserted, and deliberately so: the backlog item originally claimed Brief/TicketUpdate should
-// not be EMITTED on a non-ticket run because the generator knows at scaffold time. It does not —
-// `TICKET` is read from `args.ticket` at LAUNCH (`const TICKET = (args && args.ticket) ? ... : null`),
-// so a scaffold cannot know whether a ticket will be supplied, and the runtime `if (!TICKET)` guard
-// is the correct design. A bare scaffold already emits only Setup -> Implement. That claim was
-// dropped from the contract rather than frozen into a check that would push the loop toward a
-// wrong fix.
+// Frozen contract:
+//   1. The delivery profile emits at most 9 `await checkpoint(` calls.
+//   2. Specifically, the CHEAP phases stop buying a dedicated checkpoint worker: Setup (a worktree
+//      add plus a symlink), Brief (one tracker call), Verify and ReVerify (run the suite), PR
+//      (push + gh) and TicketUpdate (one tracker call) must emit no `checkpoint('<self>')`.
+//   3. The EXPENSIVE phases keep theirs — DoDBaseline, RED, the work phase, PathGap, CodeGate,
+//      DocsGate, DoDGate and Writeup must each still checkpoint. This fences the fix against simply
+//      deleting checkpoints wholesale to hit the budget.
 //
-// Phases that stay separate (expensive to redo, which is what a checkpoint is FOR): Implement, RED,
-// CodeGate, PathGap, DoDGate, Writeup, DocsGate. The principle is self-limiting — it never merges
-// anything expensive — and the generator already REQUIRES every phase to be idempotent
-// (at-least-once on resume), which is exactly what makes merging the cheap ones safe.
+//      DoDBaseline is deliberately EXPENSIVE despite running in seconds: it measures each checkable
+//      criterion BEFORE any work, so re-running it on a resume after work had landed would record a
+//      post-work state as the baseline and destroy the honesty check. Cheapness to re-RUN is not the
+//      test; cheapness to re-run CORRECTLY is.
 //
-// Baseline (RED): delivery emits Setup, DoDBaseline and Brief as three separate phases, emits
-// ReVerify as its own phase, and emits 15 checkpoint workers across 14 phases. All three
-// assertions fail.
+// WHY this attacks checkpoints rather than merging the phases: the backlog item proposed collapsing
+// Setup+DoDBaseline+Brief into one Prepare phase and folding ReVerify into the code-quality gate.
+// Both are blocked by LOCKED frozen checks that the loop may not edit and the floor runs every
+// round — frontend-gate-phase.check.mjs asserts phase('ReVerify') exists and orders before
+// FrontendGate, and dod-gate.check.mjs asserts phase('DoDBaseline') exists before the work phase
+// AND that a judged-only DoD emits none (a contract a merged Prepare phase could not express). A
+// check demanding those phases disappear would contradict two green checks, so every fix satisfying
+// it would fail the floor and be reverted. The phase-merge idea needs those contracts renegotiated
+// first, by hand; it is out of scope here.
 //
-// HOW this is judged: by GENERATING scripts and reading the emitted text — no LLM, no network. The
-// assertions target the emitted phase list and checkpoint count, not any particular spelling of the
-// fix, so a fix is free to name the merged phase whatever it likes as long as the three originals
-// stop being separate phases.
+// The saving is real without the merge: 14 phases each buy a phase worker AND a checkpoint worker,
+// and dropping the 6 cheap ones removes 6 subagent dispatches per delivery run.
+//
+// Resume stays correct: `done` is an in-memory Set that still accumulates every completed phase, so
+// the NEXT checkpoint persists a phasesDone that includes the un-checkpointed ones — the
+// contiguous-prefix resume guard still holds. The only cost is that a crash between a cheap phase
+// and the next checkpoint re-runs that cheap phase, which is precisely the intended trade (every
+// phase is already required to be idempotent).
+// Baseline (RED): delivery emits 15 checkpoint workers across 14 phases, and every cheap phase
+// buys one. Assertions 1 and 2 fail.
+//
+// HOW this is judged: by GENERATING a delivery script and reading the emitted text — no LLM, no
+// network. The assertions target which phases emit `checkpoint('<self>')` and the total count, not
+// any particular spelling of the fix.
 //
 // Exit codes: 0 = GREEN (contract holds), 1 = RED (contract violated), 2 = harness error
 // (generation failed / the script could not be produced) so a RED verdict never means "the
@@ -99,31 +108,38 @@ const delivery = generate('delivery', [
 ]);
 const dPhases = phasesOf(delivery);
 
-// 1. the front matter merged — Setup/DoDBaseline/Brief must not all survive as separate phases
-const frontSurvivors = ['Setup', 'DoDBaseline', 'Brief'].filter((p) => dPhases.includes(p));
-if (frontSurvivors.length > 1) {
-  fail.push(`front matter not merged: ${frontSurvivors.join(', ')} are still separate phases (${dPhases.length} phases total)`);
-}
-
-// 2. ReVerify folded into the gate, not its own phase
-if (dPhases.includes('ReVerify')) {
-  fail.push('ReVerify is still a separate phase — it re-proves what CodeGate\'s buildExit===0 already established');
-}
-
-// 3. checkpoint budget
+// 1. checkpoint budget
 const checkpoints = (delivery.match(/await checkpoint\(/g) || []).length;
 if (checkpoints > 9) {
   fail.push(`delivery emits ${checkpoints} checkpoint workers (budget: <= 9)`);
 }
 
+// 2. cheap phases buy no checkpoint worker
+const CHEAP = ['Setup', 'Brief', 'Verify', 'ReVerify', 'PR', 'TicketUpdate'];
+for (const p of CHEAP) {
+  if (!dPhases.includes(p)) continue;               // phase absent under this flag set — nothing to assert
+  if (delivery.includes(`checkpoint('${p}')`)) {
+    fail.push(`cheap phase '${p}' still buys a dedicated checkpoint worker`);
+  }
+}
+
+// 3. expensive phases keep theirs (fence against deleting checkpoints wholesale to hit the budget)
+const EXPENSIVE = ['DoDBaseline', 'RED', 'Implement', 'PathGap', 'CodeGate', 'DocsGate', 'DoDGate', 'Writeup'];
+for (const p of EXPENSIVE) {
+  if (!dPhases.includes(p)) continue;
+  if (!delivery.includes(`checkpoint('${p}')`)) {
+    fail.push(`expensive phase '${p}' lost its checkpoint — redo cost there is exactly what a checkpoint is for`);
+  }
+}
+
 rmSync(tmp, { recursive: true, force: true });
 
 if (fail.length) {
-  console.error('RED — trivial phases still pay full phase + checkpoint cost:');
+  console.error('RED — cheap phases still buy dedicated checkpoint workers:');
   for (const f of fail) console.error('  - ' + f);
   console.error(`\n  delivery phases (${dPhases.length}): ${dPhases.join(' -> ')}`);
 
   process.exit(1);
 }
-console.log('GREEN — cheap/no-op phases are merged and the checkpoint budget holds.');
+console.log('GREEN — checkpoint toll is paid only where redo is expensive.');
 process.exit(0);

@@ -214,7 +214,6 @@ test -d "${WORKTREE}" && echo OK`,
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
-  await checkpoint('Setup')
 }
 
 phase('RED')
@@ -374,7 +373,6 @@ VERIFY (GREEN): run the full relevant test suite for the changes on ${BRANCH} vs
   )
   if (!results.verify || !results.verify.green) throw new Error('Verify failed: not green — ' + (results.verify && (results.verify.failing || []).join(', ')))
   done.add('Verify')
-  await checkpoint('Verify')
 }
 
 phase('PathGap')
@@ -442,7 +440,6 @@ RE-VERIFY: after IMPROVE/SIMPLIFY (CodeGate), re-run the FULL test suite + branc
   )
   if (!results.reVerify || !results.reVerify.green) throw new Error('ReVerify failed: regression after improve/simplify — ' + (results.reVerify && (results.reVerify.regressions || []).join(', ')))
   done.add('ReVerify')
-  await checkpoint('ReVerify')
 }
 
 return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
