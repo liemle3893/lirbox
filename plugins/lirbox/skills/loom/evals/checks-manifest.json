@@ -18,6 +18,7 @@
     "gate-failure-edges-return": { "expect": "green" },
     "baseline-discrimination-structural": { "expect": "green" },
     "server-no-lost-update": { "expect": "green" },
-    "editor-escapes-approval-gate": { "expect": "green" }
+    "editor-escapes-approval-gate": { "expect": "green" },
+    "lock-freeze-must-be-stamped": { "expect": "green" }
   }
 }

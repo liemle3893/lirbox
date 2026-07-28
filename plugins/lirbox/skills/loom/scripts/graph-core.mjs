@@ -190,6 +190,14 @@ function validateGraph(next, prev, cursor) {
   // `next.invariants` governs ONLY pre-approval, when there is no prior graph yet.
   const inv = (prev && prev.invariants) ? prev.invariants : (next.invariants || {});
 
+  // A gate lock nothing stamped is not a lock: without invariants.lockedHash the
+  // exempt-locked-edge rule has nothing behind it and a patch can MINT locked:true.
+  // Only once `prev` exists — a graph pre-approval has not been frozen yet.
+  if (prev && (inv.mustCross || []).length && !inv.lockedHash) {
+    v.push('invariants.mustCross is set but invariants.lockedHash was never stamped — '
+      + 'the freeze did not happen, so locked flags are unenforceable');
+  }
+
   // And say so out loud, so a UI that drifts them gets a readable error rather than
   // silently having its edits ignored.
   if (prev && prev.invariants
