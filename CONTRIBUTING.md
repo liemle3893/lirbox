@@ -192,7 +192,8 @@ cost split — the two halves differ by three orders of magnitude:**
 - If the user **accepts** — write the Harbor task and run the **free** gate. The paid run is a
   separate ask, made separately.
 
-A skill declares its own tasks; nothing in the builder knows about any specific skill.
+A skill declares its own tasks. **The declaration is the tracked source of truth** — it is what a
+reviewer reads and the only copy anyone edits:
 
 ```
 plugins/lirbox/skills/<skill>/harbor/
@@ -201,21 +202,47 @@ plugins/lirbox/skills/<skill>/harbor/
     instruction.md        REQUIRED — what the agent is asked to do
     verify.sh             REQUIRED — the only grader; writes /logs/verifier/reward.json
     files/                optional — copied into /app before the agent runs
-    task.toml             optional — hand-tuned resources/network/artifacts; merged
+    task.toml             optional — resources/network/artifacts
+```
+
+Harbor wants a different on-disk layout. There is **no builder script** — a task is run rarely and
+by hand, so assemble it by hand into `.harbor/` (gitignored, per-machine, rebuildable from the
+declaration at any time):
+
+```
+.harbor/tasks/<skill>__<id>/
+  instruction.md          harness.md + "---" + the declaration's instruction.md
+  task.toml               [task] name/version/description, [environment] cpus/memory_mb,
+                          [agent] timeout_sec, [verifier] timeout_sec
+  environment/
+    Dockerfile            node:22-bookworm-slim + git ca-certificates curl ripgrep, WORKDIR /app
+    files/                ← the declaration's files/
+  tests/
+    test.sh               ← the declaration's verify.sh (chmod +x)
+    skill-assets/         ← any skill asset the grader invokes (see the caveat below)
 ```
 
 ```bash
-node scripts/harbor-build.mjs --skill <skill>                    # build that skill's tasks
 harbor run -p .harbor/tasks/<skill>__<id> -a nop -e docker -y    # free: discrimination gate only
 ```
 
-Two honest caveats. Harbor is **not adopted** — `swe-run.mjs` is still the execution engine and
-no scorecard has been produced through Harbor; treat tier 3 as an available instrument, not the
-default path. And when injecting the skill catalog into a container, always use the **pruned**
-catalog `harbor-build.mjs` emits (`.harbor/skills`), never `plugins/lirbox/skills` — skills keep
-their eval material inside their own directory, so an unpruned inject puts every task's hidden
-graders in the agent's own discovery path and it can read the answer key. The prune is generic —
-every skill's `evals/`, `harbor/` and `arena/` — and hard-fails if anything leaks.
+Three honest caveats.
+
+Harbor is **not adopted** — `swe-run.mjs` is still the execution engine and no scorecard has been
+produced through Harbor; treat tier 3 as an available instrument, not the default path.
+
+When injecting the skill catalog into a container, **never point at `plugins/lirbox/skills`** —
+skills keep their eval material inside their own directory, so an unpruned inject puts every task's
+hidden graders in the agent's own discovery path and it can read the answer key. Copy the tree to
+`.harbor/skills/` and strip every skill's `evals/`, `harbor/` and `arena/` (and any `*.bundle`)
+first, then confirm no `verify.sh` or `fail_to_pass` survived — that pruned copy is what
+`--skill` points at below.
+
+A grader that runs a skill's own validator — `flowchart`'s `verify.sh` calls
+`/tests/skill-assets/validate.mjs` — needs a **copy** of it under `tests/skill-assets/`. That copy
+is manual and has nothing watching it: change `plugins/lirbox/skills/<skill>/assets/validate.mjs`
+and every stale copy keeps silently grading against the old version. Re-copy when you touch the
+assets.
 
 #### Running against Ollama, or any Anthropic-compatible endpoint
 
