@@ -54,6 +54,31 @@ tracked.
 - A skill's frontmatter `description` is its **trigger** — keep it specific; it decides when Claude invokes it.
 - Skills resolve under the `lirbox:` namespace (e.g. `lirbox:conductor`).
 
+## Shipping a skill — the three tiers (full detail in [CONTRIBUTING.md](./CONTRIBUTING.md#testing))
+
+**Tier 1** validate + smoke-test + `skill-lint`. **Tier 2** evals — `evals/floor/`, `evals/checks/`,
+`evals/checks-manifest.json`, green under `node scripts/evals-all.mjs --fast`. **Tiers 1–2 are
+required**; a skill with no floor is ungated forever *and* can never be improved by `whetstone`,
+whose keep-rule has nothing to tunnel-proof against without one.
+
+**Tier 3 — Harbor (containerised behavioural test): ASK THE USER, never assume.** Tier 2 is
+artifact-level only — swap the model and every tier-2 check stays green. When implementing a skill,
+offer tier 3 and state the cost split honestly: building the task and running the discrimination
+gate (`-a nop` / `-a oracle`) is **free** (no model calls, ~30s/task); a real behavioural run
+(`-a claude-code -m <model>`) is **~$5–15 per task**. Declined → skip it and say so in the summary.
+Accepted → write the task and run the free gate; the paid run is a separate ask.
+
+Tasks are declared per skill under `plugins/lirbox/skills/<skill>/harbor/tasks/<id>/`
+(`instruction.md` + `verify.sh` required) — that declaration is the tracked source. To run one you
+assemble it by hand into Harbor's on-disk layout under `.harbor/` (gitignored, per-machine); there
+is no builder script. Layout and the assembly steps: [CONTRIBUTING.md](./CONTRIBUTING.md#tier-3--harbor-containerised-behavioural-test--offer-it-do-not-assume-it).
+
+Two things that bite. **Never inject `plugins/lirbox/skills` into a container** — skills keep eval
+material inside their own dir, so an unpruned inject hands the agent the graders it is scored
+against; strip every skill's `evals/`, `harbor/` and `arena/` first. And a grader that runs a
+skill's own validator needs a **copy** of it inside the task; that copy is manual, so re-copy it
+whenever the skill's `assets/` change or you will score against a stale validator.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

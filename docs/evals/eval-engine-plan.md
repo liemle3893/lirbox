@@ -46,12 +46,21 @@ skill" is — and that is a skill/prompt defect with a completely different fix 
 capability verdict. The single headline number hides the distinction.
 
 **Correction found during implementation (2026-07-25):** the engagement *gap* above is weaker still
-— it is not usable at all. `swe-score.mjs`'s `loadCells()` hardcodes `engaged: true`, because a
-`.grade` file only exists for cells that engaged; non-engaged cells leave no grade and never enter
+— it is not usable at all. `swe-score.mjs`'s `loadCells()` hardcoded `engaged: true`, because a
+`.grade` file only existed for cells that engaged; non-engaged cells left no grade and never entered
 the denominator. `base-opus48-1m-high` was built that way (`--cells`), so its 5/5 engagement was
 **assumed by construction, never measured**. The only *measured* opus arm is `base-opus48-1m-med` at
 4/5, which differs from the sonnet row in **effort as well as model** — confounded — and even at
 face value 4/5 vs 2/5 is Fisher exact **p = 0.52** at n=5.
+
+> **FIXED 2026-07-27.** `swe-run.mjs` now writes a `.grade` record for *every* cell — non-engaged and
+> timed-out included — carrying the measured `engaged` flag, and `loadCells()` reads that flag instead
+> of assuming it. Engagement is tri-state (`true` / `false` / `null`); a record with no `engaged`
+> field stays **unknown** and keeps the `†` marker rather than being promoted to a measurement, so the
+> three legacy `--cells` rows above are still correctly daggered. Guarded by
+> `arena/evals/checks/engagement-measured-not-assumed.check.mjs`. The *historical* rows remain
+> unusable for a cross-model comparison — that part of the finding stands, and only a fresh
+> `swe-run` per model at matched effort fixes it.
 
 So the sonnet half of the finding stands (2/5 engaged, 6/6 on attempted criteria, all measured), but
 there is **no usable cross-model engagement comparison** in the recorded data. Getting one needs a
@@ -101,7 +110,9 @@ recovers most of the power without the independence lie.
 
 1. **`runs: 1` in every recorded scorecard** despite `--runs N` existing → zero within-config
    variance estimate, no `pass^k`, no flake detection.
-2. **Headline metric conflates engagement failure with quality failure** (§2).
+2. ~~**Headline metric conflates engagement failure with quality failure** (§2).~~ **FIXED** — the
+   scoreboard renders engagement beside the headline (#41), and engagement is now *measured* rather
+   than assumed on both the `swe-run` and `--cells` paths (2026-07-27, §2).
 3. **No significance test** — comparison is by eyeballing overlapping Wilson CIs. That is
    conservative and lossy: non-overlap implies significance, but overlap does *not* imply
    non-significance.

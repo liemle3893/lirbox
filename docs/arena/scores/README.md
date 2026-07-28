@@ -40,9 +40,12 @@ is the noise source and any A-vs-B gap smaller than that spread is unreadable.
 | x-uglify-conductor-opus48-high | 2026-07-14 | `68fc7b29894a` | claude-opus-4-8[1m] / high | **0/1 (0%)** | 0%–79% | 1/1 | 0/1 | 0/0 |
 | x-uglify-conductor-v2-opus48-high | 2026-07-14 | `68fc7b29894a` | claude-opus-4-8[1m] / high / /Users/liemlhd/Documents/git/Personal/lirbox/.worktrees/improve-conductor-20260714-182449/plugins/lirbox | **0/1 (0%)** | 0%–79% | 1/1 | 0/1 | 0/6 |
 
-† engagement assumed, not measured: the row was built from `.grade` files (`--cells`), which exist
-only for cells that engaged — non-engaged cells leave no grade and never enter the denominator. Only
-`swe-run.mjs` rows measure engagement. **F2P tests** is pooled over all cells, so non-engaged cells
+† engagement assumed, not measured: the row contains at least one cell whose engagement was never
+recorded. Those rows were built (`--cells`) from `.grade` files written back when only ENGAGED cells
+produced one — a non-engaged cell left no grade, so it never entered the denominator and its
+non-engagement is structurally invisible. `swe-run.mjs` now writes a grade record for every cell
+carrying its measured `engaged` flag, so rows built either way measure engagement; a † means the
+underlying files predate that. **F2P tests** is pooled over all cells, so non-engaged cells
 contribute 0/0 and vanish from it — it says nothing about engagement either.
 
 Produce a new row: `node plugins/lirbox/skills/arena/scripts/swe-run.mjs --name <label> --model <m> --effort <e> [--plugin-dir <lirbox-checkout>] [--runs N]`
