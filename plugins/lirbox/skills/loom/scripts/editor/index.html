@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>loom — graph editor</title>
+<!-- Exact versions + SRI. This page is served next to a repo it is about to edit;
+     a CDN serving different bytes tomorrow would be arbitrary code execution.
+     Regenerate these four tags with the command in Step 3b after any version bump. -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+        integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
+        integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/reactflow@11.11.4/dist/umd/index.js"
+        integrity="sha384-lA1w00Vex5qXDv4/xYJO/e8SCjfdlNghbTP+s+2zl37rCEAC7trsSRpYrv/JQy5y" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://unpkg.com/reactflow@11.11.4/dist/style.css"
+      integrity="sha384-uySezIHhsCs2A2+GIarZ89Bi2gd6yjY0I1FFVamfrk6hgEUWLuBYlXA7bYr6dHaJ" crossorigin="anonymous">
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  #app { display: flex; height: 100vh; }
+  #canvas { flex: 1; }
+  #panel { width: 320px; border-left: 1px solid #8884; padding: 12px; overflow-y: auto; }
+  #bar { position: absolute; z-index: 10; top: 12px; left: 12px; display: flex; gap: 8px; }
+  button { padding: 6px 12px; border-radius: 6px; border: 1px solid #8886; background: #8881; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #violations { color: #c33; white-space: pre-wrap; margin-top: 8px; }
+  #violations:empty { display: none; }
+  textarea { width: 100%; min-height: 120px; font: 12px ui-monospace, monospace; }
+  .node-gate { border-color: #c93 !important; }
+  .node-work { border-color: #39c !important; }
+  .locked::after { content: " 🔒"; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="canvas"><div id="bar">
+    <button id="save">Save</button>
+    <button id="replan">Replan from comments</button>
+    <button id="approve">Approve &amp; run</button>
+    <span id="status"></span>
+  </div></div>
+  <div id="panel">
+    <div id="detail">Select a node.</div>
+    <div id="violations"></div>
+  </div>
+</div>
+<script type="module" src="./editor.js"></script>
+</body>
+</html>
