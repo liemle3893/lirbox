@@ -43,5 +43,8 @@ implementation-notes/
 !docs/arena/
 !docs/arena/**
 
-# Subagent-driven-development scratch (ledgers, briefs, review packages)
-.superpowers/
+
+# graphify machine-local pointers — absolute paths to this machine's interpreter
+# and scan root, rewritten on every run. The rest of graphify-out/ stays tracked.
+graphify-out/.graphify_python
+graphify-out/.graphify_root
