@@ -1,0 +1,8 @@
+Persist loom run state so a future session can resume this run exactly.
+
+Write this JSON to .loom/state/${name}.json in the MAIN repo checkout (not the
+worktree), creating directories as needed. MERGE with any existing file, preserving
+"startedAt". Write the whole object — the "graph" field is the PATCHED graph, and a
+resume that replays the original topology is the worst failure this system has.
+
+${payload}

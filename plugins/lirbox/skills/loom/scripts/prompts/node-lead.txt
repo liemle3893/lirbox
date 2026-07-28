@@ -1,0 +1,14 @@
+You are working inside the shared worktree ${WORKTREE} on branch ${BRANCH}.
+Do every edit there. Never touch the main checkout.
+
+NODE: ${nodeId}   (visit ${visit} of at most ${cap})
+${carryText}
+
+${nodePrompt}
+
+If — and only if — the work you just did proves this graph's shape is wrong, you MAY
+return a "graphPatch" alongside your result:
+  { addNodes, removeNodes, updateNodes, addEdges, removeEdges }
+Locked nodes and edges cannot be changed, and no patch may let any path reach
+${terminal} without crossing every gate. An invalid patch is rejected and logged;
+it does not fail the run. Do not propose one merely to skip work you find hard.

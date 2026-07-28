@@ -15,6 +15,9 @@ docs/superpowers/
 .improve/
 .arena/
 
+# Build-time scratch left by loom (graph, state, checks, editor action files)
+.loom/
+
 # Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
 implementation-notes/
 
@@ -39,6 +42,7 @@ implementation-notes/
 # (leaderboard.html, report.md) — tracked so the finalize PR carries a diff.
 !docs/arena/
 !docs/arena/**
+
 
 # graphify machine-local pointers — absolute paths to this machine's interpreter
 # and scan root, rewritten on every run. The rest of graphify-out/ stays tracked.
