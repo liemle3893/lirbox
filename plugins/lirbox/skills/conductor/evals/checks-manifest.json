@@ -85,6 +85,10 @@
     },
     "scaffold-prompts-as-data": {
       "expect": "green"
+    },
+    "trivial-phases-merged": {
+      "expect": "red",
+      "note": "In-flight whetstone item (trivial-phases-pay-full-phase-and-checkpoint-cost). Delivery emits 14 phases and 15 checkpoint workers; Setup/DoDBaseline/Brief should merge, ReVerify should fold into the code-quality gate's buildExit===0 exit condition, and the checkpoint budget should land at <= 9. Move to 'green' when the fix lands."
     }
   }
 }
