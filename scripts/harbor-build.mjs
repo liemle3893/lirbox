@@ -105,7 +105,16 @@ function build(skill, id) {
   const harnessPath = join(SKILLS, skill, 'harbor', 'harness.md');
   const harness = existsSync(harnessPath)
     ? readFileSync(harnessPath, 'utf8').trim()
-    : `Use the lirbox:${skill} skill to complete this task. This session is headless and non-interactive: do not end your turn until the work is finished and written to disk.`;
+    // Names the MECHANISM and the NAME, because getting either wrong silently scores the harness
+    // instead of the skill. Both failures observed live on gemma4:e2b-mlx:
+    //   - `lirbox:<skill>` → "Unknown skill". That namespace exists only on the host, where lirbox
+    //     is a plugin marketplace; Harbor copies the catalog into $CLAUDE_CONFIG_DIR/skills/ where
+    //     skills register BARE. The agent then proceeds without the skill and fabricates output.
+    //   - naming the skill without naming the Skill tool → the agent reads the skills list as a
+    //     tool list and calls `<skill>` directly → "No such tool available", 3×, then hand-rolls
+    //     the artefact. A skill is invoked THROUGH the Skill tool; the list advertises names, it
+    //     does not create tools.
+    : `Invoke the Skill tool with skill: "${skill}" — that exact bare value, not "lirbox:${skill}". Do not call "${skill}" as a tool directly; it is not one. This session is headless and non-interactive: do not end your turn until the work is finished and written to disk.`;
   writeFileSync(join(dst, 'instruction.md'), `${harness}\n\n---\n\n${readFileSync(instruction, 'utf8')}`);
 
   // The task owns its grading. We copy verify.sh verbatim — this file is the ONLY grader,
