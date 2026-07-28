@@ -20,6 +20,9 @@ docs/superpowers/
 .improve/
 .arena/
 
+# Build-time scratch left by loom (graph, state, checks, editor action files)
+.loom/
+
 # Harbor: TASKS ARE TRACKED (.harbor/tasks) — not because they are hand-edited (they are NOT;
 # hand-tuning lives upstream in skills/<skill>/harbor/tasks/<id>/task.toml and is merged by
 # scripts/harbor-build.mjs) but so a reviewer sees the exact task the agent is graded against in
@@ -59,3 +62,13 @@ implementation-notes/
 # (leaderboard.html, report.md) — tracked so the finalize PR carries a diff.
 !docs/arena/
 !docs/arena/**
+
+
+# graphify machine-local pointers — absolute paths to this machine's interpreter
+# and scan root, rewritten on every run. The rest of graphify-out/ stays tracked.
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/cost.json
+graphify-out/cache/last_query_stamp
+
+.env
