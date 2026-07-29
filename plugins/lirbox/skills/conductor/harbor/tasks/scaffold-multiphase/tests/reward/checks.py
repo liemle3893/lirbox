@@ -81,16 +81,38 @@ def has_meta(workspace: Path) -> bool:
 
 @criterion(description="conductor layer is pure JS (no fs/git/require/Date.now/Math.random)")
 def conductor_layer_pure(workspace: Path) -> bool:
-    """CLAUDE.md: the conductor layer is "pure JS only". Those primitives may appear ONLY inside
-    worker prompt strings, which are data the conductor ships and never executes — so template
-    literals are stripped before scanning."""
+    """CLAUDE.md: the conductor layer is "pure JS only". The rule is about what the conductor
+    EXECUTES, so every string literal is stripped first — anything inside quotes is data the
+    conductor ships to a worker or a shell, never code it runs itself. A genuine violation is
+    unquoted (`require(` / `fs.` as code), so it survives the strip and is still caught.
+
+    Stripping only template literals is not enough, and scoring a real run proved it: with a
+    --dod-file, the generator inlines the DoD as a JSON blob whose `check` fields are shell
+    commands the gate shells out, e.g.
+
+        "check":"node -e \\"const fs=require('fs'); ...\\""
+
+    Those are double- and single-quoted, so a template-literal-only strip left 9 matches and
+    failed a correct scaffold. That penalised exactly the behaviour the task wants: the run that
+    tripped it (claude-code/sonnet-5, 2026-07-30) earned 5/5 from the judge for a falsifiable DoD
+    and lost a deterministic point for the same file. The repo's own scan in
+    scripts/test-scaffold.cjs shares this blind spot; its matrix just never feeds it such a DoD.
+
+    ponytail: regex-based, so a regex literal containing a lone quote could still confuse it.
+    Upgrade to a real JS tokenizer only if that ever shows up in generator output."""
     wf = _workflow(workspace)
     if wf is None:
         return False
     body = _body(wf.read_text())
     if not body:
         return False
-    stripped = re.sub(r"`(?:[^`\\]|\\.)*`", '""', body)
+    stripped = body
+    for literal in (
+        r"`(?:[^`\\]|\\.)*`",
+        r'"(?:[^"\\]|\\.)*"',
+        r"'(?:[^'\\]|\\.)*'",
+    ):
+        stripped = re.sub(literal, '""', stripped)
     forbidden = [
         r"\brequire\s*\(",
         r"\bfs\.",
