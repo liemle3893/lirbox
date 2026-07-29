@@ -1,9 +1,14 @@
 # Delivery-tier companion to scaffold-multiphase. See tests/reward/checks.py for why it exists:
 # the bare-tier sibling is structurally blind to a regression in gate wiring.
 [task]
-name = "conductor__scaffold-delivery-gates"
-version = "0.1.0"
+name = "lirbox/conductor__scaffold-delivery-gates"
+version = "1.0.0"
 description = "conductor must scaffold a DELIVERY-tier workflow: gates, PR, and a falsifiable DoD"
+
+[metadata]
+skill = "conductor"
+difficulty = "medium"
+category = "agent-workflow-authoring"
 
 [environment]
 cpus = 2
