@@ -21,8 +21,13 @@ if ! command -v uvx >/dev/null 2>&1; then
   [ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env"
 fi
 
-uvx --with harbor-rewardkit@0.1 rewardkit /tests
-rc=$?
+# `--from`, not `--with`: uvx resolves a --with argument as a PEP 508 requirement, where `pkg@0.1`
+# means "path 0.1" and fails with "Expected path (/app/0.1) to end in a supported file extension".
+# The pkg@version shorthand only works in uvx's TOOL position. --from names the distribution to
+# install and `rewardkit` the entrypoint to run from it, which is what we actually want.
+# Version pinned to the 0.1 line per the Harbor convention of pinning every test dependency.
+uvx --from 'harbor-rewardkit==0.1.*' rewardkit /tests 2>&1 | tee /logs/verifier/rewardkit.log
+rc=${PIPESTATUS[0]}
 
 # rewardkit writes /logs/verifier/reward.json itself. If it could not run at all, Harbor would fail
 # the trial with RewardFileNotFoundError and we would not know why — so leave a zeroed reward plus a

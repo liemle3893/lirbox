@@ -13,11 +13,18 @@
 # claude-code trial scored 1.000). rewardkit uses CLAUDE_CODE_OAUTH_TOKEN natively when it is the
 # only Anthropic credential present.
 #
-# isolated: an agent judge can write to the workspace. Isolation mounts it read-only with writes
-# discarded, so grading can never mutate the artifact being graded — or leak into ../reward/.
+# isolated is OFF, deliberately. It needs overlayfs, which is unavailable in this container: measured
+# 2026-07-30, `mount -t overlay` exits 32 (unprivileged) and the fuse-overlayfs fallback exits 1.
+# Worse, that failure did not stay local — rewardkit runs dimensions in one asyncio.TaskGroup, so the
+# raised RuntimeError aborted the whole run and NO reward.json was written, zeroing the deterministic
+# `reward` dimension too. Enabling isolation therefore requires fuse-overlayfs in the image plus the
+# privileges to mount it; until then it is off.
+#
+# The tradeoff being accepted: an agent judge can write to /app. Tolerable here because this task is
+# scaffold-only — the generated file is already on disk before the verifier runs, nothing downstream
+# consumes /app afterwards, and the judge is asked to read rather than modify.
 [judge]
 judge = "claude-code"
-isolated = true
 weight = 1.0
 
 # The goal the instruction actually asked for. Kept here verbatim so the judge scores against the
