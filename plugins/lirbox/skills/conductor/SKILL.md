@@ -36,7 +36,9 @@ Two layers — confusing them is the #1 source of bugs:
 **Isolation.** ONE shared worktree `.worktrees/<name>` on branch `wf/<name>` holds every edit (a
 **Setup** worker creates/reuses it); `state.json` stays in the **main repo**. Do NOT pass per-agent
 `isolation:'worktree'` to work phases. Details →
-[`workflow-runtime.md`](references/workflow-runtime.md) (read before authoring).
+[`workflow-runtime.md`](references/workflow-runtime.md) — read it when **resuming**, reading
+`state.json`, or chasing a gotcha. A fresh scaffold does not need it: the generator authors the
+script, so there is nothing for you to author.
 </core-model>
 
 <procedure>
@@ -74,8 +76,7 @@ Classify the goal, pick ONE tier, bias **down** (skip for `list`/`resume`):
 or by name): explicit invocation selects the skill, it does not license skipping triage. Surface the
 cost/overkill caveat and offer to do the work inline **before** any scaffold or launch.
 
-No up-signal → lowest tier; genuinely ambiguous → ONE `AskUserQuestion`. Up-signal list →
-[`run-planning.md`](references/run-planning.md) §1.
+No up-signal → lowest tier; genuinely ambiguous → ONE `AskUserQuestion`. Up-signal list → [`triage.md`](references/triage.md).
 
 ### 1c. Acquire the DoD (new lite/delivery runs)
 
@@ -87,25 +88,20 @@ goals also fold in a probed `frontend` block (`--frontend` → **FrontendGate**)
 prose-lint criterion. Confirm ONCE (`AskUserQuestion`: accept / edit), then freeze
 `.workflows/<name>.dod.json` and pass `--dod-file` in step 2 — bare may skip it, lite/delivery
 require it (`--no-dod` opts out). **DoDGate** verifies every criterion at run end (fix-loop ≤3, then
-hard-fail). Probes, formats, precedence → [`run-planning.md`](references/run-planning.md) §2.
+hard-fail). Probes, formats, precedence → [`dod.md`](references/dod.md).
 
 ### 2. Generate the conductor (prompts as data)
 
 Always generate from `scripts/scaffold-workflow.cjs` — never author or hand-edit the `.js` (drift);
 re-run with `--force` to change structure. Prompts travel as **DATA** (`--prompt` /
-`--prompts-file`). Size to the triage tier (`--profile lite` / `--profile delivery`) — never default
-to the full profile.
+`--prompts-file`). Size to the triage tier — never default to the full profile.
 
 **The human declares the goal + DoD; the LOOP decides the decomposition — never author a work-item
-or dependency table here.** Nothing has read the code yet, so any split you write down is a guess,
-and a wrong edge is silent. Splitting happens **at runtime**: each work phase first runs a
-**planner** worker that reads the repo and returns that phase's items plus each item's dependency
-edges, then the conductor dispatches them by dependency **level** — every ready item in ONE
-`parallel()` batch, each worker in its own worktree/branch off the level's integrated base, so an
-item always sees the output it depends on. `--phases` declares human-visible **stages** (each gets
-its own planner), not items; `--no-plan-fanout` is the single escape hatch (one serial worker per
-phase). Want specific items? State them in the phase prompt — the planner returns them. Detail →
-[§3](references/run-planning.md).
+or dependency table here.** A split written before anything has read the code is a guess, and a
+wrong edge fails silently. At **runtime** each work phase runs a **planner** worker that reads the
+repo, then fans its items out by dependency level. `--phases` declares human-visible **stages**, not items; `--no-plan-fanout` is the
+one escape hatch. Want specific items? Name them in the phase prompt. Mechanism →
+[`decomposition.md`](references/decomposition.md).
 
 ```
 node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,Implement" \
@@ -113,10 +109,15 @@ node <skill-dir>/scripts/scaffold-workflow.cjs --name <name> --phases "Analyze,I
   [--ticket] [--pr] [--merge-gates] [--base <ref>] [--desc "..."]
 ```
 
-→ **Full flag reference: [`references/generator-flags.md`](references/generator-flags.md)** — read
-before generating: every phase/prompt/delivery/gate flag, `--cycle` ordering, the profiles,
-`--model-mode` (**`auto` per-phase tiering is the default; `inherit` gives workers the session
-model**), agent swapping, `implementation-notes/` → `docs/changes/` promotion.
+→ **Flags: `scaffold-workflow.cjs --help`** — authoritative, every flag, ~4KB. **Never read the
+generator source or `scripts/prompts/*.txt`**: `--help` prints from the source's own header, so
+reading 1,500 lines costs ~15× the tokens for the same answer, and a gap in `--help` is a bug to
+report. **Bare tier needs no reference read** — `--phases` + `--prompts-file` (+ `--dod-file`) is the
+whole invocation.
+
+[`generator-flags.md`](references/generator-flags.md) holds the *why*, not the spelling: profile
+rationale, `--cycle` ordering, `--model-mode` (**`auto` per-phase tiering is default; `inherit` gives
+workers the session model**), agent swapping, notes → `docs/changes/` promotion.
 
 ### 3. Launch (fresh)
 
@@ -156,8 +157,7 @@ replays cached results; otherwise always the `args` path.
 When the Workflow returns, stamp `status` + `finishedAt` (the conductor cannot) — `failed`, not
 `complete`, if it threw, so a later `resume` re-runs only the failed gate. Then run
 `workflow-report.cjs <name>` and hand the user the report, the `results`, and the run's **branch +
-worktree**. **Never auto-merge** or auto-remove the worktree — that is the human's call. Commands →
-[`run-planning.md`](references/run-planning.md) §4.
+worktree**. **Never auto-merge** or auto-remove the worktree — that is the human's call. Commands → [`finalize.md`](references/finalize.md).
 </procedure>
 
 <gotchas>
@@ -173,7 +173,9 @@ Full list → [`references/workflow-runtime.md`](references/workflow-runtime.md)
 - `scripts/` — `scaffold-workflow.cjs` (step 2) · `list-workflows.cjs` (step 1; `--all` includes
   completed) · `workflow-report.cjs` (step 5; rates via `RATES_JSON`) · `test-scaffold.cjs`
   (generator regression net).
-- `references/` — `run-planning.md` (steps 1b–1c, 5; runtime decomposition) · `generator-flags.md` (step 2) ·
+- `references/` — one file per step, so a run loads only what it is on: `triage.md` (1b) ·
+  `dod.md` (1c) · `decomposition.md` (2) · `finalize.md` (5) · `generator-flags.md` (step 2, the
+  *why* behind a flag — spelling comes from `--help`) ·
   `delivery-phases.md` (`--ticket` / `--pr` / writeup phases) · `workflow-runtime.md` (layers,
   state schema, resume, gotchas).
 </resources>
