@@ -23,11 +23,16 @@ docs/superpowers/
 # Build-time scratch left by loom (graph, state, checks, editor action files)
 .loom/
 
-# Harbor scratch. The TRACKED source of a tier-3 task is its declaration under
-# plugins/lirbox/skills/<skill>/harbor/tasks/<id>/; .harbor/ is the local staging tree you
-# assemble into Harbor's on-disk format to run one, plus any skill catalog you inject. Both
-# are per-machine and reproducible from tracked files — never committed.
-.harbor/
+# Harbor tasks ARE tracked — .harbor/ is the layout `harbor run -p` actually consumes, and with
+# harbor-build.mjs gone (PR #46) nothing regenerates it, so leaving it untracked meant the runnable
+# task existed only on one machine.
+#
+# EXCEPT the vendored skill copy: environment/skill/ is a verbatim duplicate of
+# plugins/lirbox/skills/<skill>/, copied in so the sandbox can resolve the skill under test. It is
+# ~216 files of pure duplication that would silently go stale the moment the real skill changes —
+# the same trap CLAUDE.md warns about for copied validators. It is DERIVED, so it stays ignored and
+# gets re-copied at assembly time.
+.harbor/tasks/*/environment/skill/
 
 # Harbor run output (`harbor run` writes jobs/<job>/<trial>/ with agent logs, verifier
 # results and artifacts). Runtime, per-run, often large — never committed.

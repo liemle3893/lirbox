@@ -1,0 +1,30 @@
+[task]
+name = "lirbox/conductor__scaffold-multiphase"
+version = "1.0.0"
+description = "conductor skill task: scaffold a durable multi-phase workflow (generated file is graded; the workflow is never executed)"
+
+[metadata]
+skill = "conductor"
+difficulty = "medium"
+category = "agent-workflow-authoring"
+
+[environment]
+cpus = 2
+memory_mb = 2048
+build_timeout_sec = 900
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+# Generous: the deterministic criteria finish in seconds, but tests/quality/ runs a claude-code AGENT
+# judge that inspects the workspace through the CLI, which is minutes not milliseconds.
+timeout_sec = 900.0
+
+# Credentials for the judge, read from the HOST environment at run time — never literal values here,
+# so nothing secret is committed. rewardkit uses CLAUDE_CODE_OAUTH_TOKEN natively when it is the only
+# Anthropic credential present; ANTHROPIC_API_KEY takes priority when both are set.
+# Harbor also accepts these ad hoc via `--ve KEY=VALUE`.
+[verifier.env]
+ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"
+CLAUDE_CODE_OAUTH_TOKEN = "${CLAUDE_CODE_OAUTH_TOKEN}"
