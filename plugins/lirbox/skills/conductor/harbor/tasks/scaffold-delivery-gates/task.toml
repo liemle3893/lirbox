@@ -1,0 +1,22 @@
+# Delivery-tier companion to scaffold-multiphase. See tests/reward/checks.py for why it exists:
+# the bare-tier sibling is structurally blind to a regression in gate wiring.
+[task]
+name = "conductor__scaffold-delivery-gates"
+version = "0.1.0"
+description = "conductor must scaffold a DELIVERY-tier workflow: gates, PR, and a falsifiable DoD"
+
+[environment]
+cpus = 2
+memory_mb = 4096
+
+[agent]
+timeout_sec = 900.0
+
+[verifier]
+timeout_sec = 900.0
+
+# Only the subscription token is declared. Harbor validates this table BEFORE the run and aborts on
+# any unset variable, so declaring ANTHROPIC_API_KEY here would make the task unrunnable for anyone
+# holding only a subscription token; pass an API key ad hoc with --ve instead.
+[verifier.env]
+CLAUDE_CODE_OAUTH_TOKEN = "${CLAUDE_CODE_OAUTH_TOKEN}"
