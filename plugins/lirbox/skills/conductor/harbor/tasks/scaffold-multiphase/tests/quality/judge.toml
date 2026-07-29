@@ -15,16 +15,28 @@
 #
 # isolated is OFF, deliberately. It needs overlayfs, which is unavailable in this container: measured
 # 2026-07-30, `mount -t overlay` exits 32 (unprivileged) and the fuse-overlayfs fallback exits 1.
-# Worse, that failure did not stay local — rewardkit runs dimensions in one asyncio.TaskGroup, so the
-# raised RuntimeError aborted the whole run and NO reward.json was written, zeroing the deterministic
-# `reward` dimension too. Enabling isolation therefore requires fuse-overlayfs in the image plus the
-# privileges to mount it; until then it is off.
+# Enabling isolation therefore requires fuse-overlayfs in the image plus the privileges to mount it;
+# until then it is off. (That failure used to take the deterministic dimension down with it — see the
+# process-separation comment in ../test.sh, which is what stops any failure here from doing that.)
 #
 # The tradeoff being accepted: an agent judge can write to /app. Tolerable here because this task is
 # scaffold-only — the generated file is already on disk before the verifier runs, nothing downstream
 # consumes /app afterwards, and the judge is asked to read rather than modify.
+# The judge is deliberately a STRONGER model than the agent under test. The task is typically run
+# with sonnet-5; grading its output on opus-5 keeps the scorer from being the weak link, and stops a
+# sonnet-vs-sonnet setup where judge and generator share the same blind spots.
+#
+# `model` is PINNED, not left to the agent's default. Before this it was unset (reward-details.json
+# reported `model: None`), so the judge ran on whatever claude-code happened to default to — which
+# silently rescales the metric between runs and makes two `quality` numbers incomparable. Same rule
+# swe-run.mjs enforces when it refuses `--model opus` as a floating alias.
+#
+# Override per run without editing this file:
+#   harbor run -p <task> --ve REWARDKIT_MODEL=anthropic/claude-opus-5
+# (`--ve REWARDKIT_JUDGE=...` swaps the judge itself — an LLM model id instead of an agent.)
 [judge]
 judge = "claude-code"
+model = "anthropic/claude-opus-5"
 weight = 1.0
 
 # The goal the instruction actually asked for. Kept here verbatim so the judge scores against the
