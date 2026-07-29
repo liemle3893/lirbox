@@ -160,6 +160,8 @@ worktree**. **Never auto-merge** or auto-remove the worktree — that is the hum
 </procedure>
 
 <gotchas>
+- Don't "verify" the emitted script with `node --check` — it stops validating past the leading
+  `export`, so it passes even when the body is broken. The generator aborts on its own errors.
 - Phases are **at-least-once**: each needs a skip-if-done guard and must be **idempotent**.
 - `.filter(Boolean)` after `parallel()` — dead agents return `null`.
 - Durable ≠ **unattended** — Workflow needs a live session; no headless/cron.

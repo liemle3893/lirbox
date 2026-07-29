@@ -61,6 +61,10 @@ def output_exists(workspace: Path) -> bool:
 
 @criterion(description="emitted script compiles as an async workflow body")
 def parses_as_workflow_body(workspace: Path) -> bool:
+    """Compiled as the async function BODY the runtime wraps it in (top-level await AND top-level
+    return). NOT `node --check`, which is vacuous here: measured 2026-07-30 on node v22.21.1 it stops
+    validating after the first ESM statement, and every emitted script opens with `export const
+    meta`, so a syntax error in the executing body passes cleanly."""
     wf = _workflow(workspace)
     if wf is None:
         return False
