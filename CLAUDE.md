@@ -68,16 +68,21 @@ gate (`-a nop` / `-a oracle`) is **free** (no model calls, ~30s/task); a real be
 (`-a claude-code -m <model>`) is **~$5–15 per task**. Declined → skip it and say so in the summary.
 Accepted → write the task and run the free gate; the paid run is a separate ask.
 
-Tasks are declared per skill under `plugins/lirbox/skills/<skill>/harbor/tasks/<id>/`
-(`instruction.md` + `verify.sh` required) — that declaration is the tracked source. To run one you
-assemble it by hand into Harbor's on-disk layout under `.harbor/` (gitignored, per-machine); there
-is no builder script. Layout and the assembly steps: [CONTRIBUTING.md](./CONTRIBUTING.md#tier-3--harbor-containerised-behavioural-test--offer-it-do-not-assume-it).
+Tasks are declared per skill under `plugins/lirbox/skills/<skill>/harbor/tasks/<id>/` —
+`instruction.md` plus a grader (`verify.sh`, or a whole `tests/` tree when grading has more than one
+dimension) — and that declaration is the tracked source. To run one you assemble it by hand into
+Harbor's on-disk layout under `.harbor/` (gitignored, per-machine); there is no builder script.
+Layout, the assembly steps, and the Reward Kit rules for multi-dimension grading:
+[CONTRIBUTING.md](./CONTRIBUTING.md#tier-3--harbor-containerised-behavioural-test--offer-it-do-not-assume-it).
 
-Two things that bite. **Never inject `plugins/lirbox/skills` into a container** — skills keep eval
+Four things that bite. **Never inject `plugins/lirbox/skills` into a container** — skills keep eval
 material inside their own dir, so an unpruned inject hands the agent the graders it is scored
-against; strip every skill's `evals/`, `harbor/` and `arena/` first. And a grader that runs a
+against; strip every skill's `evals/`, `harbor/` and `arena/` first. A grader that runs a
 skill's own validator needs a **copy** of it inside the task; that copy is manual, so re-copy it
-whenever the skill's `assets/` change or you will score against a stale validator.
+whenever the skill's `assets/` change or you will score against a stale validator. **Editing the
+declaration does not change what runs** — `.harbor/` is a copy, so re-sync it before every run or
+you will pay for a run that scored the old grader. And always run `-a nop` alongside `-a oracle`:
+a green oracle proves the grader is *satisfiable*, only `nop` proves it is not passing on nothing.
 
 ## graphify
 

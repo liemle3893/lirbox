@@ -1,0 +1,35 @@
+[task]
+name = "lirbox/conductor__scaffold-multiphase"
+version = "1.0.0"
+description = "conductor skill task: scaffold a durable multi-phase workflow (generated file is graded; the workflow is never executed)"
+
+[metadata]
+skill = "conductor"
+difficulty = "medium"
+category = "agent-workflow-authoring"
+
+[environment]
+cpus = 2
+memory_mb = 2048
+build_timeout_sec = 900
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+# Generous: the deterministic criteria finish in seconds, but tests/quality/ runs a claude-code AGENT
+# judge that inspects the workspace through the CLI, which is minutes not milliseconds.
+timeout_sec = 900.0
+
+# Credential for the judge in tests/quality/, read from the HOST environment at run time — never a
+# literal value here, so nothing secret is committed.
+#
+# ONLY the OAuth token is declared. Harbor validates this table BEFORE the run and aborts if a
+# declared variable is unset on the host, so listing ANTHROPIC_API_KEY too made the task unrunnable
+# for anyone holding just a subscription token. rewardkit uses CLAUDE_CODE_OAUTH_TOKEN natively when
+# it is the only Anthropic credential present, which is the case here.
+#
+# Holding an API key instead? Pass it ad hoc rather than editing this file:
+#   harbor run -p <task> --ve ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+[verifier.env]
+CLAUDE_CODE_OAUTH_TOKEN = "${CLAUDE_CODE_OAUTH_TOKEN}"

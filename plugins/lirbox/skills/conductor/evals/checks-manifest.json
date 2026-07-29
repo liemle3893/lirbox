@@ -85,6 +85,10 @@
     },
     "scaffold-prompts-as-data": {
       "expect": "green"
+    },
+    "trivial-phases-merged": {
+      "expect": "green",
+      "note": "Fixed 2026-07-29: a checkpoint exists to avoid re-running EXPENSIVE work, so the six phases that are cheap to re-run correctly (Setup, Brief, Verify, ReVerify, PR, TicketUpdate) no longer buy a dedicated checkpoint worker — 15 -> 9 per delivery run. DoDBaseline deliberately keeps its checkpoint despite running in seconds: re-running it on a resume after work had landed would record a post-work state as the pre-work baseline. The phase-MERGE half of the original concern was dropped, not implemented — frontend-gate-phase and dod-gate assert phase('ReVerify') and phase('DoDBaseline') exist, so a check demanding they disappear would contradict two green checks."
     }
   }
 }

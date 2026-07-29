@@ -317,19 +317,30 @@ let pendingTodos = 0;
 // `body` is emitted VERBATIM (already indented for the `} else {` block by the builders below) —
 // emitPhase must NOT re-indent it, since interior prompt template-literal lines are column-0 and
 // whitespace there is significant. `extraGuard` prepends an `if(<cond>){log} else ...` branch.
+//
+// `checkpoint: false` omits this phase's dedicated checkpoint WORKER (default is true). A checkpoint
+// exists to avoid re-running expensive work, so a phase that is cheap to re-run should not buy a
+// whole subagent whose only job is `cat > state.json` — that toll was ~a third of a delivery run's
+// dispatches. `done` still records the phase IN MEMORY, so the next checkpoint persists a phasesDone
+// that includes it and the contiguous-prefix resume guard still holds; the only cost is that a crash
+// before that next checkpoint re-runs this phase.
+//
+// The test is cheap to re-run CORRECTLY, not merely cheap to re-run: DoDBaseline finishes in seconds
+// but keeps its checkpoint, because re-running it on a resume after work had landed would record a
+// post-work state as the pre-work baseline and silently destroy the honesty check.
 function emitPhase(title, body, opts = {}) {
   const resumed = opts.resumed || `${title} already complete (resumed)`;
   const head = opts.extraGuard
     ? `if (${opts.extraGuard.cond}) {\n  log('${opts.extraGuard.msg}')\n} else if (done.has('${title}')) {`
     : `if (done.has('${title}')) {`;
+  const persist = opts.checkpoint === false ? '' : `\n  await checkpoint('${title}')`;
   return `
 phase('${title}')
 ${head}
   log('${resumed}')
 } else {
 ${body}
-  done.add('${title}')
-  await checkpoint('${title}')
+  done.add('${title}')${persist}
 }`;
 }
 
@@ -636,7 +647,7 @@ const PHASES = [
       schema: SCHEMA({ title: { type: 'string' }, goal: { type: 'string' }, acceptanceCriteria: { type: 'array', items: { type: 'string' } } }, ['goal']),
       modelFrag: mdl('think'), label: 'brief', phase: 'Brief',
     }),
-    { extraGuard: { cond: '!TICKET', msg: 'No ticket — goal came from the invocation text' } }) },
+    { checkpoint: false, extraGuard: { cond: '!TICKET', msg: 'No ticket — goal came from the invocation text' } }) },
 
   { title: 'RED', enabledWhen: withCycle, build: () => emitPhase('RED',
     agentCall({
@@ -657,7 +668,7 @@ const PHASES = [
       schema: SCHEMA({ green: { type: 'boolean' }, failing: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['green']),
       modelFrag: mdl('mechanical'), label: 'verify', phase: 'Verify',
       check: `if (!results.verify || !results.verify.green) throw new Error('Verify failed: not green — ' + (results.verify && (results.verify.failing || []).join(', ')))`,
-    })) },
+    }), { checkpoint: false }) },
 
   { title: 'PathGap', enabledWhen: withCycle, build: () => emitPhase('PathGap',
     '  // Close test gaps for code paths the ACs never specified (decide-or-justify, hard-fail).\n' + gateLoop({
@@ -685,7 +696,7 @@ const PHASES = [
       schema: SCHEMA({ green: { type: 'boolean' }, regressions: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['green']),
       modelFrag: mdl('mechanical'), label: 'reverify', phase: 'ReVerify',
       check: `if (!results.reVerify || !results.reVerify.green) throw new Error('ReVerify failed: regression after improve/simplify — ' + (results.reVerify && (results.reVerify.regressions || []).join(', ')))`,
-    })) },
+    }), { checkpoint: false }) },
 
   // TestGate (triage-based): NON-cycle test enforcement; replaced by RED/Verify/PathGap/ReVerify under --cycle.
   { title: 'TestGate', enabledWhen: enforceTests && !withCycle, build: () => emitPhase('TestGate',
@@ -829,7 +840,7 @@ const PHASES = [
       }),
       schema: SCHEMA({ prUrl: { type: 'string' } }, ['prUrl']),
       modelFrag: mdl('mechanical'), label: 'pr', phase: 'PR',
-    })) },
+    }), { checkpoint: false }) },
 
   { title: 'TicketUpdate', enabledWhen: withTicket, build: () => emitPhase('TicketUpdate',
     agentCall({
@@ -838,7 +849,7 @@ const PHASES = [
       schema: SCHEMA({ updated: { type: 'boolean' }, transition: { type: 'string' } }, ['updated']),
       modelFrag: mdl('mechanical'), label: 'ticket-update', phase: 'TicketUpdate',
     }),
-    { extraGuard: { cond: '!TICKET', msg: 'No ticket — nothing to update' } }) },
+    { checkpoint: false, extraGuard: { cond: '!TICKET', msg: 'No ticket — nothing to update' } }) },
 ];
 
 // Derive BOTH the order (titles) and the blocks from the ONE table. Work phases expand inline.
@@ -941,7 +952,6 @@ if (done.has('Setup')) {
       schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { type: 'boolean' }, worktree: { type: 'string' }, branch: { type: 'string' } } } },
   )
   done.add('Setup')
-  await checkpoint('Setup')
 }
 ${coreBlocks}
 
