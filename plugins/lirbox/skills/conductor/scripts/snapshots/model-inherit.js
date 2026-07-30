@@ -309,6 +309,12 @@ ${goal}`,
         { label: 'work:' + it.id, phase: 'Work',
           schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
       )))
+      // A DEAD worker (parallel() yields null on a terminal agent error) must never be recorded as
+      // a completed item — that is silent plan drift: the item vanishes from the plan-of-record and
+      // the run walks on to a gate that can go green without it. Hard-fail the phase instead; its
+      // plan is already checkpointed, so a resume re-runs the items against the SAME plan.
+      const deadItems = level.filter((it, i) => !levelOut[i])
+      if (deadItems.length) throw new Error('Work: ' + deadItems.length + ' planned item(s) returned no result (dead worker) — ' + deadItems.map((it) => it.id).join(', '))
       levelOut.forEach((r, i) => { itemResults.push({ id: level[i].id, title: level[i].title, summary: (r && r.summary) || '' }) })
       const levelIntegrate = await agent(
         `${inWorktree('work-integrate')}

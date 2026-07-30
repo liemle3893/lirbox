@@ -88,7 +88,8 @@ goals also fold in a probed `frontend` block (`--frontend` → **FrontendGate**)
 prose-lint criterion. Confirm ONCE (`AskUserQuestion`: accept / edit), then freeze
 `.workflows/<name>.dod.json` and pass `--dod-file` in step 2 — bare may skip it, lite/delivery
 require it (`--no-dod` opts out). **DoDGate** verifies every criterion at run end (fix-loop ≤3, then
-hard-fail). Probes, formats, precedence → [`run-planning.md`](references/run-planning.md) §2.
+hard-fail) **plus the run's plan-of-record** — every item the phase planners committed to — in
+parallel, so a skipped item cannot pass on coarse criteria. Automatic; declare nothing. Probes, formats, precedence → [`run-planning.md`](references/run-planning.md) §2.
 
 ### 2. Generate the conductor (prompts as data)
 

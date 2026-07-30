@@ -41,6 +41,10 @@
     "dod-gate": {
       "expect": "green"
     },
+    "dodgate-plan-of-record": {
+      "expect": "green",
+      "note": "Added 2026-07-30 together with its fix, so it lands as 'green'. Verified RED (7/9) against the origin/main@d5e5b25 generator via GEN_OVERRIDE before landing -- it discriminates, it is not a check that passes on nothing. Guards two drift paths a frozen DoD structurally cannot see: a worker retiring its own planned item, and parallel() returning null for a dead worker (which the baseline recorded as a completed item carrying an empty summary)."
+    },
     "dodgate-replan-outer-loop": {
       "expect": "green"
     },

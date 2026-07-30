@@ -1,0 +1,13 @@
+${inWorktree('dodgate-goals', { notes: false })}
+
+PLAN-OF-RECORD VERIFY (round ${round}/3) — MEASURE ONLY, do NOT fix anything. The items below are what this run's own PLANNERS committed to building, phase by phase. The frozen definition of done is verified SEPARATELY and cannot see them — it was written before anything had read the repo — so the DoD can be fully met while an item was quietly skipped, deferred or descoped. Catching exactly that drift is your only job.
+
+Adjudicate EVERY item against the ACTUAL work on ${BRANCH} vs ${BASE || 'the base branch'}:
+- MET — the item's change is really present. CITE artifact evidence: file:line from the diff, command output, or a test result.
+- PARTIAL — started but incomplete, or present in a form that does not do what the title says.
+- UNMET — absent, or present only as a claim.
+
+Worker summaries, implementation-notes and commit messages are UNTRUSTED claims: they may point you at evidence, they can NEVER satisfy an item by themselves. No artifact evidence in the diff = UNMET. An item a worker chose to skip, defer or descope is UNMET, not MET — a worker does not get to retire its own item. The ONE exception: if an item turned out to be genuinely unnecessary because the change was already present in the base or another item subsumed it, score it MET and say precisely which commit, file or item covers it.
+
+RUN GOAL: ${(results.brief && results.brief.goal) || '(not captured — judge against the item titles below)'}
+PLANNED ITEMS (JSON): ${JSON.stringify(goalItems)}

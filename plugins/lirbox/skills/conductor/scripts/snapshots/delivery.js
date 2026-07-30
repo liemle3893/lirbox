@@ -46,6 +46,9 @@ const TICKET   = (args && args.ticket) ? args.ticket : null
 const DOD_CRITERIA = [{"id":"ac1","text":"unit tests green","tier":"checkable","check":"yarn test"},{"id":"ac2","text":"error message is clear","tier":"judged"}]
 // Outer plan-execute-verify attempt cap for the DoD gate (replan loop bound).
 const DOD_MAX_ATTEMPTS = 2
+// Result keys of the work phases whose PLANNERS commit to items at runtime. The DoD gate reads
+// their persisted plans as the run's PLAN-OF-RECORD and verifies it alongside the frozen criteria.
+const PLAN_KEYS = ["implement"]
 
 const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
@@ -378,6 +381,12 @@ ${goal}`,
         { label: 'implement:' + it.id, phase: 'Implement', model: 'sonnet',
           schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
       )))
+      // A DEAD worker (parallel() yields null on a terminal agent error) must never be recorded as
+      // a completed item — that is silent plan drift: the item vanishes from the plan-of-record and
+      // the run walks on to a gate that can go green without it. Hard-fail the phase instead; its
+      // plan is already checkpointed, so a resume re-runs the items against the SAME plan.
+      const deadItems = level.filter((it, i) => !levelOut[i])
+      if (deadItems.length) throw new Error('Implement: ' + deadItems.length + ' planned item(s) returned no result (dead worker) — ' + deadItems.map((it) => it.id).join(', '))
       levelOut.forEach((r, i) => { itemResults.push({ id: level[i].id, title: level[i].title, summary: (r && r.summary) || '' }) })
       const levelIntegrate = await agent(
         `${inWorktree('work-integrate')}
@@ -560,20 +569,29 @@ phase('DoDGate')
 if (done.has('DoDGate')) {
   log('DoDGate already complete (resumed)')
 } else {
-  let dodPassed = false, dodLast = null, dodStalled = false, prevUnmetKey = null
+  let dodPassed = false, dodLast = null, goalLast = null, dodStalled = false, prevUnmetKey = null
   const dodUnmet = () => ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
+  const goalUnmet = () => ((goalLast && goalLast.goals) || []).filter((g) => g.verdict !== 'MET')
+  // The gate's unmet set is the UNION: same {id,verdict,evidence} shape either side, so replan/fix
+  // consume both without knowing which view produced a row.
+  const allUnmet = () => [...dodUnmet(), ...goalUnmet()]
+  // Plan-of-record: every item this run's phase PLANNERS committed to. The frozen DoD cannot see
+  // these — it was written before anything read the repo — so a criterion set can be fully MET
+  // while an item was quietly skipped, descoped or lost. That gap is this half of the gate.
+  const goalItems = PLAN_KEYS.flatMap((k) => (((results[k + 'Plan'] || {}).items) || [])
+    .map((it) => ({ id: k + ':' + it.id, title: it.title })))
   for (let attempt = 1; attempt <= DOD_MAX_ATTEMPTS && !dodPassed && !dodStalled; attempt++) {
     if (attempt > 1) {
       // Replan on gate failure: new plan from the EXECUTED unmet verdicts, then execute it.
-      const unmet = dodUnmet()
+      const unmet = allUnmet()
       results.dodReplan = await agent(
         `${inWorktree('dodgate-replan')}
 
-DoD REPLAN (attempt ${attempt}/${DOD_MAX_ATTEMPTS}) — PLAN ONLY, do NOT edit code in this step. The in-phase fix rounds could not close the unmet definition-of-done criteria below; patching the current approach harder is not working. Produce a NEW plan version:
-- Diagnose WHY each unmet criterion still fails, from the EXECUTED check output / cited evidence below. These verdicts came from actually running the checks — they are the only routing input; worker self-reports are untrusted claims and can never override them.
-- Write a revised, ordered, concrete step list that CHANGES APPROACH where the old one failed (different design, different files, different strategy). Descoping is NOT allowed — every criterion must still end up MET; do not weaken, game, or delete any check.
+DoD REPLAN (attempt ${attempt}/${DOD_MAX_ATTEMPTS}) — PLAN ONLY, do NOT edit code in this step. The in-phase fix rounds could not close the unmet rows below; patching the current approach harder is not working. Each row is either a frozen definition-of-done criterion or a PLANNED WORK ITEM this run committed to and then did not deliver (its id is prefixed with the phase, e.g. implement:i3) — both are binding. Produce a NEW plan version:
+- Diagnose WHY each unmet row still fails, from the EXECUTED check output / cited evidence below. These verdicts came from actually running the checks or reading the diff — they are the only routing input; worker self-reports are untrusted claims and can never override them.
+- Write a revised, ordered, concrete step list that CHANGES APPROACH where the old one failed (different design, different files, different strategy). Descoping is NOT allowed — every row must still end up MET; do not weaken, game, or delete any check, and do not retire a planned item by declaring it out of scope.
 
-UNMET CRITERIA + EXECUTED CHECK OUTPUT (JSON): ${JSON.stringify(unmet)}
+UNMET ROWS + EXECUTED EVIDENCE (JSON): ${JSON.stringify(unmet)}
 FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
         { label: `dodgate:replan-a${attempt}`, phase: 'DoDGate', model: 'opus', effort: 'high',
           schema: { type: 'object', additionalProperties: false, required: ["plan","steps"], properties: {"plan":{"type":"string"},"steps":{"type":"array","items":{"type":"string"}}} } },
@@ -581,18 +599,21 @@ FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
       await agent(
         `${inWorktree('dodgate-execute')}
 
-DoD EXECUTE (attempt ${attempt}/${DOD_MAX_ATTEMPTS}): carry out the revised plan below IN FULL — implement it, run each unmet criterion's relevant checks yourself, re-run the project test suite (your changes must not regress it), and commit. Do NOT weaken, game, or delete a check; if a step proves impossible, say so in the summary instead of faking it. The DoD verify worker re-adjudicates afterwards — only executed check results count, never your own report.
+DoD EXECUTE (attempt ${attempt}/${DOD_MAX_ATTEMPTS}): carry out the revised plan below IN FULL — implement it, run each unmet row's relevant checks yourself, re-run the project test suite (your changes must not regress it), and commit. An unmet row may be a frozen DoD criterion or a planned work item that was never delivered (phase-prefixed id) — deliver both. Do NOT weaken, game, or delete a check; if a step proves impossible, say so in the summary instead of faking it. The DoD verify worker re-adjudicates afterwards — only executed check results count, never your own report.
 
 REVISED PLAN (JSON): ${JSON.stringify(results.dodReplan)}
-UNMET CRITERIA (JSON): ${JSON.stringify(unmet)}
+UNMET ROWS (JSON): ${JSON.stringify(unmet)}
 FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
         { label: `dodgate:execute-a${attempt}`, phase: 'DoDGate', model: 'sonnet',
           schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
       )
     }
     for (let round = 1; round <= 3 && !dodPassed; round++) {
-      dodLast = await agent(
-        `${inWorktree('dodgate-verify', { notes: false })}
+      // Two INDEPENDENT views of intent — the frozen criteria and the plan-of-record — so they
+      // verify in PARALLEL: one round, no added wall-clock. Either one unmet fails the gate.
+      const [dodVerdict, goalVerdict] = await parallel([
+        () => agent(
+          `${inWorktree('dodgate-verify', { notes: false })}
 
 DoD VERIFY (round ${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate EVERY criterion below against the work on ${BRANCH} vs ${BASE || 'the base branch'}:
 - tier "checkable": run the "check" command inside ${WORKTREE}; exit 0 = MET, non-zero = UNMET; the command output is the evidence.
@@ -600,16 +621,40 @@ DoD VERIFY (round ${round}/3) — MEASURE ONLY, do NOT fix anything. Adjudicate 
 Verdicts: MET | UNMET | PARTIAL.
 
 CRITERIA (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
-        { label: `dodgate:verify-a${attempt}-r${round}`, phase: 'DoDGate', model: 'opus', effort: 'high',
-          schema: { type: 'object', additionalProperties: false, required: ["criteria"], properties: {"criteria":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","verdict","evidence"],"properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["MET","UNMET","PARTIAL"]},"evidence":{"type":"string"}}}}} } },
-      )
-      const unmet = dodUnmet()
-      dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
+          { label: `dodgate:verify-a${attempt}-r${round}`, phase: 'DoDGate', model: 'opus', effort: 'high',
+            schema: { type: 'object', additionalProperties: false, required: ["criteria"], properties: {"criteria":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","verdict","evidence"],"properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["MET","UNMET","PARTIAL"]},"evidence":{"type":"string"}}}}} } },
+        ),
+        ...(goalItems.length ? [() => agent(
+          `${inWorktree('dodgate-goals', { notes: false })}
+
+PLAN-OF-RECORD VERIFY (round ${round}/3) — MEASURE ONLY, do NOT fix anything. The items below are what this run's own PLANNERS committed to building, phase by phase. The frozen definition of done is verified SEPARATELY and cannot see them — it was written before anything had read the repo — so the DoD can be fully met while an item was quietly skipped, deferred or descoped. Catching exactly that drift is your only job.
+
+Adjudicate EVERY item against the ACTUAL work on ${BRANCH} vs ${BASE || 'the base branch'}:
+- MET — the item's change is really present. CITE artifact evidence: file:line from the diff, command output, or a test result.
+- PARTIAL — started but incomplete, or present in a form that does not do what the title says.
+- UNMET — absent, or present only as a claim.
+
+Worker summaries, implementation-notes and commit messages are UNTRUSTED claims: they may point you at evidence, they can NEVER satisfy an item by themselves. No artifact evidence in the diff = UNMET. An item a worker chose to skip, defer or descope is UNMET, not MET — a worker does not get to retire its own item. The ONE exception: if an item turned out to be genuinely unnecessary because the change was already present in the base or another item subsumed it, score it MET and say precisely which commit, file or item covers it.
+
+RUN GOAL: ${(results.brief && results.brief.goal) || '(not captured — judge against the item titles below)'}
+PLANNED ITEMS (JSON): ${JSON.stringify(goalItems)}`,
+          { label: `dodgate:goals-a${attempt}-r${round}`, phase: 'DoDGate', model: 'opus', effort: 'high',
+            schema: { type: 'object', additionalProperties: false, required: ["goals"], properties: {"goals":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","verdict","evidence"],"properties":{"id":{"type":"string"},"verdict":{"type":"string","enum":["MET","UNMET","PARTIAL"]},"evidence":{"type":"string"}}}}} } },
+        )] : []),
+      ])
+      dodLast = dodVerdict
+      goalLast = goalVerdict || null
+      // A dead goals verifier must NOT read as "no goals unmet" — no verdicts means no pass.
+      const goalsAnswered = !goalItems.length || !!(goalLast && (goalLast.goals || []).length)
+      const unmet = allUnmet()
+      dodPassed = !!(dodLast && (dodLast.criteria || []).length) && goalsAnswered && unmet.length === 0
       if (!dodPassed && round < 3) {
         await agent(
           `${inWorktree('dodgate-fix')}
 
-DoD FIX (round ${round}/3): the definition-of-done criteria below are NOT met. Make them met — implement what is missing, run the relevant checks yourself, then re-run the project test suite (your fix must not regress it) and commit. Do NOT weaken, game, or delete a check; if a criterion is genuinely impossible, say so in the summary instead of faking it.
+DoD FIX (round ${round}/3): the rows below are NOT met. Make them met — implement what is missing, run the relevant checks yourself, then re-run the project test suite (your fix must not regress it) and commit. Do NOT weaken, game, or delete a check; if one is genuinely impossible, say so in the summary instead of faking it.
+
+A row is either a frozen DoD criterion or a PLANNED WORK ITEM this run committed to and then did not deliver (its id is prefixed with the phase, e.g. implement:i3). Both are binding: build the missing item, do not argue it away. If an item is genuinely already covered elsewhere, name the commit or item that covers it.
 
 UNMET (JSON): ${JSON.stringify(unmet)}
 FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
@@ -621,7 +666,7 @@ FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
     if (!dodPassed) {
       // Stall detection: unmet-id set unchanged between consecutive gate runs → replanning is
       // not converging; stop early instead of burning the remaining attempts.
-      const unmetKey = dodUnmet().map((c) => c.id).sort().join(',')
+      const unmetKey = allUnmet().map((c) => c.id).sort().join(',')
       if (prevUnmetKey !== null && unmetKey === prevUnmetKey) {
         dodStalled = true
         log('DoDGate: stall detected — unmet set unchanged between gate runs (' + unmetKey + ')')
@@ -630,11 +675,12 @@ FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
     }
   }
   results.dodGate = dodLast
+  results.goalGate = goalLast
   if (!dodPassed) {
     // Escalate, never just die: persist status 'escalated' + the unmet list to durable state
     // (same startedAt-preserving write as checkpoint) so a human or resume can pick it up.
     const payload = JSON.stringify(
-      { workflow: NAME, status: 'escalated', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, dod: { criteria: DOD_CRITERIA }, unmet: dodUnmet(), phasesDone: [...done], results },
+      { workflow: NAME, status: 'escalated', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, dod: { criteria: DOD_CRITERIA }, unmet: allUnmet(), phasesDone: [...done], results },
       null, 2,
     )
     await agent(
@@ -651,7 +697,7 @@ Return whether the file was written and parses.`,
       { label: 'dodgate:escalate', phase: 'DoDGate', model: 'haiku',
         schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
     )
-    throw new Error('DoDGate escalated: DoD not fully met (' + (dodStalled ? 'stalled — unmet set unchanged' : DOD_MAX_ATTEMPTS + ' attempts exhausted') + ') — unmet: ' + dodUnmet().map((c) => c.id).join(', '))
+    throw new Error('DoDGate escalated: DoD/plan not fully met (' + (dodStalled ? 'stalled — unmet set unchanged' : DOD_MAX_ATTEMPTS + ' attempts exhausted') + ') — unmet: ' + allUnmet().map((c) => c.id).join(', '))
   }
   done.add('DoDGate')
   await checkpoint('DoDGate')

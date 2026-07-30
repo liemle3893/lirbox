@@ -61,7 +61,11 @@ try {
 
 // Extract the DoDGate VERIFY prompt segment ONLY (the backtick template handed to the verify
 // agent). Scoping here is load-bearing: "diff"/"artifact"/"human" live in other phase prompts.
-const m = src.match(/dodLast = await agent\(\s*`([\s\S]*?)`\s*,\s*\{\s*label:\s*`dodgate:verify/);
+// Anchored on the trailing `label: \`dodgate:verify` — NOT on how the call is bound. It used to
+// read `dodLast = await agent(`, which broke on 2026-07-30 when the verify dispatch moved inside a
+// parallel([...]) thunk alongside the plan-of-record verifier: the prompt was untouched, but the
+// anchor stopped matching and this check reported a false regression. The label is the identity.
+const m = src.match(/agent\(\s*`([\s\S]*?)`\s*,\s*\{\s*label:\s*`dodgate:verify/);
 const seg = m ? m[1] : '';
 
 const results = [];
