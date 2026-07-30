@@ -67,3 +67,8 @@ graphify-out/cost.json
 graphify-out/cache/last_query_stamp
 
 .env
+
+# Python bytecode — rewardkit imports the Harbor graders as modules, so running a task
+# verifier locally drops __pycache__ next to checks.py. One copy already reached main this way.
+__pycache__/
+*.pyc

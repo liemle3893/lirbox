@@ -62,6 +62,24 @@
 const fs = require('fs');
 const path = require('path');
 
+// `--help` prints the Usage/Options block from THIS file's header comment. Reading the header back
+// rather than restating it keeps one source of truth — a second copy would drift the moment a flag
+// changed, and a stale --help is worse than none.
+//
+// Measured 2026-07-30, why this exists: without it, `--help` answered `ERROR: --name <slug> is
+// required` (33 bytes), and a caller that cannot ask a tool what it does reads the tool instead. In
+// four Harbor runs of conductor/scaffold-multiphase the agent read or grepped this 1,500-line file
+// in three of them — up to 60KB of tool output in ONE run, and the run that skipped it used 264K
+// input tokens against 1,295K for the run that read it hardest. The trajectory shows the chain
+// directly: `--help`, then `sed -n '1,80p'` on this file as the very next call.
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  const src = fs.readFileSync(__filename, 'utf8');
+  const header = src.slice(src.indexOf('/*') + 2, src.indexOf('*/'));
+  const usage = header.slice(header.indexOf(' * Usage:'));
+  console.log(usage.replace(/^ \* ?/gm, '').trimEnd());
+  process.exit(0);
+}
+
 function arg(name, def) {
   const i = process.argv.indexOf('--' + name);
   if (i === -1) return def;
@@ -90,7 +108,7 @@ function promptTpl(file, subs) {
 const tpl = (file, subs) => '`' + promptTpl(file, subs) + '`';
 
 const name = arg('name');
-if (!name || name === true) { console.error('ERROR: --name <slug> is required'); process.exit(1); }
+if (!name || name === true) { console.error('ERROR: --name <slug> is required — run with --help for every flag'); process.exit(1); }
 if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a kebab slug (a-z0-9-)'); process.exit(1); }
 
 const phases = String(arg('phases', 'Work')).split(',').map((s) => s.trim()).filter(Boolean);

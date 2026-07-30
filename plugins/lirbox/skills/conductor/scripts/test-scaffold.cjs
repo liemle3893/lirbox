@@ -96,6 +96,22 @@ function reportedPhases(stdout) {
   return line.replace('Phases:', '').trim().split('→').map((s) => s.trim()).filter(Boolean);
 }
 
+// Gate-1 parse probe. `node --check` CANNOT validate a generated conductor: measured 2026-07-30 on
+// node v22.21.1, it stops validating everything after the first ESM statement, and every emitted
+// script opens with `export const meta`. A syntax error injected into the executing body
+// (`const = = CORRUPTED(` before `phase('Setup')`) passes `--check` cleanly, and a bare top-level
+// `return 1` passes too — so the old gate could not fail. Errors BEFORE the first export/import are
+// still caught, which is why this went unnoticed.
+//
+// The runtime wraps the script in an async function (it uses top-level await and top-level return),
+// so compiling it as that function's BODY is what actually parses it. Same probe as the Harbor
+// task's `parses_as_workflow_body` criterion.
+const PARSE_PROBE = "const fs=require('fs');"
+  + "const s=fs.readFileSync(process.argv[1],'utf8')"
+  + ".replace(/^export const meta/m,'const meta');"
+  + "const AF=Object.getPrototypeOf(async function(){}).constructor;"
+  + "new AF('args','log','phase','agent','parallel','pipeline','budget','workflow',s);";
+
 // Conductor-layer purity scan (ported from prospector/whetstone test nets, per CLAUDE.md:
 // "Their test-*.cjs enforce this with a string scan"). fs/git/Date.now()/Math.random()/require()
 // may appear ONLY inside worker prompt STRINGS (data, not executed by the conductor). So slice to
@@ -121,8 +137,9 @@ for (const [label, extra] of MATRIX) {
   try {
     const stdout = execFileSync('node', args, { encoding: 'utf8' });
 
-    // Gate 1: emitted script must parse.
-    execFileSync('node', ['--check', out], { stdio: 'pipe' });
+    // Gate 1: emitted script must parse — as the async function body the runtime wraps it in, NOT
+    // via `node --check`, which is vacuous past the leading `export` (see PARSE_PROBE).
+    execFileSync('node', ['-e', PARSE_PROBE, out], { stdio: 'pipe' });
 
     // Gate 2: emitted phase order === reported phase order.
     const emitted = emittedPhases(out);

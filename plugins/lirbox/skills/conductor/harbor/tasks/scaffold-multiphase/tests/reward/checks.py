@@ -45,9 +45,16 @@ def output_exists(workspace: Path) -> bool:
 
 @criterion(description="emitted script compiles as an async workflow body")
 def parses_as_workflow_body(workspace: Path) -> bool:
-    """A generated conductor is neither standalone ESM nor CommonJS: it carries `export const meta`
-    AND a top-level `return`, so `node --check` can never pass it. The runtime wraps it in an async
-    function (it uses top-level await), so that is what we compile it as."""
+    """The runtime wraps the script in an async function (top-level await AND top-level return), so
+    compiling it as that function's BODY is what actually parses it.
+
+    CORRECTION to the rationale first written here, measured 2026-07-30 on node v22.21.1: I claimed
+    `node --check` "can never pass" a generated conductor. The opposite is true — it ALWAYS passes,
+    and passes even when the file is broken. `--check` stops validating after the first ESM
+    statement, and every emitted script opens with `export const meta`, so a syntax error injected
+    into the executing body sails through; a bare top-level `return 1` passes too. Errors BEFORE the
+    first export/import are still caught, which is why it looked like it worked. So this probe is
+    needed not because --check fails, but because --check is VACUOUS here."""
     wf = _workflow(workspace)
     if wf is None:
         return False
