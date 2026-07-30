@@ -135,6 +135,29 @@ function planItems(res, prefix, fallback) {
   return items
 }
 
+// A worker's self-asserted boolean is not evidence. The conductor DISPATCHED a known set of per-item
+// worktrees/branches, so it asks for that exact set back and compares: a setup that created 2 of 3
+// worktrees, or an integrate that merged 2 of 3 branches while returning true, must STOP the run
+// rather than hand every downstream gate an incomplete diff while reporting on the whole plan.
+// Returns '' when the sets match, otherwise what is missing (or unexpectedly extra).
+function planSetDiff(what, expected, actual) {
+  if (!Array.isArray(actual)) {
+    // ponytail: the schema REQUIRES the list, so an absent one means a runtime that did not enforce
+    // the schema, not a worker claiming a partial result. Loud, not fatal; make it fatal if a
+    // non-enforcing runtime ever becomes real.
+    log('plan: ' + what + ' answered without the set it acted on — cross-check skipped (the schema requires that list)')
+    return ''
+  }
+  const got = new Set(actual.map(String))
+  const want = new Set(expected.map(String))
+  const missing = expected.filter((e) => !got.has(String(e)))
+  const extra = Array.from(got).filter((g) => !want.has(g))
+  if (!missing.length && !extra.length) return ''
+  return (missing.length ? 'missing: ' + missing.join(', ') : '')
+    + (missing.length && extra.length ? '; ' : '')
+    + (extra.length ? 'unexpected: ' + extra.join(', ') : '')
+}
+
 // Dependency LEVELS: every item whose dependsOn is already satisfied lands in the same level (one
 // parallel() batch); an item waits until every id it depends on has resolved. A dependency cycle
 // can never stall the run — the remaining items are emitted as one final level, loudly.
@@ -292,9 +315,12 @@ ${items[0].prompt}`,
     log('Implement: ' + items.length + ' planned item(s) across ' + levels.length + ' dependency level(s)')
     for (let li = 0; li < levels.length; li++) {
       const level = levels[li]
-      const itemLines = level.map((it) => `setup_item "${WORKTREE}--${it.slug}" "${BRANCH}--${it.slug}"`).join('\n')
-      const itemBranches = level.map((it) => `${BRANCH}--${it.slug}`).join(', ')
-      const itemWorktrees = level.map((it) => `${WORKTREE}--${it.slug}`).join(', ')
+      // The DISPATCHED set, kept as arrays: it is what the setup/integrate answers are compared against.
+      const itemWorktreeSet = level.map((it) => `${WORKTREE}--${it.slug}`)
+      const itemBranchSet = level.map((it) => `${BRANCH}--${it.slug}`)
+      const itemLines = itemWorktreeSet.map((wt, i) => `setup_item "${wt}" "${itemBranchSet[i]}"`).join('\n')
+      const itemBranches = itemBranchSet.join(', ')
+      const itemWorktrees = itemWorktreeSet.join(', ')
       const levelSetup = await agent(
         `Create ONE isolated git worktree PER independent work item, each on its OWN branch off ${BRANCH}, so the parallel workers never share a working tree or index. Run from the MAIN repo (do NOT cd into ${WORKTREE}) and create them SEQUENTIALLY — concurrent worktree adds contend on .git locks. Run idempotently:
 
@@ -315,12 +341,14 @@ setup_item() {
 }
 ${itemLines}
 
-Return ready=true ONLY if every per-item worktree exists, plus a short summary.`,
+Return ready=true ONLY if every per-item worktree exists, AND created = the list of worktree paths that now exist, copied EXACTLY as spelled in the setup_item lines above (one entry per item, no extras, no renames). The conductor set-compares created against the set it dispatched and ABORTS the level on any mismatch, so a short or invented list stops the run — do not pad it and do not omit an item you failed to create. Add a short summary.`,
         { label: 'implement:setup-l' + (li + 1), phase: 'Implement',
           model: 'haiku',
-          schema: { type: 'object', additionalProperties: false, required: ["ready"], properties: {"ready":{"type":"boolean"},"summary":{"type":"string"}} } },
+          schema: {"type":"object","additionalProperties":false,"required":["ready","created"],"properties":{"ready":{"type":"boolean"},"created":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}}} },
       )
       if (!levelSetup || !levelSetup.ready) throw new Error('Implement: per-item worktrees not ready for level ' + (li + 1) + ' — ' + ((levelSetup && levelSetup.summary) || ''))
+      const setupGap = planSetDiff('level ' + (li + 1) + ' setup', itemWorktreeSet, levelSetup.created)
+      if (setupGap) throw new Error('Implement: level ' + (li + 1) + ' setup reported ready:true but the worktrees it created are not the set that was dispatched — ' + setupGap)
       const levelOut = await parallel(level.map((it) => () => agent(
         `${inItemWorktree(it.slug, WORKTREE + '--' + it.slug, BRANCH + '--' + it.slug)}
 
@@ -353,12 +381,14 @@ INTEGRATE (combine the parallel fan-out): each independent work item was built o
 4. After ALL branches are processed, clean up the per-item trees (from the MAIN repo, not inside ${WORKTREE}): for each of ${itemWorktrees} run 'git worktree remove --force <wt>', and delete each fully-merged item branch with 'git branch -d <br>' — keep any UNMERGED (conflicted) branch so its work is not lost.
 5. Sanity: the working tree is clean and 'git log --oneline -n 20' on ${BRANCH} shows the integrate merges.
 
-Return merged=true ONLY if EVERY per-item branch landed in ${BRANCH}, the list of conflicted branches (empty when clean), and a short summary.`,
+Return merged=true ONLY if EVERY per-item branch landed in ${BRANCH}, plus merged_branches = the list of branches whose commits are now reachable from ${BRANCH}, copied EXACTLY as spelled in the list above (verify with 'git branch --merged ${BRANCH}'; one entry per item, no extras, no renames), the list of conflicted branches (empty when clean), and a short summary. The conductor set-compares merged_branches against the set it dispatched and ABORTS the phase on any mismatch, so listing a branch you did not merge, or omitting one you did, stops the run — never pad the list to make merged=true stick.`,
         { label: 'implement:integrate-l' + (li + 1), phase: 'Implement',
           model: 'opus', effort: 'high',
-          schema: { type: 'object', additionalProperties: false, required: ["merged"], properties: {"merged":{"type":"boolean"},"conflicts":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}} } },
+          schema: {"type":"object","additionalProperties":false,"required":["merged","merged_branches"],"properties":{"merged":{"type":"boolean"},"merged_branches":{"type":"array","items":{"type":"string"}},"conflicts":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}}} },
       )
       if (!levelIntegrate || !levelIntegrate.merged) throw new Error('Implement: level ' + (li + 1) + ' did not integrate into ' + BRANCH + ' — ' + ((levelIntegrate && levelIntegrate.summary) || ''))
+      const mergeGap = planSetDiff('level ' + (li + 1) + ' integrate', itemBranchSet, levelIntegrate.merged_branches)
+      if (mergeGap) throw new Error('Implement: level ' + (li + 1) + ' reported merged:true but the branches it merged are not the set that was dispatched, so ' + BRANCH + ' does NOT hold the whole level — ' + mergeGap)
     }
     results.implement = { summary: 'plan fan-out: ' + items.length + ' item(s) across ' + levels.length + ' dependency level(s)', items: itemResults }
   }

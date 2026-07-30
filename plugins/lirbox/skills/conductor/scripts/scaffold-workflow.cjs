@@ -561,8 +561,18 @@ const PLAN_SCHEMA = SCHEMA({
   items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'title', 'prompt', 'dependsOn'], properties: { id: { type: 'string' }, title: { type: 'string' }, prompt: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } } } } },
   summary: { type: 'string' },
 }, ['items']);
-const PLAN_SETUP_SCHEMA = SCHEMA({ ready: { type: 'boolean' }, summary: { type: 'string' } }, ['ready']);
-const PLAN_INTEGRATE_SCHEMA = SCHEMA({ merged: { type: 'boolean' }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['merged']);
+// These two are the fan-out's control-flow gates, so they demand the SET the worker acted on, not
+// just a boolean it asserts about itself: `created` (worktrees) and `merged_branches` (branches) are
+// REQUIRED, and the conductor set-compares them against what it dispatched. Emitted as plain JSON
+// (quoted keys) — a valid JS object literal either way, and the required set stays machine-readable.
+const PLAN_SETUP_SCHEMA = JSON.stringify({
+  type: 'object', additionalProperties: false, required: ['ready', 'created'],
+  properties: { ready: { type: 'boolean' }, created: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+});
+const PLAN_INTEGRATE_SCHEMA = JSON.stringify({
+  type: 'object', additionalProperties: false, required: ['merged', 'merged_branches'],
+  properties: { merged: { type: 'boolean' }, merged_branches: { type: 'array', items: { type: 'string' } }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+});
 const optLine = (frag, indent) => (frag ? `\n${indent}${frag}` : '');
 
 function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
@@ -602,15 +612,20 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
     log('${p}: ' + items.length + ' planned item(s) across ' + levels.length + ' dependency level(s)')
     for (let li = 0; li < levels.length; li++) {
       const level = levels[li]
-      const itemLines = level.map((it) => \`setup_item "\${WORKTREE}--\${it.slug}" "\${BRANCH}--\${it.slug}"\`).join('\\n')
-      const itemBranches = level.map((it) => \`\${BRANCH}--\${it.slug}\`).join(', ')
-      const itemWorktrees = level.map((it) => \`\${WORKTREE}--\${it.slug}\`).join(', ')
+      // The DISPATCHED set, kept as arrays: it is what the setup/integrate answers are compared against.
+      const itemWorktreeSet = level.map((it) => \`\${WORKTREE}--\${it.slug}\`)
+      const itemBranchSet = level.map((it) => \`\${BRANCH}--\${it.slug}\`)
+      const itemLines = itemWorktreeSet.map((wt, i) => \`setup_item "\${wt}" "\${itemBranchSet[i]}"\`).join('\\n')
+      const itemBranches = itemBranchSet.join(', ')
+      const itemWorktrees = itemWorktreeSet.join(', ')
       const levelSetup = await agent(
         ${tpl('setup-item-worktrees.txt', { ITEM_LINES: '${itemLines}' })},
         { label: '${key}:setup-l' + (li + 1), phase: '${p}',${optLine(mdl('mechanical'), '          ')}
           schema: ${PLAN_SETUP_SCHEMA} },
       )
       if (!levelSetup || !levelSetup.ready) throw new Error('${p}: per-item worktrees not ready for level ' + (li + 1) + ' — ' + ((levelSetup && levelSetup.summary) || ''))
+      const setupGap = planSetDiff('level ' + (li + 1) + ' setup', itemWorktreeSet, levelSetup.created)
+      if (setupGap) throw new Error('${p}: level ' + (li + 1) + ' setup reported ready:true but the worktrees it created are not the set that was dispatched — ' + setupGap)
       const levelOut = await parallel(level.map((it) => () => agent(
         ${tpl('plan-item.txt', { CONCURRENCY: promptTpl('independent-concurrency.txt') })},
         { label: '${key}:' + it.id, phase: '${p}',${workLead ? ' ' + workLead : ''}
@@ -629,6 +644,8 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
           schema: ${PLAN_INTEGRATE_SCHEMA} },
       )
       if (!levelIntegrate || !levelIntegrate.merged) throw new Error('${p}: level ' + (li + 1) + ' did not integrate into ' + BRANCH + ' — ' + ((levelIntegrate && levelIntegrate.summary) || ''))
+      const mergeGap = planSetDiff('level ' + (li + 1) + ' integrate', itemBranchSet, levelIntegrate.merged_branches)
+      if (mergeGap) throw new Error('${p}: level ' + (li + 1) + ' reported merged:true but the branches it merged are not the set that was dispatched, so ' + BRANCH + ' does NOT hold the whole level — ' + mergeGap)
     }
     results.${key} = { summary: 'plan fan-out: ' + items.length + ' item(s) across ' + levels.length + ' dependency level(s)', items: itemResults }
   }`;

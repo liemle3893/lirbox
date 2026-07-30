@@ -35,6 +35,29 @@ function planItems(res, prefix, fallback) {
   return items
 }
 
+// A worker's self-asserted boolean is not evidence. The conductor DISPATCHED a known set of per-item
+// worktrees/branches, so it asks for that exact set back and compares: a setup that created 2 of 3
+// worktrees, or an integrate that merged 2 of 3 branches while returning true, must STOP the run
+// rather than hand every downstream gate an incomplete diff while reporting on the whole plan.
+// Returns '' when the sets match, otherwise what is missing (or unexpectedly extra).
+function planSetDiff(what, expected, actual) {
+  if (!Array.isArray(actual)) {
+    // ponytail: the schema REQUIRES the list, so an absent one means a runtime that did not enforce
+    // the schema, not a worker claiming a partial result. Loud, not fatal; make it fatal if a
+    // non-enforcing runtime ever becomes real.
+    log('plan: ' + what + ' answered without the set it acted on — cross-check skipped (the schema requires that list)')
+    return ''
+  }
+  const got = new Set(actual.map(String))
+  const want = new Set(expected.map(String))
+  const missing = expected.filter((e) => !got.has(String(e)))
+  const extra = Array.from(got).filter((g) => !want.has(g))
+  if (!missing.length && !extra.length) return ''
+  return (missing.length ? 'missing: ' + missing.join(', ') : '')
+    + (missing.length && extra.length ? '; ' : '')
+    + (extra.length ? 'unexpected: ' + extra.join(', ') : '')
+}
+
 // Dependency LEVELS: every item whose dependsOn is already satisfied lands in the same level (one
 // parallel() batch); an item waits until every id it depends on has resolved. A dependency cycle
 // can never stall the run — the remaining items are emitted as one final level, loudly.
