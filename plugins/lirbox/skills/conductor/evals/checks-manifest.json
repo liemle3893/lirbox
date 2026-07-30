@@ -42,8 +42,8 @@
       "expect": "green"
     },
     "dead-item-worker-recorded-as-done": {
-      "expect": "red",
-      "note": "IN-FLIGHT (whetstone run, 2026-07-30). Discrimination-gated RED on this branch. Requires the RICHER shape than the #52 hard-fail: per-item ok:false, a run-level coverage note, a partial terminal marker, and the dead item NOT aborting the phase -- so the fixer is expected to REPLACE that throw. Land with plan-fanout-levels-never-checkpointed; they share the per-item ok field."
+      "expect": "green",
+      "note": "Fixed by whetstone run conductor-fanout-cluster (8057005), promoted 2026-07-30. A dead item worker is recorded ok:false and noted in results.coverage; checkpoint persists the notes and marks the run partial; Writeup renders 'Coverage and uncertainty'. Only a level where NOTHING landed still throws -- there is no diff to integrate and every later level would branch off a base missing the whole level. Continuing past a PARTIAL death is safe only because dodgate-plan-of-record's plan verifier adjudicates every planned item against the real diff; do not weaken that check thinking this one covers it."
     },
     "dodgate-plan-of-record": {
       "expect": "green",
@@ -70,8 +70,8 @@
       "note": "SUCCESSOR CHECK -- supersedes the earlier concern 'headless-background-workflow-orphan' (a headless -p driver backgrounded the workflow, ended its turn, and the exiting process killed the orphan). That fix is assertion 1 here (SKILL.md pins run_in_background: false); assertions 2-3 add the blocking-call and state-file re-verify requirements on top."
     },
     "integrate-and-setup-trusted-on-a-bare-boolean": {
-      "expect": "red",
-      "note": "IN-FLIGHT (whetstone run, 2026-07-30). Discrimination-gated RED. setup/integrate routing believes a self-asserted boolean over a set the conductor itself dispatched; a worker that merges 2 of 3 branches and returns merged:true advances the run and every later gate verifies an incomplete diff."
+      "expect": "green",
+      "note": "Fixed by whetstone run conductor-fanout-cluster (9b3b188), promoted 2026-07-30. PLAN_SETUP_SCHEMA requires created:string[] and PLAN_INTEGRATE_SCHEMA requires merged_branches:string[]; a pure-JS planSetDiff() set-compares them against the dispatched worktree/branch sets and aborts the level naming the missing/extra entries. The prompts now ASK for the list and warn that padding it stops the run -- keep both halves: a schema nobody is told to fill returns nothing."
     },
     "judged-dod-report-vulnerable": {
       "expect": "green"
@@ -99,8 +99,8 @@
       "expect": "green"
     },
     "plan-fanout-levels-never-checkpointed": {
-      "expect": "red",
-      "note": "IN-FLIGHT (whetstone run, 2026-07-30). Discrimination-gated RED. The fan-out persists the plan but no per-level progress, so any mid-phase abort re-dispatches every completed level -- the dominant token cost of a failed fan-out phase, made more likely by the new dead-worker throw site."
+      "expect": "green",
+      "note": "Fixed by whetstone run conductor-fanout-cluster (43a3890), promoted 2026-07-30. results.<key>Levels records per-level integration plus per-item {id,title,ok,summary}; the checkpoint moved to the TOP of the level loop so it persists the plan on the first pass and each completed level after, with no extra call site. A resume skips levels already marked integrated and re-dispatches only items with no recorded ok. Shares the per-item ok flag with dead-item-worker-recorded-as-done by design."
     },
     "trivial-phases-merged": {
       "expect": "green",

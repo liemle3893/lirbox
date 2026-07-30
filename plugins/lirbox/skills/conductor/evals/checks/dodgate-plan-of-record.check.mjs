@@ -119,11 +119,25 @@ ok(!/const unmet = dodUnmet\(\)/.test(gateBody)
 ok(/goalsAnswered/.test(gateBody) && /goalsAnswered\s*&&/.test(gateBody),
   '6. `goalsAnswered` blocks a pass when the plan verifier returned no verdicts');
 
-// 7. dead-worker guard: hard-fail BEFORE the null is recorded as a completed item
-const deadAt = src.indexOf('deadItems');
-ok(deadAt !== -1 && /throw new Error\(/.test(src.slice(deadAt, deadAt + 400))
-  && deadAt < src.indexOf('itemResults.push'),
-  '7. a null (dead-worker) item result hard-fails the phase before itemResults is written');
+// 7. dead-worker guard: a null result must never be recorded as a COMPLETED item.
+//
+// RE-STATED 2026-07-30, and deliberately narrowed. This assertion originally read "a null
+// (dead-worker) item result hard-fails the phase", matching the crude guard that shipped with this
+// check: `deadItems` + an unconditional `throw`. The fan-out reporting cluster then replaced that
+// with the shape the backlog had specified all along — a dead item is recorded ok:false and noted in
+// `results.coverage`, and only a level where NOTHING landed still throws. The old wording kept
+// passing on a substring match (`deadItems` near some `throw`) while no longer describing what runs,
+// which is a check that has stopped measuring its own claim.
+//
+// So this now asserts the invariant that actually survives the redesign and is the reason the
+// concern existed: every item record carries an explicit `ok` flag that STARTS false, so a worker
+// that never returned cannot be indistinguishable from one that finished. The full behavioural
+// contract — coverage note, partial status, non-fatal — belongs to its own frozen check,
+// dead-item-worker-recorded-as-done.check.mjs; this one only guards the flag's existence and
+// default, so the two do not drift into asserting the same thing twice.
+const itemRecord = src.match(/return \{ id: it\.id, title: it\.title, ok: [^}]*\}/);
+ok(/\bok: false\b/.test(src) && itemRecord !== null && /\bok:/.test(itemRecord[0]),
+  '7. every fan-out item record carries an `ok` flag defaulting to false (a dead worker is never a done item)');
 
 // 8. RIGHT-REASON guard: the generator still runs and emits a parseable conductor (the failures
 //    above are MISSING structure, not a generator crash / unparseable output).
