@@ -36,6 +36,24 @@ const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
 const results = { ...prior }
 
+// --- Coverage ledger: every place this run did LESS than it planned ---
+// A degraded run must be LEGIBLE, never silent. A dead item worker, an unusable plan entry, a
+// dangling dependsOn, a collapsed dependency cycle — each is a hole in the delivered scope that used
+// to leave no trace at all. Notes live in `results.coverage`, so the checkpoint worker persists them
+// with everything else and a resume inherits them; any note marks the persisted state `partial`
+// instead of a clean complete, and Writeup renders them as 'Coverage and uncertainty'. Continuing
+// past a hole is safe because a GATE adjudicates the plan-of-record against the real diff.
+const coverage = Array.isArray(results.coverage) ? results.coverage : []
+results.coverage = coverage
+const cover = (kind, item, detail) => {
+  if (coverage.some((n) => n.kind === kind && n.item === item)) return   // resume must not double-note
+  coverage.push({ kind, item, detail })
+  log('coverage: ' + kind + ' [' + item + '] — ' + detail)
+}
+const coverageMd = () => (coverage.length
+  ? coverage.map((n) => '- ' + n.kind + ' [' + n.item + '] — ' + n.detail).join('\n')
+  : '- none — no degradation was recorded')
+
 // --- Resume reachability guard: phasesDone MUST be a contiguous prefix ---
 // Canonical order is baked in as a literal — the Workflow runtime consumes `meta` as
 // metadata, so it is NOT a runtime binding in this body. A durable state that marks a
@@ -99,9 +117,11 @@ function inItemWorktree(slot, wt, br) {
 // pure (no fs/git/Date/Math.random) — every side-effect still lives in a worker prompt.
 
 // Normalize the planner's answer into a stable item list: a unique id, a filesystem-safe slug (the
-// item's own worktree/branch suffix), and a dependsOn list filtered to ids that actually exist. A
-// planner that returns nothing usable degenerates to ONE item carrying the phase's own goal — i.e.
-// exactly the single serial worker this phase used to be.
+// item's own worktree/branch suffix), `ok: false` (nothing is done until a worker says so), and a
+// dependsOn list filtered to ids that actually exist. A planner that returns nothing usable
+// degenerates to ONE item carrying the phase's own goal — i.e. exactly the single serial worker this
+// phase used to be. Every entry this normalization DROPS or rewrites is a hole in the delivered
+// scope, so each one leaves a coverage note instead of vanishing.
 function planItems(res, prefix, fallback) {
   const raw = (res && Array.isArray(res.items)) ? res.items : []
   const items = []
@@ -109,9 +129,9 @@ function planItems(res, prefix, fallback) {
   const slugs = new Set()
   for (const r of raw) {
     const prompt = (r && typeof r.prompt === 'string') ? r.prompt.trim() : ''
-    if (!prompt) continue
     const id = String((r && r.id) || '').trim() || ('item' + (items.length + 1))
-    if (ids.has(id)) continue
+    if (!prompt) { cover('dropped-plan-item', id, prefix + ': the planner returned this item with no prompt — it was dropped from the fan-out'); continue }
+    if (ids.has(id)) { cover('dropped-plan-item', id, prefix + ': duplicate item id — the second copy was dropped from the fan-out'); continue }
     let slug = (prefix + '-' + id).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 48)
     if (!slug) slug = prefix + '-item' + (items.length + 1)
     while (slugs.has(slug)) slug = slug + '-' + (items.length + 1)
@@ -123,10 +143,23 @@ function planItems(res, prefix, fallback) {
       title: String((r && r.title) || id),
       prompt,
       dependsOn: (r && Array.isArray(r.dependsOn)) ? r.dependsOn.map(String) : [],
+      ok: false,
     })
   }
-  if (!items.length) return [{ id: 'all', slug: prefix + '-all', title: prefix, prompt: fallback, dependsOn: [] }]
-  for (const it of items) it.dependsOn = it.dependsOn.filter((d) => d !== it.id && ids.has(d))
+  if (!items.length) {
+    if (raw.length) cover('empty-plan', prefix, 'the planner returned ' + raw.length + ' item(s), none of them usable — the phase ran as ONE worker on its whole goal')
+    return [{ id: 'all', slug: prefix + '-all', title: prefix, prompt: fallback, dependsOn: [], ok: false }]
+  }
+  for (const it of items) {
+    const edges = it.dependsOn.filter((d) => d !== it.id && ids.has(d))
+    // A dangling edge is not a typo to swallow: dropping it can float the item into an EARLIER level
+    // than the planner intended, so it may run before work it was told to build on.
+    if (edges.length !== it.dependsOn.length) {
+      cover('dangling-depends-on', it.id, prefix + ': dependsOn named ' + it.dependsOn.filter((d) => !edges.includes(d)).join(', ')
+        + ' — no such planned item, so the edge was dropped and this item may run earlier than intended')
+    }
+    it.dependsOn = edges
+  }
   return items
 }
 
@@ -163,7 +196,9 @@ function planLevels(items) {
   while (pending.length) {
     let level = pending.filter((it) => it.dependsOn.every((d) => settled.has(d)))
     if (!level.length) {
-      log('plan: dependency cycle among [' + pending.map((it) => it.id).join(', ') + '] — dispatching them as ONE level')
+      // Collapsing the cycle keeps the run alive, but it dispatches items IN PARALLEL that the
+      // planner said depend on each other — a real coverage hole, not just a log line.
+      cover('dependency-cycle', pending.map((it) => it.id).join('+'), 'a dependency cycle collapsed into ONE level — these items ran in parallel despite the edges between them')
       level = pending
     }
     const inLevel = new Set(level)
@@ -177,7 +212,7 @@ function planLevels(items) {
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
   const payload = JSON.stringify(
-    { workflow: NAME, status: 'running', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results },
+    { workflow: NAME, status: 'running', partial: coverage.length > 0, branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results },
     null, 2,
   )
   await agent(
@@ -364,14 +399,24 @@ ${goal}`,
         { label: 'work:' + it.id, phase: 'Work',
           schema: { type: 'object', additionalProperties: false, required: ["summary"], properties: {"summary":{"type":"string"}} } },
       )))
-      const ran = pending.map((it, i) => ({ id: it.id, title: it.title, ok: !!levelOut[i], summary: (levelOut[i] && levelOut[i].summary) || '' }))
+      // The plan item is the plan-of-record entry, so it carries its own outcome: planItems seeds
+      // every item ok:false ("planned, not done") and only a live result flips it true.
+      const ran = pending.map((it, i) => {
+        it.ok = !!levelOut[i]
+        return { id: it.id, title: it.title, ok: it.ok, summary: (levelOut[i] && levelOut[i].summary) || '' }
+      })
       entry.items = kept.concat(ran)
-      // A DEAD worker (parallel() yields null on a terminal agent error) must never be recorded as
-      // a completed item — that is silent plan drift: the item vanishes from the plan-of-record and
-      // the run walks on to a gate that can go green without it. Hard-fail the phase instead; the plan
-      // is already checkpointed, so a resume re-runs the items against the SAME plan.
-      const deadItems = pending.filter((it, i) => !levelOut[i])
-      if (deadItems.length) throw new Error('Work: ' + deadItems.length + ' planned item(s) returned no result (dead worker) — ' + deadItems.map((it) => it.id).join(', '))
+      // A DEAD worker (parallel() yields null on a terminal agent error) is recorded as NOT done and
+      // noted as a coverage gap — never as a finished item carrying an empty summary, which is the
+      // silent plan drift this reporting exists to kill. It is NOT fatal: DoDGate's plan-of-record
+      // verifier adjudicates every planned item against the real diff, so an item that never landed
+      // fails a GATE instead of shipping unseen, while the level's survivors still integrate — and a
+      // throw here would re-dispatch nothing but cost every later level a re-run. A level where
+      // NOTHING landed is different: there is no diff to integrate and every later level would branch
+      // off a base missing the whole level, so that one still stops the run.
+      const deadItems = ran.filter((r) => !r.ok)
+      if (deadItems.length === level.length) throw new Error('Work: level ' + (li + 1) + ' produced nothing — all ' + level.length + ' item worker(s) died (' + deadItems.map((r) => r.id).join(', ') + '); there is nothing to integrate')
+      for (const r of deadItems) cover('dead-item-worker', r.id, 'Work level ' + (li + 1) + ': \'' + r.title + '\' returned no result (worker died after retries) — its work is NOT on ' + BRANCH)
       ran.forEach((r) => { itemResults.push(r) })
       const levelIntegrate = await agent(
         `${inWorktree('work-integrate')}
@@ -402,4 +447,6 @@ Return merged=true ONLY if EVERY per-item branch landed in ${BRANCH}, plus merge
   await checkpoint('Work')
 }
 
-return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
+// A run that recorded a coverage note did NOT deliver its whole plan: it ends 'partial', never
+// 'complete' — the main session stamps the same verdict into state.json (SKILL.md step 5).
+return { workflow: NAME, status: coverage.length ? 'partial' : 'complete', partial: coverage.length > 0, coverage, branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }

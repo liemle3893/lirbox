@@ -4,5 +4,8 @@ Produce reviewer-facing delivery artifacts for the changes on ${BRANCH} vs ${BAS
 1. PRESERVE design notes — mkdir -p docs/changes/${NAME}/notes, then copy every implementation-notes/*.html into it (if any exist). These are the per-worker decision notes; keep them, do NOT discard. If implementation-notes/frontend-evidence/ exists, ALSO copy it recursively — manifest.json, screenshots, logs, every file type — into docs/changes/${NAME}/evidence/ so the frontend evidence rides the PR.
 2. WRITE-UP — invoke the lirbox:pr-writeup skill (via the Skill tool, by name) to produce a self-contained reviewer write-up of this branch's diff; save it to docs/changes/${NAME}/writeup.html. If the Skill tool is unavailable, read plugins/lirbox/skills/pr-writeup/SKILL.md + assets/template.html and follow them.
 3. DESIGN DIAGRAM — invoke the lirbox:flowchart skill (via the Skill tool, by name) to visualize the design of this change; choose the Mermaid diagram type (flowchart OR sequenceDiagram) that best fits; save to docs/changes/${NAME}/design.html. The flowchart skill validates its own output — ensure that validation passes before continuing. If the Skill tool is unavailable, read plugins/lirbox/skills/flowchart/SKILL.md + assets/template.html, follow them, and run that skill's assets/validate.mjs on the result.
-4. COMMIT all of docs/changes/${NAME}/ on ${BRANCH}.
+4. COVERAGE AND UNCERTAINTY — this run's degradation ledger (each note is scope it did NOT deliver):
+${coverageMd()}
+Add a **Coverage and uncertainty** section to writeup.html carrying every note above verbatim, and for each one say what a reviewer must check by hand because the run could not. If the ledger says none, state plainly that the run recorded no degradation. Never omit this section and never soften it — a reviewer trusting a silent write-up is exactly the failure it prevents.
+5. COMMIT all of docs/changes/${NAME}/ on ${BRANCH}.
 Return what was written.

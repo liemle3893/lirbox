@@ -658,14 +658,24 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
         { label: '${key}:' + it.id, phase: '${p}',${workLead ? ' ' + workLead : ''}
           schema: ${sch} },
       )))
-      const ran = pending.map((it, i) => ({ id: it.id, title: it.title, ok: !!levelOut[i], summary: (levelOut[i] && levelOut[i].summary) || '' }))
+      // The plan item is the plan-of-record entry, so it carries its own outcome: planItems seeds
+      // every item ok:false ("planned, not done") and only a live result flips it true.
+      const ran = pending.map((it, i) => {
+        it.ok = !!levelOut[i]
+        return { id: it.id, title: it.title, ok: it.ok, summary: (levelOut[i] && levelOut[i].summary) || '' }
+      })
       entry.items = kept.concat(ran)
-      // A DEAD worker (parallel() yields null on a terminal agent error) must never be recorded as
-      // a completed item — that is silent plan drift: the item vanishes from the plan-of-record and
-      // the run walks on to a gate that can go green without it. Hard-fail the phase instead; the plan
-      // is already checkpointed, so a resume re-runs the items against the SAME plan.
-      const deadItems = pending.filter((it, i) => !levelOut[i])
-      if (deadItems.length) throw new Error('${p}: ' + deadItems.length + ' planned item(s) returned no result (dead worker) — ' + deadItems.map((it) => it.id).join(', '))
+      // A DEAD worker (parallel() yields null on a terminal agent error) is recorded as NOT done and
+      // noted as a coverage gap — never as a finished item carrying an empty summary, which is the
+      // silent plan drift this reporting exists to kill. It is NOT fatal: DoDGate's plan-of-record
+      // verifier adjudicates every planned item against the real diff, so an item that never landed
+      // fails a GATE instead of shipping unseen, while the level's survivors still integrate — and a
+      // throw here would re-dispatch nothing but cost every later level a re-run. A level where
+      // NOTHING landed is different: there is no diff to integrate and every later level would branch
+      // off a base missing the whole level, so that one still stops the run.
+      const deadItems = ran.filter((r) => !r.ok)
+      if (deadItems.length === level.length) throw new Error('${p}: level ' + (li + 1) + ' produced nothing — all ' + level.length + ' item worker(s) died (' + deadItems.map((r) => r.id).join(', ') + '); there is nothing to integrate')
+      for (const r of deadItems) cover('dead-item-worker', r.id, '${p} level ' + (li + 1) + ': \\'' + r.title + '\\' returned no result (worker died after retries) — its work is NOT on ' + BRANCH)
       ran.forEach((r) => { itemResults.push(r) })
       const levelIntegrate = await agent(
         ${tpl('integrate-items.txt', { ITEM_BRANCHES: '${itemBranches}', ITEM_WORKTREES: '${itemWorktrees}' })},
@@ -1005,6 +1015,24 @@ const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
 const results = { ...prior }
 
+// --- Coverage ledger: every place this run did LESS than it planned ---
+// A degraded run must be LEGIBLE, never silent. A dead item worker, an unusable plan entry, a
+// dangling dependsOn, a collapsed dependency cycle — each is a hole in the delivered scope that used
+// to leave no trace at all. Notes live in \`results.coverage\`, so the checkpoint worker persists them
+// with everything else and a resume inherits them; any note marks the persisted state \`partial\`
+// instead of a clean complete, and Writeup renders them as 'Coverage and uncertainty'. Continuing
+// past a hole is safe because a GATE adjudicates the plan-of-record against the real diff.
+const coverage = Array.isArray(results.coverage) ? results.coverage : []
+results.coverage = coverage
+const cover = (kind, item, detail) => {
+  if (coverage.some((n) => n.kind === kind && n.item === item)) return   // resume must not double-note
+  coverage.push({ kind, item, detail })
+  log('coverage: ' + kind + ' [' + item + '] — ' + detail)
+}
+const coverageMd = () => (coverage.length
+  ? coverage.map((n) => '- ' + n.kind + ' [' + n.item + '] — ' + n.detail).join('\\n')
+  : '- none — no degradation was recorded')
+
 // --- Resume reachability guard: phasesDone MUST be a contiguous prefix ---
 // Canonical order is baked in as a literal — the Workflow runtime consumes \`meta\` as
 // metadata, so it is NOT a runtime binding in this body. A durable state that marks a
@@ -1035,7 +1063,7 @@ ${promptTpl('in-worktree.txt')}${usePlanFanout ? '\n\n' + promptTpl('in-item-wor
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
   const payload = JSON.stringify(
-    { workflow: NAME, status: 'running', branch: BRANCH, worktree: WORKTREE, ticket: TICKET,${withDod ? ' dod: { criteria: DOD_CRITERIA },' : ''} phasesDone: [...done], results },
+    { workflow: NAME, status: 'running', partial: coverage.length > 0, branch: BRANCH, worktree: WORKTREE, ticket: TICKET,${withDod ? ' dod: { criteria: DOD_CRITERIA },' : ''} phasesDone: [...done], results },
     null, 2,
   )
   await agent(
@@ -1059,7 +1087,9 @@ if (done.has('Setup')) {
 }
 ${coreBlocks}
 
-return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
+// A run that recorded a coverage note did NOT deliver its whole plan: it ends 'partial', never
+// 'complete' — the main session stamps the same verdict into state.json (SKILL.md step 5).
+return { workflow: NAME, status: coverage.length ? 'partial' : 'complete', partial: coverage.length > 0, coverage, branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
 `;
 
 fs.mkdirSync(path.dirname(out), { recursive: true });

@@ -343,21 +343,38 @@ try {
     && /const goalItems = \[\]/.test(goalNoFanout),
     '--no-plan-fanout: no plan verifier emitted, goalItems is empty');
 
-  // 9c. Dead-worker guard: parallel() yields null for an agent that died, and recording that as a
-  //     COMPLETED item IS the drift — the item vanishes from the plan-of-record and the run walks
-  //     on to a gate that can pass without it. Every plan-fanout combo must record it ok:false (the
-  //     per-level durability shape below) and then hard-fail.
+  // 9c. Dead-worker REPORTING: parallel() yields null for an agent that died, and recording that as
+  //     a COMPLETED item IS the drift — the item vanishes from the plan-of-record and the run walks
+  //     on to a gate that can pass without it. Every plan-fanout combo must record it ok:false, leave
+  //     a run-level coverage note, mark the persisted state partial — and NOT abort: DoDGate's
+  //     plan-of-record verifier catches a missing item, and aborting inside the level loop would cost
+  //     every later level a re-run. A level where NOTHING landed still stops (nothing to integrate).
   for (const [label, argv] of [
     ['bare', ['--phases', 'Work']],
     ['delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]],
   ]) {
     const g = gen('dead-item-' + label, argv);
-    check(/const deadItems = pending\.filter\(\(it, i\) => !levelOut\[i\]\)/.test(g)
-      && /if \(deadItems\.length\) throw new Error\(/.test(g)
-      && /ok: !!levelOut\[i\]/.test(g)
-      && g.indexOf('ok: !!levelOut[i]') < g.indexOf('const deadItems'),
-      `a dead item is recorded ok:false, then hard-fails the phase (${label})`);
+    check(/const deadItems = ran\.filter\(\(r\) => !r\.ok\)/.test(g)
+      && /it\.ok = !!levelOut\[i\]/.test(g)
+      && /cover\('dead-item-worker', r\.id,/.test(g)
+      && /if \(deadItems\.length === level\.length\) throw new Error\(/.test(g)
+      && !/if \(deadItems\.length\) throw/.test(g)
+      && /partial: coverage\.length > 0/.test(g)
+      && g.indexOf('it.ok = !!levelOut[i]') < g.indexOf('const deadItems'),
+      `a dead item is recorded ok:false + covered, and only an all-dead level aborts (${label})`);
   }
+
+  // 9c-2. The coverage ledger is a RUN-level fact, so it must reach durable state and the write-up:
+  //       results.coverage (checkpointed with everything else, inherited on resume), a partial marker
+  //       on every checkpoint payload, a terminal status that is 'partial' rather than 'complete',
+  //       and a 'Coverage and uncertainty' section in the Writeup prompt.
+  const cov = gen('coverage-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]);
+  check(/results\.coverage = coverage/.test(cov)
+    && /status: coverage\.length \? 'partial' : 'complete'/.test(cov)
+    && /COVERAGE AND UNCERTAINTY/.test(cov) && /\$\{coverageMd\(\)\}/.test(cov)
+    && /cover\('dangling-depends-on'/.test(cov) && /cover\('dropped-plan-item'/.test(cov)
+    && /cover\('dependency-cycle'/.test(cov),
+    'coverage ledger: persisted in results, partial terminal status, rendered by Writeup, noted for every degradation');
 
   // 9d. Per-LEVEL durability: the fan-out's unit of progress is the dependency LEVEL, so an
   //     integrated level must survive a LATER level's failure — otherwise a resume re-dispatches
