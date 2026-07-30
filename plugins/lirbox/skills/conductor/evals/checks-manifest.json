@@ -41,6 +41,10 @@
     "dod-gate": {
       "expect": "green"
     },
+    "dead-item-worker-recorded-as-done": {
+      "expect": "red",
+      "note": "IN-FLIGHT (whetstone run, 2026-07-30). Discrimination-gated RED on this branch. Requires the RICHER shape than the #52 hard-fail: per-item ok:false, a run-level coverage note, a partial terminal marker, and the dead item NOT aborting the phase -- so the fixer is expected to REPLACE that throw. Land with plan-fanout-levels-never-checkpointed; they share the per-item ok field."
+    },
     "dodgate-plan-of-record": {
       "expect": "green",
       "note": "Added 2026-07-30 together with its fix, so it lands as 'green'. Verified RED (7/9) against the origin/main@d5e5b25 generator via GEN_OVERRIDE before landing -- it discriminates, it is not a check that passes on nothing. Guards two drift paths a frozen DoD structurally cannot see: a worker retiring its own planned item, and parallel() returning null for a dead worker (which the baseline recorded as a completed item carrying an empty summary)."
@@ -64,6 +68,10 @@
     "headless-driver-still-ends-turn": {
       "expect": "green",
       "note": "SUCCESSOR CHECK -- supersedes the earlier concern 'headless-background-workflow-orphan' (a headless -p driver backgrounded the workflow, ended its turn, and the exiting process killed the orphan). That fix is assertion 1 here (SKILL.md pins run_in_background: false); assertions 2-3 add the blocking-call and state-file re-verify requirements on top."
+    },
+    "integrate-and-setup-trusted-on-a-bare-boolean": {
+      "expect": "red",
+      "note": "IN-FLIGHT (whetstone run, 2026-07-30). Discrimination-gated RED. setup/integrate routing believes a self-asserted boolean over a set the conductor itself dispatched; a worker that merges 2 of 3 branches and returns merged:true advances the run and every later gate verifies an incomplete diff."
     },
     "judged-dod-report-vulnerable": {
       "expect": "green"
@@ -89,6 +97,10 @@
     },
     "scaffold-prompts-as-data": {
       "expect": "green"
+    },
+    "plan-fanout-levels-never-checkpointed": {
+      "expect": "red",
+      "note": "IN-FLIGHT (whetstone run, 2026-07-30). Discrimination-gated RED. The fan-out persists the plan but no per-level progress, so any mid-phase abort re-dispatches every completed level -- the dominant token cost of a failed fan-out phase, made more likely by the new dead-worker throw site."
     },
     "trivial-phases-merged": {
       "expect": "green",
