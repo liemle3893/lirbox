@@ -84,6 +84,15 @@ declaration does not change what runs** — `.harbor/` is a copy, so re-sync it 
 you will pay for a run that scored the old grader. And always run `-a nop` alongside `-a oracle`:
 a green oracle proves the grader is *satisfiable*, only `nop` proves it is not passing on nothing.
 
+Two more, learned the expensive way. **The oracle bar is `== 1.0` per dimension, not `> 0`** — an
+oracle that cannot max its own grader means the rubric is broken and every score is read against a
+false denominator. **A judged dimension is advisory, never a gate**: Harbor averages an *absent*
+reward key as 0, so a judge that dies mid-run is indistinguishable from a bad verdict — read
+per-trial values from `stats.evals.<arm>.reward_stats`, and keep each dimension in its own
+`rewardkit` process so one dying cannot take the deterministic score with it. Before assembling a
+task, read `plugins/lirbox/skills/<skill>/harbor/harness.md` — it is the tracked instruction preamble
+(bare skill name, headless, any scaffold-only constraint) that gets prepended to `instruction.md`.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
