@@ -54,6 +54,35 @@ tracked.
 - A skill's frontmatter `description` is its **trigger** — keep it specific; it decides when Claude invokes it.
 - Skills resolve under the `lirbox:` namespace (e.g. `lirbox:conductor`).
 
+## Changing a skill — the rule
+
+> **Every skill change lands behind a discrimination-gated frozen check and a green floor.**
+> Whether a `whetstone` loop or a human executes the change is a **cost decision**, not a rule.
+
+The check must be **proven RED on the baseline** before the fix
+(`node plugins/lirbox/skills/whetstone/scripts/check-baseline.cjs "<check cmd>"` → `DISCRIMINATING`),
+registered in that skill's `evals/checks-manifest.json`, and the floor must stay green. A check that
+was never seen failing is not a gate.
+
+Keep it measuring, too: `node scripts/prove-checks.mjs --skill <skill>` mutation-tests the frozen
+checks — it breaks the invariant each one claims to guard and requires it to go RED. Declare
+`mutations` on a check's manifest entry; undeclared checks are reported `UNPROVEN`, not assumed good.
+This exists because both failure modes have shipped here: a check that kept passing after the
+behaviour it described was replaced (**false green**), and one that reported a regression in an
+untouched file after a refactor moved its anchor (**false red**). Both were anchored to incidental
+structure — a variable name, a nearby token — instead of an invariant.
+
+**When to spend a `whetstone` run** rather than editing directly: unattended/overnight work, a
+backlog large enough that per-item revert will actually fire, or a fixer you don't trust to
+self-police the surface. At small N, attended, it is mostly overhead — and note the loop **cannot fix
+a stale check**, because `evals/**` is locked to it, so a wrong check silently shapes the fix.
+If you do run it, **push the frozen checks first**: the worktree is cut from the pushed remote tip,
+so locally-committed checks are invisible and the floor silently runs a smaller set.
+
+After an improve-PR merges: **prune** resolved items from `feedback/<skill>.jsonl` (it is the queue of
+OPEN concerns only). Do *not* bother promoting green checks into `evals/floor/` — `floor/06-checks-manifest.test.mjs`
+already runs every check on every floor run and enforces its expected state.
+
 ## Shipping a skill — the three tiers (full detail in [CONTRIBUTING.md](./CONTRIBUTING.md#testing))
 
 **Tier 1** validate + smoke-test + `skill-lint`. **Tier 2** evals — `evals/floor/`, `evals/checks/`,
