@@ -174,6 +174,39 @@ node scripts/evals-all.mjs --fast --skill <name>
 node scripts/evals-all.mjs --fast
 ```
 
+#### Changing a shipped skill — the check gate
+
+> **Every skill change lands behind a discrimination-gated frozen check and a green floor.**
+> Whether a `whetstone` loop or a human executes the change is a **cost decision**, not a rule.
+
+The check must be **proven RED on the baseline** before the fix
+(`node plugins/lirbox/skills/whetstone/scripts/check-baseline.cjs "<check cmd>"` → `DISCRIMINATING`)
+and registered in that skill's `checks-manifest.json`. A check that was never seen failing is not a
+gate.
+
+Keep it measuring, too: `node scripts/prove-checks.mjs --skill <skill>` mutation-tests the frozen
+checks — it breaks the invariant each one claims to guard and requires it to go RED. Declare
+`mutations` on the manifest entry; undeclared checks are reported `UNPROVEN`, not assumed good.
+This exists because both failure modes have shipped here: a check that kept passing after the
+behaviour it described was replaced (**false green**), and one that reported a regression in an
+untouched file after a refactor moved its anchor (**false red**). Both were anchored to incidental
+structure — a variable name, a nearby token — instead of an invariant.
+
+Do **not** bother promoting green checks into `evals/floor/` — `floor/06-checks-manifest.test.mjs`
+already runs every check on every floor run and enforces its expected state.
+
+#### When to spend a `whetstone` run rather than editing directly
+
+Worth it for: unattended/overnight work, a backlog large enough that per-item revert will actually
+fire, or a fixer you don't trust to self-police the surface. At small N, attended, it is mostly
+overhead — and the loop **cannot fix a stale check**, because `evals/**` is locked to it, so a wrong
+check silently shapes the fix.
+
+If you do run it, **push the frozen checks first**: the worktree is cut from the pushed remote tip,
+so locally-committed checks are invisible and the floor silently runs a smaller set. After an
+improve-PR merges, **prune** resolved items from `feedback/<skill>.jsonl` — it is the queue of OPEN
+concerns only.
+
 ### Tier 3 — Harbor: containerised behavioural test — OFFER IT, DO NOT ASSUME IT
 
 Tier 2 is **artifact-level**: it checks what a skill's text and generators *contain*. Swap the
@@ -252,7 +285,14 @@ non-TTY**. Results land in `jobs/<ts>/`; read them with `harbor view jobs`, or s
 **A green oracle proves the grader is satisfiable, never that it measures.** `-a nop` is the half
 that catches a grader passing on an empty workspace, and it is the one worth running first. Measured
 on `conductor/scaffold-multiphase` (2026-07-30): `nop` 0.000 / `oracle` 1.000 / `claude-code`
-sonnet-5 1.000 — a real 0→1 spread on both dimensions.
+sonnet-5 1.000 — a real 0→1 spread on the deterministic dimension.
+
+**The oracle bar is `== 1.0`, not `> 0`.** An oracle that cannot max its own grader means the grader
+is broken, not that the task is hard — and every score on that dimension is then read against a false
+denominator. Caught late on `conductor/scaffold-multiphase` (2026-07-30): its oracle scores
+**quality 0.750**, so a `claude-code` run at 0.9375 was *beating the reference solution*, and the
+quality figures quoted for that task in PR #51 were measured against a ceiling that was never 1.0.
+Check each dimension separately — `reward` hit 1.000 there while `quality` did not.
 
 Four honest caveats.
 
@@ -305,10 +345,22 @@ wasted the paid run that produced it. Directory layout separates **scores**; onl
 separate **failures**. `rewardkit` always writes `reward-details.json` beside `--output` under that
 exact name, so give each dimension its own output subdirectory and merge afterwards.
 
-**A failed judge must omit its key, not write 0.** Absent means "not measured", `0` means "judged
-bad" — conflate them and an upstream outage reads as a regression. Retry the judge once while you are
-there; `rewardkit` raises on a non-zero agent-CLI exit *inside* its retry loop (`judges.py`), so only
-*parse* failures get a second attempt and a 529 gets none.
+**A failed judge omits its key — but do NOT rely on that to protect the score.** Absent *ought* to
+mean "not measured" while `0` means "judged bad". **Harbor does not honour the distinction: it
+averages an absent key as 0.** Measured on `conductor/scaffold-delivery-gates` (2026-07-30, sonnet-5,
+k=3): `reward` 1.000 on all three trials, `quality` 1.000 on exactly one and absent on two, reported
+as `quality 0.333` — that is `1.0 ÷ 3`, not a quality signal. The two judges had died with
+`ValueError: Agent CLI 'claude' exited with code 1` (`num_turns: 1`, `input_tokens: 0`): they never
+judged anything.
+
+So omit-don't-zero is still the right thing to write, but it buys you a readable `reward.json`, not a
+protected metric. **The mitigation that actually worked was the process separation above** — `reward`
+ran in its own `rewardkit` process and held 1.000 while the judge dimension collapsed. Treat a judged
+dimension as advisory, never as a gate, and read its per-trial values from
+`stats.evals.<arm>.reward_stats` rather than the aggregate. Retry the judge while you are there;
+`rewardkit` raises on a non-zero agent-CLI exit *inside* its retry loop (`judges.py`), so only *parse*
+failures get a second attempt and a CLI death gets none. Agent judges also fail under concurrency —
+2 of 3 died when `-n 3` ran three of them against one token.
 
 **Pin `[judge].model`.** Left unset it runs on whatever the CLI defaults to (`reward-details.json`
 reports `model: None`), which silently rescales the metric between runs — the same reason

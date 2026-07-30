@@ -36,6 +36,23 @@ jobs:
       - name: Regression gate
         run: node scripts/evals-all.mjs --fast
 
+      # Mutation-proof the frozen checks. evals-all only proves a green check EXITS 0 — it cannot
+      # tell "the behaviour is present" from "the check stopped looking". Both false-green and
+      # false-red have shipped here (see scripts/prove-checks.mjs). This breaks the invariant each
+      # check claims to guard and requires the check to go RED.
+      - name: Prove the checks still measure
+        run: |
+          set -o pipefail
+          fails=0
+          for d in plugins/lirbox/skills/*/evals/checks-manifest.json; do
+            skill=$(basename "$(dirname "$(dirname "$d")")")
+            echo "── $skill"
+            node scripts/prove-checks.mjs --skill "$skill" || { echo "FAIL $skill"; fails=$((fails+1)); }
+          done
+          echo "---"
+          if [ "$fails" -gt 0 ]; then echo "GATE RED — $fails skill(s) have a check that no longer measures"; exit 1; fi
+          echo "GATE GREEN — every declared mutation produced a RED"
+
   # Generator regression nets (scripts/test-*.cjs). Slower — arena's clones fixture bundles and
   # runs their npm suites — so it is a separate job and does not hold up the fast gate.
   nets:
