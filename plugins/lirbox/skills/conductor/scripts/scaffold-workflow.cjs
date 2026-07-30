@@ -597,7 +597,6 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
     )
     items = planItems(planned, '${key}', goal)
     results.${key}Plan = { items }
-    await checkpoint('${p}')
   }
   if (items.length === 1) {
     log('${p}: the plan holds ONE item — running it as a single worker in the run worktree')
@@ -608,11 +607,39 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
     )
   } else {
     const levels = planLevels(items)
-    const itemResults = []
+    // DURABLE per-LEVEL progress. The phase-level \`done\` set cannot express this: its granularity is
+    // the PHASE, while the fan-out's unit of progress is the dependency LEVEL. Without it a level-3
+    // failure discards levels 1-2 — the resume re-dispatches their workers against a base that ALREADY
+    // contains their commits (so they no-op or re-apply and conflict) and re-integrates them. Each
+    // entry is { level, integrated, items: [{ id, title, ok, summary }] }: a level with integrated:true
+    // is skipped outright, and a re-entered level re-dispatches ONLY the items whose recorded \`ok\` is
+    // false — the same per-item flag a degraded (dead-worker) item is recorded under.
+    const levelLog = Array.isArray(results.${key}Levels) ? results.${key}Levels : []
+    results.${key}Levels = levelLog
+    const itemResults = levelLog.flatMap((e) => (Array.isArray(e.items) ? e.items : []).filter((it) => it && it.ok))
     log('${p}: ' + items.length + ' planned item(s) across ' + levels.length + ' dependency level(s)')
     for (let li = 0; li < levels.length; li++) {
+      // The fan-out's ONLY checkpoint site, deliberately — a checkpoint is a whole subagent, and the
+      // delivery profile's budget is tight. On the first pass it persists the PLAN before any item is
+      // dispatched (so a resume never re-decomposes); on every later pass it also carries the PREVIOUS
+      // level's integrated:true and per-item outcomes. The final level's lands in the phase's own
+      // trailing checkpoint.
+      await checkpoint('${p}')
       const level = levels[li]
+      let entry = levelLog.find((e) => e && e.level === li + 1)
+      if (!entry) { entry = { level: li + 1, integrated: false, items: [] }; levelLog.push(entry) }
+      if (entry.integrated) {
+        log('${p}: level ' + (li + 1) + ' already integrated (resumed) — its ' + entry.items.length + ' item(s) are on ' + BRANCH + ', so nothing is re-dispatched')
+        continue
+      }
+      // Only items with no recorded success are re-dispatched; the rest already have commits on their
+      // own item branch, waiting for this level's integrate.
+      const kept = (Array.isArray(entry.items) ? entry.items : []).filter((it) => it && it.ok)
+      const pending = level.filter((it) => !kept.some((k) => k.id === it.id))
       // The DISPATCHED set, kept as arrays: it is what the setup/integrate answers are compared against.
+      // Deliberately the WHOLE level, not \`pending\`: setup is idempotent (it reuses an existing
+      // worktree) and integrate must merge every item branch in the level, including one built before
+      // an earlier abort.
       const itemWorktreeSet = level.map((it) => \`\${WORKTREE}--\${it.slug}\`)
       const itemBranchSet = level.map((it) => \`\${BRANCH}--\${it.slug}\`)
       const itemLines = itemWorktreeSet.map((wt, i) => \`setup_item "\${wt}" "\${itemBranchSet[i]}"\`).join('\\n')
@@ -626,18 +653,20 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
       if (!levelSetup || !levelSetup.ready) throw new Error('${p}: per-item worktrees not ready for level ' + (li + 1) + ' — ' + ((levelSetup && levelSetup.summary) || ''))
       const setupGap = planSetDiff('level ' + (li + 1) + ' setup', itemWorktreeSet, levelSetup.created)
       if (setupGap) throw new Error('${p}: level ' + (li + 1) + ' setup reported ready:true but the worktrees it created are not the set that was dispatched — ' + setupGap)
-      const levelOut = await parallel(level.map((it) => () => agent(
+      const levelOut = await parallel(pending.map((it) => () => agent(
         ${tpl('plan-item.txt', { CONCURRENCY: promptTpl('independent-concurrency.txt') })},
         { label: '${key}:' + it.id, phase: '${p}',${workLead ? ' ' + workLead : ''}
           schema: ${sch} },
       )))
+      const ran = pending.map((it, i) => ({ id: it.id, title: it.title, ok: !!levelOut[i], summary: (levelOut[i] && levelOut[i].summary) || '' }))
+      entry.items = kept.concat(ran)
       // A DEAD worker (parallel() yields null on a terminal agent error) must never be recorded as
       // a completed item — that is silent plan drift: the item vanishes from the plan-of-record and
-      // the run walks on to a gate that can go green without it. Hard-fail the phase instead; its
-      // plan is already checkpointed, so a resume re-runs the items against the SAME plan.
-      const deadItems = level.filter((it, i) => !levelOut[i])
+      // the run walks on to a gate that can go green without it. Hard-fail the phase instead; the plan
+      // is already checkpointed, so a resume re-runs the items against the SAME plan.
+      const deadItems = pending.filter((it, i) => !levelOut[i])
       if (deadItems.length) throw new Error('${p}: ' + deadItems.length + ' planned item(s) returned no result (dead worker) — ' + deadItems.map((it) => it.id).join(', '))
-      levelOut.forEach((r, i) => { itemResults.push({ id: level[i].id, title: level[i].title, summary: (r && r.summary) || '' }) })
+      ran.forEach((r) => { itemResults.push(r) })
       const levelIntegrate = await agent(
         ${tpl('integrate-items.txt', { ITEM_BRANCHES: '${itemBranches}', ITEM_WORKTREES: '${itemWorktrees}' })},
         { label: '${key}:integrate-l' + (li + 1), phase: '${p}',${optLine(mdl('think'), '          ')}
@@ -646,6 +675,9 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
       if (!levelIntegrate || !levelIntegrate.merged) throw new Error('${p}: level ' + (li + 1) + ' did not integrate into ' + BRANCH + ' — ' + ((levelIntegrate && levelIntegrate.summary) || ''))
       const mergeGap = planSetDiff('level ' + (li + 1) + ' integrate', itemBranchSet, levelIntegrate.merged_branches)
       if (mergeGap) throw new Error('${p}: level ' + (li + 1) + ' reported merged:true but the branches it merged are not the set that was dispatched, so ' + BRANCH + ' does NOT hold the whole level — ' + mergeGap)
+      // The level is now on the run branch. The next iteration's checkpoint (or the phase's trailing
+      // one) makes that durable, so a LATER level's failure never re-runs this one.
+      entry.integrated = true
     }
     results.${key} = { summary: 'plan fan-out: ' + items.length + ' item(s) across ' + levels.length + ' dependency level(s)', items: itemResults }
   }`;

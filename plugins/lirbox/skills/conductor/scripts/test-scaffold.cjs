@@ -344,17 +344,40 @@ try {
     '--no-plan-fanout: no plan verifier emitted, goalItems is empty');
 
   // 9c. Dead-worker guard: parallel() yields null for an agent that died, and recording that as a
-  //     completed item IS the drift — the item vanishes from the plan-of-record and the run walks
-  //     on to a gate that can pass without it. Every plan-fanout combo must hard-fail instead.
+  //     COMPLETED item IS the drift — the item vanishes from the plan-of-record and the run walks
+  //     on to a gate that can pass without it. Every plan-fanout combo must record it ok:false (the
+  //     per-level durability shape below) and then hard-fail.
   for (const [label, argv] of [
     ['bare', ['--phases', 'Work']],
     ['delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]],
   ]) {
     const g = gen('dead-item-' + label, argv);
-    check(/const deadItems = level\.filter\(\(it, i\) => !levelOut\[i\]\)/.test(g)
+    check(/const deadItems = pending\.filter\(\(it, i\) => !levelOut\[i\]\)/.test(g)
       && /if \(deadItems\.length\) throw new Error\(/.test(g)
-      && g.indexOf('const deadItems') < g.indexOf('levelOut.forEach'),
-      `dead-item guard hard-fails before results are recorded (${label})`);
+      && /ok: !!levelOut\[i\]/.test(g)
+      && g.indexOf('ok: !!levelOut[i]') < g.indexOf('const deadItems'),
+      `a dead item is recorded ok:false, then hard-fails the phase (${label})`);
+  }
+
+  // 9d. Per-LEVEL durability: the fan-out's unit of progress is the dependency LEVEL, so an
+  //     integrated level must survive a LATER level's failure — otherwise a resume re-dispatches
+  //     workers whose commits are already on the run branch. Every plan-fanout combo must persist
+  //     `results.<key>Levels` (per-item ok flags), skip an integrated level, and re-dispatch only
+  //     the items with no recorded success. The checkpoint sits at the TOP of the level loop — one
+  //     site, so the delivery checkpoint budget is untouched: it persists the plan on the first pass
+  //     and every prior level's integrated flag after that.
+  for (const [label, argv, key] of [
+    ['bare', ['--phases', 'Work'], 'work'],
+    ['delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile], 'implement'],
+  ]) {
+    const g = gen('level-ckpt-' + label, argv);
+    check(new RegExp(`const levelLog = Array\\.isArray\\(results\\.${key}Levels\\)`).test(g)
+      && new RegExp(`results\\.${key}Levels = levelLog`).test(g)
+      && /if \(entry\.integrated\) \{/.test(g)
+      && /const pending = level\.filter\(\(it\) => !kept\.some\(\(k\) => k\.id === it\.id\)\)/.test(g)
+      && /entry\.integrated = true/.test(g)
+      && new RegExp(`for \\(let li = 0; li < levels\\.length; li\\+\\+\\) \\{\\n(\\s*//[^\\n]*\\n)*\\s*await checkpoint\\('`).test(g),
+      `per-level progress is checkpointed and guards the level loop (${label})`);
   }
 
   // 10. Panel CodeGate: delivery default ON (guard → dimensions → ≥80 filter → lead loop);

@@ -40,7 +40,11 @@ More phases = more subagent round-trips; reserve them for work that warrants the
   output it depends on. A mixed graph (`w1`,`w2` independent → `w3` needing both) is therefore
   expressible **inside one phase**.
   The plan is checkpointed **before** the first item runs, so a resume reuses the same decomposition
-  the branch's commits already belong to instead of re-planning a different one. A one-item plan
+  the branch's commits already belong to instead of re-planning a different one. Progress is durable
+  at **level** granularity, not just phase: `results.<key>Levels` records
+  `{ level, integrated, items: [{ id, title, ok, summary }] }`, so a level-3 failure resumes into
+  level 3 — an `integrated` level is skipped outright (its commits are already on the run branch) and
+  a re-entered level re-dispatches only the items with no recorded `ok`. A one-item plan
   degenerates to the single serial worker this phase used to be (cost: one cheap planner round-trip).
   Pass `--no-plan-fanout` when the phase is small, strictly serial, or you want the byte-minimal
   script. This is the **only** decomposition mechanism, and its only escape hatch.
