@@ -41,6 +41,14 @@
     "dod-gate": {
       "expect": "green"
     },
+    "dead-item-worker-recorded-as-done": {
+      "expect": "green",
+      "note": "Fixed by whetstone run conductor-fanout-cluster (8057005), promoted 2026-07-30. A dead item worker is recorded ok:false and noted in results.coverage; checkpoint persists the notes and marks the run partial; Writeup renders 'Coverage and uncertainty'. Only a level where NOTHING landed still throws -- there is no diff to integrate and every later level would branch off a base missing the whole level. Continuing past a PARTIAL death is safe only because dodgate-plan-of-record's plan verifier adjudicates every planned item against the real diff; do not weaken that check thinking this one covers it."
+    },
+    "dodgate-plan-of-record": {
+      "expect": "green",
+      "note": "Added 2026-07-30 together with its fix, so it lands as 'green'. Verified RED (7/9) against the origin/main@d5e5b25 generator via GEN_OVERRIDE before landing -- it discriminates, it is not a check that passes on nothing. Guards two drift paths a frozen DoD structurally cannot see: a worker retiring its own planned item, and parallel() returning null for a dead worker (which the baseline recorded as a completed item carrying an empty summary)."
+    },
     "dodgate-replan-outer-loop": {
       "expect": "green"
     },
@@ -60,6 +68,10 @@
     "headless-driver-still-ends-turn": {
       "expect": "green",
       "note": "SUCCESSOR CHECK -- supersedes the earlier concern 'headless-background-workflow-orphan' (a headless -p driver backgrounded the workflow, ended its turn, and the exiting process killed the orphan). That fix is assertion 1 here (SKILL.md pins run_in_background: false); assertions 2-3 add the blocking-call and state-file re-verify requirements on top."
+    },
+    "integrate-and-setup-trusted-on-a-bare-boolean": {
+      "expect": "green",
+      "note": "Fixed by whetstone run conductor-fanout-cluster (9b3b188), promoted 2026-07-30. PLAN_SETUP_SCHEMA requires created:string[] and PLAN_INTEGRATE_SCHEMA requires merged_branches:string[]; a pure-JS planSetDiff() set-compares them against the dispatched worktree/branch sets and aborts the level naming the missing/extra entries. The prompts now ASK for the list and warn that padding it stops the run -- keep both halves: a schema nobody is told to fill returns nothing."
     },
     "judged-dod-report-vulnerable": {
       "expect": "green"
@@ -85,6 +97,10 @@
     },
     "scaffold-prompts-as-data": {
       "expect": "green"
+    },
+    "plan-fanout-levels-never-checkpointed": {
+      "expect": "green",
+      "note": "Fixed by whetstone run conductor-fanout-cluster (43a3890), promoted 2026-07-30. results.<key>Levels records per-level integration plus per-item {id,title,ok,summary}; the checkpoint moved to the TOP of the level loop so it persists the plan on the first pass and each completed level after, with no extra call site. A resume skips levels already marked integrated and re-dispatches only items with no recorded ok. Shares the per-item ok flag with dead-item-worker-recorded-as-done by design."
     },
     "trivial-phases-merged": {
       "expect": "green",

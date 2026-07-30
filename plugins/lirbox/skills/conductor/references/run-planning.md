@@ -102,6 +102,22 @@ At the end of the run the **DoDGate** verifies every criterion (fix-loop ≤3, t
 PR body and run report carry the scorecard, and a criterion already met at baseline is flagged
 as non-discriminating.
 
+**The gate also verifies the plan-of-record — nothing to declare.** A DoD is frozen before anything
+has read the repo, so it can never name a work item the planner invents at runtime: criteria are a
+coarse *proxy* for intent, and a worker that defers its own item can leave every criterion MET while
+the implementation is missing planned work. So DoDGate runs a second verifier **in parallel** with
+the criteria verifier (one round, no added wall-clock) over every item the phase planners committed
+to, read from the persisted plans. Its verdicts share the criteria shape, so both sets **union** into
+one unmet list and the existing replan / fix / stall-detection / escalate path handles them
+identically — a missing item is fixed, not argued away. Only a genuinely subsumed item may score MET,
+and only by naming what covers it. Serial runs (`--no-plan-fanout`) have no planner, so no plan-of-record
+and no second verifier.
+
+Separately, a **dead** work item can no longer vanish: `parallel()` yields `null` for a worker that
+died, and that null used to be recorded as a completed item with an empty summary. The conductor now
+hard-fails the phase instead — its plan is already checkpointed, so a resume re-runs the items
+against the same plan.
+
 ---
 
 ## 3. Decomposition — the loop's job, not the caller's (SKILL.md step 2)

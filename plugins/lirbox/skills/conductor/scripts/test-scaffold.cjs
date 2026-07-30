@@ -309,6 +309,94 @@ try {
   fs.writeFileSync(badDod, JSON.stringify({ criteria: [] }));
   check(genFails(['--phases', 'Work', '--dod-file', badDod]), 'empty criteria array rejected');
 
+  // 9b. Plan-of-record half of DoDGate: the frozen criteria are written before anything has read
+  //     the repo, so they cannot name a work item the planner invented at runtime — a criterion set
+  //     can go fully MET while an item was silently skipped. The gate verifies both views IN
+  //     PARALLEL and unions their unmet rows, so replan/fix/stall/escalate all route on the union.
+  const goalGen = gen('dod-goals', ['--phases', 'Analyze,Implement', '--profile', 'delivery', '--dod-file', dodFile]);
+  check(/const PLAN_KEYS = \["analyze","implement"\]/.test(goalGen),
+    'goals: PLAN_KEYS names every plan-fanout work phase key');
+  check(/const goalItems = PLAN_KEYS\.flatMap/.test(goalGen),
+    'goals: plan-of-record derived from the PERSISTED plans, not re-decomposed');
+  const dodGateBody = goalGen.slice(goalGen.indexOf("if (done.has('DoDGate'))"));
+  // Both verifiers must live inside the SAME parallel([...]) — slice from its opening to the
+  // destructured result's first use, so a sequential second await could not pass this.
+  const parBlock = dodGateBody.slice(
+    dodGateBody.indexOf('const [dodVerdict, goalVerdict] = await parallel(['),
+    dodGateBody.indexOf('dodLast = dodVerdict'),
+  );
+  check(parBlock.includes('dodgate:verify-a') && parBlock.includes('dodgate:goals-a'),
+    'goals: DoD verify + plan verify dispatch in ONE parallel() (no added wall-clock)');
+  check(/const allUnmet = \(\) => \[\.\.\.dodUnmet\(\), \.\.\.goalUnmet\(\)\]/.test(dodGateBody),
+    'goals: unmet set is the UNION of criteria and plan items');
+  check(!/const unmet = dodUnmet\(\)/.test(dodGateBody)
+    && !/unmet: dodUnmet\(\)/.test(dodGateBody)
+    && !/unmetKey = dodUnmet\(\)/.test(dodGateBody),
+    'goals: replan/escalate/stall route on allUnmet(), never dodUnmet() alone');
+  check(/const goalsAnswered = !goalItems\.length \|\| /.test(dodGateBody)
+    && /&& goalsAnswered && unmet\.length === 0/.test(dodGateBody),
+    'goals: a DEAD plan verifier cannot read as "nothing unmet" — no verdicts, no pass');
+  // The plan-of-record does not exist without a runtime planner, so the second verifier (and its
+  // whole prompt) must not be emitted at all under --no-plan-fanout — dead prompt text is tokens.
+  const goalNoFanout = gen('dod-goals-serial', ['--phases', 'Work', '--profile', 'delivery', '--dod-file', dodFile, '--no-plan-fanout']);
+  check(!/dodgate:goals/.test(goalNoFanout) && !/PLAN_KEYS/.test(goalNoFanout)
+    && /const goalItems = \[\]/.test(goalNoFanout),
+    '--no-plan-fanout: no plan verifier emitted, goalItems is empty');
+
+  // 9c. Dead-worker REPORTING: parallel() yields null for an agent that died, and recording that as
+  //     a COMPLETED item IS the drift — the item vanishes from the plan-of-record and the run walks
+  //     on to a gate that can pass without it. Every plan-fanout combo must record it ok:false, leave
+  //     a run-level coverage note, mark the persisted state partial — and NOT abort: DoDGate's
+  //     plan-of-record verifier catches a missing item, and aborting inside the level loop would cost
+  //     every later level a re-run. A level where NOTHING landed still stops (nothing to integrate).
+  for (const [label, argv] of [
+    ['bare', ['--phases', 'Work']],
+    ['delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]],
+  ]) {
+    const g = gen('dead-item-' + label, argv);
+    check(/const deadItems = ran\.filter\(\(r\) => !r\.ok\)/.test(g)
+      && /it\.ok = !!levelOut\[i\]/.test(g)
+      && /cover\('dead-item-worker', r\.id,/.test(g)
+      && /if \(deadItems\.length === level\.length\) throw new Error\(/.test(g)
+      && !/if \(deadItems\.length\) throw/.test(g)
+      && /partial: coverage\.length > 0/.test(g)
+      && g.indexOf('it.ok = !!levelOut[i]') < g.indexOf('const deadItems'),
+      `a dead item is recorded ok:false + covered, and only an all-dead level aborts (${label})`);
+  }
+
+  // 9c-2. The coverage ledger is a RUN-level fact, so it must reach durable state and the write-up:
+  //       results.coverage (checkpointed with everything else, inherited on resume), a partial marker
+  //       on every checkpoint payload, a terminal status that is 'partial' rather than 'complete',
+  //       and a 'Coverage and uncertainty' section in the Writeup prompt.
+  const cov = gen('coverage-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]);
+  check(/results\.coverage = coverage/.test(cov)
+    && /status: coverage\.length \? 'partial' : 'complete'/.test(cov)
+    && /COVERAGE AND UNCERTAINTY/.test(cov) && /\$\{coverageMd\(\)\}/.test(cov)
+    && /cover\('dangling-depends-on'/.test(cov) && /cover\('dropped-plan-item'/.test(cov)
+    && /cover\('dependency-cycle'/.test(cov),
+    'coverage ledger: persisted in results, partial terminal status, rendered by Writeup, noted for every degradation');
+
+  // 9d. Per-LEVEL durability: the fan-out's unit of progress is the dependency LEVEL, so an
+  //     integrated level must survive a LATER level's failure — otherwise a resume re-dispatches
+  //     workers whose commits are already on the run branch. Every plan-fanout combo must persist
+  //     `results.<key>Levels` (per-item ok flags), skip an integrated level, and re-dispatch only
+  //     the items with no recorded success. The checkpoint sits at the TOP of the level loop — one
+  //     site, so the delivery checkpoint budget is untouched: it persists the plan on the first pass
+  //     and every prior level's integrated flag after that.
+  for (const [label, argv, key] of [
+    ['bare', ['--phases', 'Work'], 'work'],
+    ['delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile], 'implement'],
+  ]) {
+    const g = gen('level-ckpt-' + label, argv);
+    check(new RegExp(`const levelLog = Array\\.isArray\\(results\\.${key}Levels\\)`).test(g)
+      && new RegExp(`results\\.${key}Levels = levelLog`).test(g)
+      && /if \(entry\.integrated\) \{/.test(g)
+      && /const pending = level\.filter\(\(it\) => !kept\.some\(\(k\) => k\.id === it\.id\)\)/.test(g)
+      && /entry\.integrated = true/.test(g)
+      && new RegExp(`for \\(let li = 0; li < levels\\.length; li\\+\\+\\) \\{\\n(\\s*//[^\\n]*\\n)*\\s*await checkpoint\\('`).test(g),
+      `per-level progress is checkpointed and guards the level loop (${label})`);
+  }
+
   // 10. Panel CodeGate: delivery default ON (guard → dimensions → ≥80 filter → lead loop);
   //     lite/merged Review stays single-agent; --review-panel/--no-review-panel override.
   const panel = gen('panel', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]);

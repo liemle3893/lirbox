@@ -561,8 +561,18 @@ const PLAN_SCHEMA = SCHEMA({
   items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'title', 'prompt', 'dependsOn'], properties: { id: { type: 'string' }, title: { type: 'string' }, prompt: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } } } } },
   summary: { type: 'string' },
 }, ['items']);
-const PLAN_SETUP_SCHEMA = SCHEMA({ ready: { type: 'boolean' }, summary: { type: 'string' } }, ['ready']);
-const PLAN_INTEGRATE_SCHEMA = SCHEMA({ merged: { type: 'boolean' }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['merged']);
+// These two are the fan-out's control-flow gates, so they demand the SET the worker acted on, not
+// just a boolean it asserts about itself: `created` (worktrees) and `merged_branches` (branches) are
+// REQUIRED, and the conductor set-compares them against what it dispatched. Emitted as plain JSON
+// (quoted keys) — a valid JS object literal either way, and the required set stays machine-readable.
+const PLAN_SETUP_SCHEMA = JSON.stringify({
+  type: 'object', additionalProperties: false, required: ['ready', 'created'],
+  properties: { ready: { type: 'boolean' }, created: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+});
+const PLAN_INTEGRATE_SCHEMA = JSON.stringify({
+  type: 'object', additionalProperties: false, required: ['merged', 'merged_branches'],
+  properties: { merged: { type: 'boolean' }, merged_branches: { type: 'array', items: { type: 'string' } }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+});
 const optLine = (frag, indent) => (frag ? `\n${indent}${frag}` : '');
 
 function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
@@ -587,7 +597,6 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
     )
     items = planItems(planned, '${key}', goal)
     results.${key}Plan = { items }
-    await checkpoint('${p}')
   }
   if (items.length === 1) {
     log('${p}: the plan holds ONE item — running it as a single worker in the run worktree')
@@ -598,31 +607,87 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
     )
   } else {
     const levels = planLevels(items)
-    const itemResults = []
+    // DURABLE per-LEVEL progress. The phase-level \`done\` set cannot express this: its granularity is
+    // the PHASE, while the fan-out's unit of progress is the dependency LEVEL. Without it a level-3
+    // failure discards levels 1-2 — the resume re-dispatches their workers against a base that ALREADY
+    // contains their commits (so they no-op or re-apply and conflict) and re-integrates them. Each
+    // entry is { level, integrated, items: [{ id, title, ok, summary }] }: a level with integrated:true
+    // is skipped outright, and a re-entered level re-dispatches ONLY the items whose recorded \`ok\` is
+    // false — the same per-item flag a degraded (dead-worker) item is recorded under.
+    const levelLog = Array.isArray(results.${key}Levels) ? results.${key}Levels : []
+    results.${key}Levels = levelLog
+    const itemResults = levelLog.flatMap((e) => (Array.isArray(e.items) ? e.items : []).filter((it) => it && it.ok))
     log('${p}: ' + items.length + ' planned item(s) across ' + levels.length + ' dependency level(s)')
     for (let li = 0; li < levels.length; li++) {
+      // The fan-out's ONLY checkpoint site, deliberately — a checkpoint is a whole subagent, and the
+      // delivery profile's budget is tight. On the first pass it persists the PLAN before any item is
+      // dispatched (so a resume never re-decomposes); on every later pass it also carries the PREVIOUS
+      // level's integrated:true and per-item outcomes. The final level's lands in the phase's own
+      // trailing checkpoint.
+      await checkpoint('${p}')
       const level = levels[li]
-      const itemLines = level.map((it) => \`setup_item "\${WORKTREE}--\${it.slug}" "\${BRANCH}--\${it.slug}"\`).join('\\n')
-      const itemBranches = level.map((it) => \`\${BRANCH}--\${it.slug}\`).join(', ')
-      const itemWorktrees = level.map((it) => \`\${WORKTREE}--\${it.slug}\`).join(', ')
+      let entry = levelLog.find((e) => e && e.level === li + 1)
+      if (!entry) { entry = { level: li + 1, integrated: false, items: [] }; levelLog.push(entry) }
+      if (entry.integrated) {
+        log('${p}: level ' + (li + 1) + ' already integrated (resumed) — its ' + entry.items.length + ' item(s) are on ' + BRANCH + ', so nothing is re-dispatched')
+        continue
+      }
+      // Only items with no recorded success are re-dispatched; the rest already have commits on their
+      // own item branch, waiting for this level's integrate.
+      const kept = (Array.isArray(entry.items) ? entry.items : []).filter((it) => it && it.ok)
+      const pending = level.filter((it) => !kept.some((k) => k.id === it.id))
+      // The DISPATCHED set, kept as arrays: it is what the setup/integrate answers are compared against.
+      // Deliberately the WHOLE level, not \`pending\`: setup is idempotent (it reuses an existing
+      // worktree) and integrate must merge every item branch in the level, including one built before
+      // an earlier abort.
+      const itemWorktreeSet = level.map((it) => \`\${WORKTREE}--\${it.slug}\`)
+      const itemBranchSet = level.map((it) => \`\${BRANCH}--\${it.slug}\`)
+      const itemLines = itemWorktreeSet.map((wt, i) => \`setup_item "\${wt}" "\${itemBranchSet[i]}"\`).join('\\n')
+      const itemBranches = itemBranchSet.join(', ')
+      const itemWorktrees = itemWorktreeSet.join(', ')
       const levelSetup = await agent(
         ${tpl('setup-item-worktrees.txt', { ITEM_LINES: '${itemLines}' })},
         { label: '${key}:setup-l' + (li + 1), phase: '${p}',${optLine(mdl('mechanical'), '          ')}
           schema: ${PLAN_SETUP_SCHEMA} },
       )
       if (!levelSetup || !levelSetup.ready) throw new Error('${p}: per-item worktrees not ready for level ' + (li + 1) + ' — ' + ((levelSetup && levelSetup.summary) || ''))
-      const levelOut = await parallel(level.map((it) => () => agent(
+      const setupGap = planSetDiff('level ' + (li + 1) + ' setup', itemWorktreeSet, levelSetup.created)
+      if (setupGap) throw new Error('${p}: level ' + (li + 1) + ' setup reported ready:true but the worktrees it created are not the set that was dispatched — ' + setupGap)
+      const levelOut = await parallel(pending.map((it) => () => agent(
         ${tpl('plan-item.txt', { CONCURRENCY: promptTpl('independent-concurrency.txt') })},
         { label: '${key}:' + it.id, phase: '${p}',${workLead ? ' ' + workLead : ''}
           schema: ${sch} },
       )))
-      levelOut.forEach((r, i) => { itemResults.push({ id: level[i].id, title: level[i].title, summary: (r && r.summary) || '' }) })
+      // The plan item is the plan-of-record entry, so it carries its own outcome: planItems seeds
+      // every item ok:false ("planned, not done") and only a live result flips it true.
+      const ran = pending.map((it, i) => {
+        it.ok = !!levelOut[i]
+        return { id: it.id, title: it.title, ok: it.ok, summary: (levelOut[i] && levelOut[i].summary) || '' }
+      })
+      entry.items = kept.concat(ran)
+      // A DEAD worker (parallel() yields null on a terminal agent error) is recorded as NOT done and
+      // noted as a coverage gap — never as a finished item carrying an empty summary, which is the
+      // silent plan drift this reporting exists to kill. It is NOT fatal: DoDGate's plan-of-record
+      // verifier adjudicates every planned item against the real diff, so an item that never landed
+      // fails a GATE instead of shipping unseen, while the level's survivors still integrate — and a
+      // throw here would re-dispatch nothing but cost every later level a re-run. A level where
+      // NOTHING landed is different: there is no diff to integrate and every later level would branch
+      // off a base missing the whole level, so that one still stops the run.
+      const deadItems = ran.filter((r) => !r.ok)
+      if (deadItems.length === level.length) throw new Error('${p}: level ' + (li + 1) + ' produced nothing — all ' + level.length + ' item worker(s) died (' + deadItems.map((r) => r.id).join(', ') + '); there is nothing to integrate')
+      for (const r of deadItems) cover('dead-item-worker', r.id, '${p} level ' + (li + 1) + ': \\'' + r.title + '\\' returned no result (worker died after retries) — its work is NOT on ' + BRANCH)
+      ran.forEach((r) => { itemResults.push(r) })
       const levelIntegrate = await agent(
         ${tpl('integrate-items.txt', { ITEM_BRANCHES: '${itemBranches}', ITEM_WORKTREES: '${itemWorktrees}' })},
         { label: '${key}:integrate-l' + (li + 1), phase: '${p}',${optLine(mdl('think'), '          ')}
           schema: ${PLAN_INTEGRATE_SCHEMA} },
       )
       if (!levelIntegrate || !levelIntegrate.merged) throw new Error('${p}: level ' + (li + 1) + ' did not integrate into ' + BRANCH + ' — ' + ((levelIntegrate && levelIntegrate.summary) || ''))
+      const mergeGap = planSetDiff('level ' + (li + 1) + ' integrate', itemBranchSet, levelIntegrate.merged_branches)
+      if (mergeGap) throw new Error('${p}: level ' + (li + 1) + ' reported merged:true but the branches it merged are not the set that was dispatched, so ' + BRANCH + ' does NOT hold the whole level — ' + mergeGap)
+      // The level is now on the run branch. The next iteration's checkpoint (or the phase's trailing
+      // one) makes that durable, so a LATER level's failure never re-runs this one.
+      entry.integrated = true
     }
     results.${key} = { summary: 'plan fan-out: ' + items.length + ' item(s) across ' + levels.length + ' dependency level(s)', items: itemResults }
   }`;
@@ -768,7 +833,13 @@ const PHASES = [
     })) },
 
   // DoDGate: verify the frozen definition of done (checkable = run the command; judged =
-  // evidence-cited verdict). Bounded plan-execute-verify OUTER loop: each attempt runs the
+  // evidence-cited verdict) AND the run's plan-of-record, in parallel. The two are independent
+  // views of intent at different resolutions: the DoD is frozen before anything read the repo, so
+  // it is coarse and cannot name a work item that did not exist yet; the plan-of-record is every
+  // item the phase planners committed to at runtime. A criterion set can go fully MET while an item
+  // was quietly skipped — that drift is invisible to criteria alone, which is why the plan half
+  // exists. Both halves emit {id,verdict,evidence}, so their unmet rows UNION into one set and the
+  // replan/fix/stall machinery below is unchanged. Bounded plan-execute-verify OUTER loop: each attempt runs the
   // verify(+fix, ≤3 rounds) gate; on gate failure a Replan worker — fed the EXACT unmet
   // criteria (ids + executed check output) — produces a new plan version, an execute worker
   // applies it, and the gate re-runs. Capped at DOD_MAX_ATTEMPTS, with stall detection (the
@@ -777,12 +848,22 @@ const PHASES = [
   // state status 'escalated' + the unmet list BEFORE aborting — the run escalates, it does not
   // just die. Placed BEFORE Writeup/PR so a PR only ever opens with a fully-met DoD.
   { title: 'DoDGate', enabledWhen: withDod, build: () => emitPhase('DoDGate',
-    `  let dodPassed = false, dodLast = null, dodStalled = false, prevUnmetKey = null
+    `  let dodPassed = false, dodLast = null, goalLast = null, dodStalled = false, prevUnmetKey = null
   const dodUnmet = () => ((dodLast && dodLast.criteria) || []).filter((c) => c.verdict !== 'MET')
+  const goalUnmet = () => ((goalLast && goalLast.goals) || []).filter((g) => g.verdict !== 'MET')
+  // The gate's unmet set is the UNION: same {id,verdict,evidence} shape either side, so replan/fix
+  // consume both without knowing which view produced a row.
+  const allUnmet = () => [...dodUnmet(), ...goalUnmet()]${usePlanFanout ? `
+  // Plan-of-record: every item this run's phase PLANNERS committed to. The frozen DoD cannot see
+  // these — it was written before anything read the repo — so a criterion set can be fully MET
+  // while an item was quietly skipped, descoped or lost. That gap is this half of the gate.
+  const goalItems = PLAN_KEYS.flatMap((k) => (((results[k + 'Plan'] || {}).items) || [])
+    .map((it) => ({ id: k + ':' + it.id, title: it.title })))` : `
+  const goalItems = []`}
   for (let attempt = 1; attempt <= DOD_MAX_ATTEMPTS && !dodPassed && !dodStalled; attempt++) {
     if (attempt > 1) {
       // Replan on gate failure: new plan from the EXECUTED unmet verdicts, then execute it.
-      const unmet = dodUnmet()
+      const unmet = allUnmet()
       results.dodReplan = await agent(
         ${tpl('dodgate-replan.txt')},
         { label: \`dodgate:replan-a\${attempt}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
@@ -795,13 +876,25 @@ const PHASES = [
       )
     }
     for (let round = 1; round <= 3 && !dodPassed; round++) {
-      dodLast = await agent(
-        ${tpl('dodgate-verify.txt')},
-        { label: \`dodgate:verify-a\${attempt}-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
-          schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
-      )
-      const unmet = dodUnmet()
-      dodPassed = !!(dodLast && (dodLast.criteria || []).length && unmet.length === 0)
+      // Two INDEPENDENT views of intent — the frozen criteria and the plan-of-record — so they
+      // verify in PARALLEL: one round, no added wall-clock. Either one unmet fails the gate.
+      const [dodVerdict, goalVerdict] = await parallel([
+        () => agent(
+          ${tpl('dodgate-verify.txt')},
+          { label: \`dodgate:verify-a\${attempt}-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
+            schema: ${SCHEMA({ criteria: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['criteria'])} },
+        ),
+${usePlanFanout ? `        ...(goalItems.length ? [() => agent(
+          ${tpl('dodgate-goals.txt')},
+          { label: \`dodgate:goals-a\${attempt}-r\${round}\`, phase: 'DoDGate',${mdl('think') ? ' ' + mdl('think') : ''}
+            schema: ${SCHEMA({ goals: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'verdict', 'evidence'], properties: { id: { type: 'string' }, verdict: { type: 'string', enum: ['MET', 'UNMET', 'PARTIAL'] }, evidence: { type: 'string' } } } } }, ['goals'])} },
+        )] : []),\n` : ''}      ])
+      dodLast = dodVerdict
+      goalLast = goalVerdict || null
+      // A dead goals verifier must NOT read as "no goals unmet" — no verdicts means no pass.
+      const goalsAnswered = !goalItems.length || !!(goalLast && (goalLast.goals || []).length)
+      const unmet = allUnmet()
+      dodPassed = !!(dodLast && (dodLast.criteria || []).length) && goalsAnswered && unmet.length === 0
       if (!dodPassed && round < 3) {
         await agent(
           ${tpl('dodgate-fix.txt')},
@@ -813,7 +906,7 @@ const PHASES = [
     if (!dodPassed) {
       // Stall detection: unmet-id set unchanged between consecutive gate runs → replanning is
       // not converging; stop early instead of burning the remaining attempts.
-      const unmetKey = dodUnmet().map((c) => c.id).sort().join(',')
+      const unmetKey = allUnmet().map((c) => c.id).sort().join(',')
       if (prevUnmetKey !== null && unmetKey === prevUnmetKey) {
         dodStalled = true
         log('DoDGate: stall detected — unmet set unchanged between gate runs (' + unmetKey + ')')
@@ -822,11 +915,12 @@ const PHASES = [
     }
   }
   results.dodGate = dodLast
+  results.goalGate = goalLast
   if (!dodPassed) {
     // Escalate, never just die: persist status 'escalated' + the unmet list to durable state
     // (same startedAt-preserving write as checkpoint) so a human or resume can pick it up.
     const payload = JSON.stringify(
-      { workflow: NAME, status: 'escalated', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, dod: { criteria: DOD_CRITERIA }, unmet: dodUnmet(), phasesDone: [...done], results },
+      { workflow: NAME, status: 'escalated', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, dod: { criteria: DOD_CRITERIA }, unmet: allUnmet(), phasesDone: [...done], results },
       null, 2,
     )
     await agent(
@@ -834,7 +928,7 @@ const PHASES = [
       { label: 'dodgate:escalate', phase: 'DoDGate',${mechFrag ? ' ' + mechFrag : ''}
         schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
     )
-    throw new Error('DoDGate escalated: DoD not fully met (' + (dodStalled ? 'stalled — unmet set unchanged' : DOD_MAX_ATTEMPTS + ' attempts exhausted') + ') — unmet: ' + dodUnmet().map((c) => c.id).join(', '))
+    throw new Error('DoDGate escalated: DoD/plan not fully met (' + (dodStalled ? 'stalled — unmet set unchanged' : DOD_MAX_ATTEMPTS + ' attempts exhausted') + ') — unmet: ' + allUnmet().map((c) => c.id).join(', '))
   }`) },
 
   // Writeup: promote the per-worker implementation-notes + emit a reviewer write-up and a design
@@ -913,11 +1007,31 @@ const STATE    = \`.workflows/state/\${NAME}.json\`
 const BRANCH   = (args && args.branch) ? args.branch : \`wf/\${NAME}\`
 const BASE     = (args && args.base) ? args.base : '${base === true ? '' : base}'
 const WORKTREE = \`.worktrees/\${NAME}\`
-const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}${withDod ? `\nconst DOD_CRITERIA = ${JSON.stringify(dodCriteria)}\n// Outer plan-execute-verify attempt cap for the DoD gate (replan loop bound).\nconst DOD_MAX_ATTEMPTS = 2` : ''}
+const TICKET   = (args && args.ticket) ? args.ticket : ${withTicket ? 'null' : 'null'}${withDod ? `\nconst DOD_CRITERIA = ${JSON.stringify(dodCriteria)}\n// Outer plan-execute-verify attempt cap for the DoD gate (replan loop bound).\nconst DOD_MAX_ATTEMPTS = 2` : ''}${withDod && usePlanFanout ? `\n// Result keys of the work phases whose PLANNERS commit to items at runtime. The DoD gate reads
+// their persisted plans as the run's PLAN-OF-RECORD and verifies it alongside the frozen criteria.
+const PLAN_KEYS = ${JSON.stringify(phases.map((p) => camel(p)))}` : ''}
 
 const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
 const results = { ...prior }
+
+// --- Coverage ledger: every place this run did LESS than it planned ---
+// A degraded run must be LEGIBLE, never silent. A dead item worker, an unusable plan entry, a
+// dangling dependsOn, a collapsed dependency cycle — each is a hole in the delivered scope that used
+// to leave no trace at all. Notes live in \`results.coverage\`, so the checkpoint worker persists them
+// with everything else and a resume inherits them; any note marks the persisted state \`partial\`
+// instead of a clean complete, and Writeup renders them as 'Coverage and uncertainty'. Continuing
+// past a hole is safe because a GATE adjudicates the plan-of-record against the real diff.
+const coverage = Array.isArray(results.coverage) ? results.coverage : []
+results.coverage = coverage
+const cover = (kind, item, detail) => {
+  if (coverage.some((n) => n.kind === kind && n.item === item)) return   // resume must not double-note
+  coverage.push({ kind, item, detail })
+  log('coverage: ' + kind + ' [' + item + '] — ' + detail)
+}
+const coverageMd = () => (coverage.length
+  ? coverage.map((n) => '- ' + n.kind + ' [' + n.item + '] — ' + n.detail).join('\\n')
+  : '- none — no degradation was recorded')
 
 // --- Resume reachability guard: phasesDone MUST be a contiguous prefix ---
 // Canonical order is baked in as a literal — the Workflow runtime consumes \`meta\` as
@@ -949,7 +1063,7 @@ ${promptTpl('in-worktree.txt')}${usePlanFanout ? '\n\n' + promptTpl('in-item-wor
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
   const payload = JSON.stringify(
-    { workflow: NAME, status: 'running', branch: BRANCH, worktree: WORKTREE, ticket: TICKET,${withDod ? ' dod: { criteria: DOD_CRITERIA },' : ''} phasesDone: [...done], results },
+    { workflow: NAME, status: 'running', partial: coverage.length > 0, branch: BRANCH, worktree: WORKTREE, ticket: TICKET,${withDod ? ' dod: { criteria: DOD_CRITERIA },' : ''} phasesDone: [...done], results },
     null, 2,
   )
   await agent(
@@ -973,7 +1087,9 @@ if (done.has('Setup')) {
 }
 ${coreBlocks}
 
-return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
+// A run that recorded a coverage note did NOT deliver its whole plan: it ends 'partial', never
+// 'complete' — the main session stamps the same verdict into state.json (SKILL.md step 5).
+return { workflow: NAME, status: coverage.length ? 'partial' : 'complete', partial: coverage.length > 0, coverage, branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
 `;
 
 fs.mkdirSync(path.dirname(out), { recursive: true });

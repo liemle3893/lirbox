@@ -88,7 +88,8 @@ goals also fold in a probed `frontend` block (`--frontend` → **FrontendGate**)
 prose-lint criterion. Confirm ONCE (`AskUserQuestion`: accept / edit), then freeze
 `.workflows/<name>.dod.json` and pass `--dod-file` in step 2 — bare may skip it, lite/delivery
 require it (`--no-dod` opts out). **DoDGate** verifies every criterion at run end (fix-loop ≤3, then
-hard-fail). Probes, formats, precedence → [`run-planning.md`](references/run-planning.md) §2.
+hard-fail) **plus the run's plan-of-record** — every item the phase planners committed to — in
+parallel, so a skipped item cannot pass on coarse criteria. Automatic; declare nothing. Probes, formats, precedence → [`run-planning.md`](references/run-planning.md) §2.
 
 ### 2. Generate the conductor (prompts as data)
 
@@ -154,7 +155,9 @@ replays cached results; otherwise always the `args` path.
 ### 5. Finalize
 
 When the Workflow returns, stamp `status` + `finishedAt` (the conductor cannot) — `failed`, not
-`complete`, if it threw, so a later `resume` re-runs only the failed gate. Then run
+`complete`, if it threw; **`partial` when `results.coverage` holds notes** (a dead item worker, a
+dropped plan item), and surface that ledger to the user — a run that lost scope must never read
+`complete`. `failed` lets a later `resume` re-run only the failed gate. Then run
 `workflow-report.cjs <name>` and hand the user the report, the `results`, and the run's **branch +
 worktree**. **Never auto-merge** or auto-remove the worktree — that is the human's call. Commands → [`run-planning.md`](references/run-planning.md) §4.
 </procedure>

@@ -17,4 +17,4 @@ setup_item() {
 }
 {{ITEM_LINES}}
 
-Return ready=true ONLY if every per-item worktree exists, plus a short summary.
+Return ready=true ONLY if every per-item worktree exists, AND created = the list of worktree paths that now exist, copied EXACTLY as spelled in the setup_item lines above (one entry per item, no extras, no renames). The conductor set-compares created against the set it dispatched and ABORTS the level on any mismatch, so a short or invented list stops the run — do not pad it and do not omit an item you failed to create. Add a short summary.
