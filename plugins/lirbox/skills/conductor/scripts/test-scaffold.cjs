@@ -343,18 +343,58 @@ try {
     && /const goalItems = \[\]/.test(goalNoFanout),
     '--no-plan-fanout: no plan verifier emitted, goalItems is empty');
 
-  // 9c. Dead-worker guard: parallel() yields null for an agent that died, and recording that as a
-  //     completed item IS the drift — the item vanishes from the plan-of-record and the run walks
-  //     on to a gate that can pass without it. Every plan-fanout combo must hard-fail instead.
+  // 9c. Dead-worker REPORTING: parallel() yields null for an agent that died, and recording that as
+  //     a COMPLETED item IS the drift — the item vanishes from the plan-of-record and the run walks
+  //     on to a gate that can pass without it. Every plan-fanout combo must record it ok:false, leave
+  //     a run-level coverage note, mark the persisted state partial — and NOT abort: DoDGate's
+  //     plan-of-record verifier catches a missing item, and aborting inside the level loop would cost
+  //     every later level a re-run. A level where NOTHING landed still stops (nothing to integrate).
   for (const [label, argv] of [
     ['bare', ['--phases', 'Work']],
     ['delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]],
   ]) {
     const g = gen('dead-item-' + label, argv);
-    check(/const deadItems = level\.filter\(\(it, i\) => !levelOut\[i\]\)/.test(g)
-      && /if \(deadItems\.length\) throw new Error\(/.test(g)
-      && g.indexOf('const deadItems') < g.indexOf('levelOut.forEach'),
-      `dead-item guard hard-fails before results are recorded (${label})`);
+    check(/const deadItems = ran\.filter\(\(r\) => !r\.ok\)/.test(g)
+      && /it\.ok = !!levelOut\[i\]/.test(g)
+      && /cover\('dead-item-worker', r\.id,/.test(g)
+      && /if \(deadItems\.length === level\.length\) throw new Error\(/.test(g)
+      && !/if \(deadItems\.length\) throw/.test(g)
+      && /partial: coverage\.length > 0/.test(g)
+      && g.indexOf('it.ok = !!levelOut[i]') < g.indexOf('const deadItems'),
+      `a dead item is recorded ok:false + covered, and only an all-dead level aborts (${label})`);
+  }
+
+  // 9c-2. The coverage ledger is a RUN-level fact, so it must reach durable state and the write-up:
+  //       results.coverage (checkpointed with everything else, inherited on resume), a partial marker
+  //       on every checkpoint payload, a terminal status that is 'partial' rather than 'complete',
+  //       and a 'Coverage and uncertainty' section in the Writeup prompt.
+  const cov = gen('coverage-delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile]);
+  check(/results\.coverage = coverage/.test(cov)
+    && /status: coverage\.length \? 'partial' : 'complete'/.test(cov)
+    && /COVERAGE AND UNCERTAINTY/.test(cov) && /\$\{coverageMd\(\)\}/.test(cov)
+    && /cover\('dangling-depends-on'/.test(cov) && /cover\('dropped-plan-item'/.test(cov)
+    && /cover\('dependency-cycle'/.test(cov),
+    'coverage ledger: persisted in results, partial terminal status, rendered by Writeup, noted for every degradation');
+
+  // 9d. Per-LEVEL durability: the fan-out's unit of progress is the dependency LEVEL, so an
+  //     integrated level must survive a LATER level's failure — otherwise a resume re-dispatches
+  //     workers whose commits are already on the run branch. Every plan-fanout combo must persist
+  //     `results.<key>Levels` (per-item ok flags), skip an integrated level, and re-dispatch only
+  //     the items with no recorded success. The checkpoint sits at the TOP of the level loop — one
+  //     site, so the delivery checkpoint budget is untouched: it persists the plan on the first pass
+  //     and every prior level's integrated flag after that.
+  for (const [label, argv, key] of [
+    ['bare', ['--phases', 'Work'], 'work'],
+    ['delivery', ['--phases', 'Implement', '--profile', 'delivery', '--dod-file', dodFile], 'implement'],
+  ]) {
+    const g = gen('level-ckpt-' + label, argv);
+    check(new RegExp(`const levelLog = Array\\.isArray\\(results\\.${key}Levels\\)`).test(g)
+      && new RegExp(`results\\.${key}Levels = levelLog`).test(g)
+      && /if \(entry\.integrated\) \{/.test(g)
+      && /const pending = level\.filter\(\(it\) => !kept\.some\(\(k\) => k\.id === it\.id\)\)/.test(g)
+      && /entry\.integrated = true/.test(g)
+      && new RegExp(`for \\(let li = 0; li < levels\\.length; li\\+\\+\\) \\{\\n(\\s*//[^\\n]*\\n)*\\s*await checkpoint\\('`).test(g),
+      `per-level progress is checkpointed and guards the level loop (${label})`);
   }
 
   // 10. Panel CodeGate: delivery default ON (guard → dimensions → ≥80 filter → lead loop);

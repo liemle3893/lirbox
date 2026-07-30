@@ -561,8 +561,18 @@ const PLAN_SCHEMA = SCHEMA({
   items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'title', 'prompt', 'dependsOn'], properties: { id: { type: 'string' }, title: { type: 'string' }, prompt: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } } } } },
   summary: { type: 'string' },
 }, ['items']);
-const PLAN_SETUP_SCHEMA = SCHEMA({ ready: { type: 'boolean' }, summary: { type: 'string' } }, ['ready']);
-const PLAN_INTEGRATE_SCHEMA = SCHEMA({ merged: { type: 'boolean' }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, ['merged']);
+// These two are the fan-out's control-flow gates, so they demand the SET the worker acted on, not
+// just a boolean it asserts about itself: `created` (worktrees) and `merged_branches` (branches) are
+// REQUIRED, and the conductor set-compares them against what it dispatched. Emitted as plain JSON
+// (quoted keys) — a valid JS object literal either way, and the required set stays machine-readable.
+const PLAN_SETUP_SCHEMA = JSON.stringify({
+  type: 'object', additionalProperties: false, required: ['ready', 'created'],
+  properties: { ready: { type: 'boolean' }, created: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+});
+const PLAN_INTEGRATE_SCHEMA = JSON.stringify({
+  type: 'object', additionalProperties: false, required: ['merged', 'merged_branches'],
+  properties: { merged: { type: 'boolean' }, merged_branches: { type: 'array', items: { type: 'string' } }, conflicts: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+});
 const optLine = (frag, indent) => (frag ? `\n${indent}${frag}` : '');
 
 function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
@@ -587,7 +597,6 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
     )
     items = planItems(planned, '${key}', goal)
     results.${key}Plan = { items }
-    await checkpoint('${p}')
   }
   if (items.length === 1) {
     log('${p}: the plan holds ONE item — running it as a single worker in the run worktree')
@@ -598,37 +607,87 @@ function planFanoutBody({ p, key, greenLine, body, sch, agentFrag }) {
     )
   } else {
     const levels = planLevels(items)
-    const itemResults = []
+    // DURABLE per-LEVEL progress. The phase-level \`done\` set cannot express this: its granularity is
+    // the PHASE, while the fan-out's unit of progress is the dependency LEVEL. Without it a level-3
+    // failure discards levels 1-2 — the resume re-dispatches their workers against a base that ALREADY
+    // contains their commits (so they no-op or re-apply and conflict) and re-integrates them. Each
+    // entry is { level, integrated, items: [{ id, title, ok, summary }] }: a level with integrated:true
+    // is skipped outright, and a re-entered level re-dispatches ONLY the items whose recorded \`ok\` is
+    // false — the same per-item flag a degraded (dead-worker) item is recorded under.
+    const levelLog = Array.isArray(results.${key}Levels) ? results.${key}Levels : []
+    results.${key}Levels = levelLog
+    const itemResults = levelLog.flatMap((e) => (Array.isArray(e.items) ? e.items : []).filter((it) => it && it.ok))
     log('${p}: ' + items.length + ' planned item(s) across ' + levels.length + ' dependency level(s)')
     for (let li = 0; li < levels.length; li++) {
+      // The fan-out's ONLY checkpoint site, deliberately — a checkpoint is a whole subagent, and the
+      // delivery profile's budget is tight. On the first pass it persists the PLAN before any item is
+      // dispatched (so a resume never re-decomposes); on every later pass it also carries the PREVIOUS
+      // level's integrated:true and per-item outcomes. The final level's lands in the phase's own
+      // trailing checkpoint.
+      await checkpoint('${p}')
       const level = levels[li]
-      const itemLines = level.map((it) => \`setup_item "\${WORKTREE}--\${it.slug}" "\${BRANCH}--\${it.slug}"\`).join('\\n')
-      const itemBranches = level.map((it) => \`\${BRANCH}--\${it.slug}\`).join(', ')
-      const itemWorktrees = level.map((it) => \`\${WORKTREE}--\${it.slug}\`).join(', ')
+      let entry = levelLog.find((e) => e && e.level === li + 1)
+      if (!entry) { entry = { level: li + 1, integrated: false, items: [] }; levelLog.push(entry) }
+      if (entry.integrated) {
+        log('${p}: level ' + (li + 1) + ' already integrated (resumed) — its ' + entry.items.length + ' item(s) are on ' + BRANCH + ', so nothing is re-dispatched')
+        continue
+      }
+      // Only items with no recorded success are re-dispatched; the rest already have commits on their
+      // own item branch, waiting for this level's integrate.
+      const kept = (Array.isArray(entry.items) ? entry.items : []).filter((it) => it && it.ok)
+      const pending = level.filter((it) => !kept.some((k) => k.id === it.id))
+      // The DISPATCHED set, kept as arrays: it is what the setup/integrate answers are compared against.
+      // Deliberately the WHOLE level, not \`pending\`: setup is idempotent (it reuses an existing
+      // worktree) and integrate must merge every item branch in the level, including one built before
+      // an earlier abort.
+      const itemWorktreeSet = level.map((it) => \`\${WORKTREE}--\${it.slug}\`)
+      const itemBranchSet = level.map((it) => \`\${BRANCH}--\${it.slug}\`)
+      const itemLines = itemWorktreeSet.map((wt, i) => \`setup_item "\${wt}" "\${itemBranchSet[i]}"\`).join('\\n')
+      const itemBranches = itemBranchSet.join(', ')
+      const itemWorktrees = itemWorktreeSet.join(', ')
       const levelSetup = await agent(
         ${tpl('setup-item-worktrees.txt', { ITEM_LINES: '${itemLines}' })},
         { label: '${key}:setup-l' + (li + 1), phase: '${p}',${optLine(mdl('mechanical'), '          ')}
           schema: ${PLAN_SETUP_SCHEMA} },
       )
       if (!levelSetup || !levelSetup.ready) throw new Error('${p}: per-item worktrees not ready for level ' + (li + 1) + ' — ' + ((levelSetup && levelSetup.summary) || ''))
-      const levelOut = await parallel(level.map((it) => () => agent(
+      const setupGap = planSetDiff('level ' + (li + 1) + ' setup', itemWorktreeSet, levelSetup.created)
+      if (setupGap) throw new Error('${p}: level ' + (li + 1) + ' setup reported ready:true but the worktrees it created are not the set that was dispatched — ' + setupGap)
+      const levelOut = await parallel(pending.map((it) => () => agent(
         ${tpl('plan-item.txt', { CONCURRENCY: promptTpl('independent-concurrency.txt') })},
         { label: '${key}:' + it.id, phase: '${p}',${workLead ? ' ' + workLead : ''}
           schema: ${sch} },
       )))
-      // A DEAD worker (parallel() yields null on a terminal agent error) must never be recorded as
-      // a completed item — that is silent plan drift: the item vanishes from the plan-of-record and
-      // the run walks on to a gate that can go green without it. Hard-fail the phase instead; its
-      // plan is already checkpointed, so a resume re-runs the items against the SAME plan.
-      const deadItems = level.filter((it, i) => !levelOut[i])
-      if (deadItems.length) throw new Error('${p}: ' + deadItems.length + ' planned item(s) returned no result (dead worker) — ' + deadItems.map((it) => it.id).join(', '))
-      levelOut.forEach((r, i) => { itemResults.push({ id: level[i].id, title: level[i].title, summary: (r && r.summary) || '' }) })
+      // The plan item is the plan-of-record entry, so it carries its own outcome: planItems seeds
+      // every item ok:false ("planned, not done") and only a live result flips it true.
+      const ran = pending.map((it, i) => {
+        it.ok = !!levelOut[i]
+        return { id: it.id, title: it.title, ok: it.ok, summary: (levelOut[i] && levelOut[i].summary) || '' }
+      })
+      entry.items = kept.concat(ran)
+      // A DEAD worker (parallel() yields null on a terminal agent error) is recorded as NOT done and
+      // noted as a coverage gap — never as a finished item carrying an empty summary, which is the
+      // silent plan drift this reporting exists to kill. It is NOT fatal: DoDGate's plan-of-record
+      // verifier adjudicates every planned item against the real diff, so an item that never landed
+      // fails a GATE instead of shipping unseen, while the level's survivors still integrate — and a
+      // throw here would re-dispatch nothing but cost every later level a re-run. A level where
+      // NOTHING landed is different: there is no diff to integrate and every later level would branch
+      // off a base missing the whole level, so that one still stops the run.
+      const deadItems = ran.filter((r) => !r.ok)
+      if (deadItems.length === level.length) throw new Error('${p}: level ' + (li + 1) + ' produced nothing — all ' + level.length + ' item worker(s) died (' + deadItems.map((r) => r.id).join(', ') + '); there is nothing to integrate')
+      for (const r of deadItems) cover('dead-item-worker', r.id, '${p} level ' + (li + 1) + ': \\'' + r.title + '\\' returned no result (worker died after retries) — its work is NOT on ' + BRANCH)
+      ran.forEach((r) => { itemResults.push(r) })
       const levelIntegrate = await agent(
         ${tpl('integrate-items.txt', { ITEM_BRANCHES: '${itemBranches}', ITEM_WORKTREES: '${itemWorktrees}' })},
         { label: '${key}:integrate-l' + (li + 1), phase: '${p}',${optLine(mdl('think'), '          ')}
           schema: ${PLAN_INTEGRATE_SCHEMA} },
       )
       if (!levelIntegrate || !levelIntegrate.merged) throw new Error('${p}: level ' + (li + 1) + ' did not integrate into ' + BRANCH + ' — ' + ((levelIntegrate && levelIntegrate.summary) || ''))
+      const mergeGap = planSetDiff('level ' + (li + 1) + ' integrate', itemBranchSet, levelIntegrate.merged_branches)
+      if (mergeGap) throw new Error('${p}: level ' + (li + 1) + ' reported merged:true but the branches it merged are not the set that was dispatched, so ' + BRANCH + ' does NOT hold the whole level — ' + mergeGap)
+      // The level is now on the run branch. The next iteration's checkpoint (or the phase's trailing
+      // one) makes that durable, so a LATER level's failure never re-runs this one.
+      entry.integrated = true
     }
     results.${key} = { summary: 'plan fan-out: ' + items.length + ' item(s) across ' + levels.length + ' dependency level(s)', items: itemResults }
   }`;
@@ -956,6 +1015,24 @@ const prior = (args && args.results) ? args.results : {}
 const done  = new Set((args && args.phasesDone) ? args.phasesDone : [])
 const results = { ...prior }
 
+// --- Coverage ledger: every place this run did LESS than it planned ---
+// A degraded run must be LEGIBLE, never silent. A dead item worker, an unusable plan entry, a
+// dangling dependsOn, a collapsed dependency cycle — each is a hole in the delivered scope that used
+// to leave no trace at all. Notes live in \`results.coverage\`, so the checkpoint worker persists them
+// with everything else and a resume inherits them; any note marks the persisted state \`partial\`
+// instead of a clean complete, and Writeup renders them as 'Coverage and uncertainty'. Continuing
+// past a hole is safe because a GATE adjudicates the plan-of-record against the real diff.
+const coverage = Array.isArray(results.coverage) ? results.coverage : []
+results.coverage = coverage
+const cover = (kind, item, detail) => {
+  if (coverage.some((n) => n.kind === kind && n.item === item)) return   // resume must not double-note
+  coverage.push({ kind, item, detail })
+  log('coverage: ' + kind + ' [' + item + '] — ' + detail)
+}
+const coverageMd = () => (coverage.length
+  ? coverage.map((n) => '- ' + n.kind + ' [' + n.item + '] — ' + n.detail).join('\\n')
+  : '- none — no degradation was recorded')
+
 // --- Resume reachability guard: phasesDone MUST be a contiguous prefix ---
 // Canonical order is baked in as a literal — the Workflow runtime consumes \`meta\` as
 // metadata, so it is NOT a runtime binding in this body. A durable state that marks a
@@ -986,7 +1063,7 @@ ${promptTpl('in-worktree.txt')}${usePlanFanout ? '\n\n' + promptTpl('in-item-wor
 // startedAt-preserving merge: cat clobbers the file, so read prev startedAt first.
 async function checkpoint(phaseTitle) {
   const payload = JSON.stringify(
-    { workflow: NAME, status: 'running', branch: BRANCH, worktree: WORKTREE, ticket: TICKET,${withDod ? ' dod: { criteria: DOD_CRITERIA },' : ''} phasesDone: [...done], results },
+    { workflow: NAME, status: 'running', partial: coverage.length > 0, branch: BRANCH, worktree: WORKTREE, ticket: TICKET,${withDod ? ' dod: { criteria: DOD_CRITERIA },' : ''} phasesDone: [...done], results },
     null, 2,
   )
   await agent(
@@ -1010,7 +1087,9 @@ if (done.has('Setup')) {
 }
 ${coreBlocks}
 
-return { workflow: NAME, status: 'complete', branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
+// A run that recorded a coverage note did NOT deliver its whole plan: it ends 'partial', never
+// 'complete' — the main session stamps the same verdict into state.json (SKILL.md step 5).
+return { workflow: NAME, status: coverage.length ? 'partial' : 'complete', partial: coverage.length > 0, coverage, branch: BRANCH, worktree: WORKTREE, ticket: TICKET, phasesDone: [...done], results }
 `;
 
 fs.mkdirSync(path.dirname(out), { recursive: true });

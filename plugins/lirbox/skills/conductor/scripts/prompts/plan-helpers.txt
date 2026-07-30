@@ -4,9 +4,11 @@
 // pure (no fs/git/Date/Math.random) — every side-effect still lives in a worker prompt.
 
 // Normalize the planner's answer into a stable item list: a unique id, a filesystem-safe slug (the
-// item's own worktree/branch suffix), and a dependsOn list filtered to ids that actually exist. A
-// planner that returns nothing usable degenerates to ONE item carrying the phase's own goal — i.e.
-// exactly the single serial worker this phase used to be.
+// item's own worktree/branch suffix), `ok: false` (nothing is done until a worker says so), and a
+// dependsOn list filtered to ids that actually exist. A planner that returns nothing usable
+// degenerates to ONE item carrying the phase's own goal — i.e. exactly the single serial worker this
+// phase used to be. Every entry this normalization DROPS or rewrites is a hole in the delivered
+// scope, so each one leaves a coverage note instead of vanishing.
 function planItems(res, prefix, fallback) {
   const raw = (res && Array.isArray(res.items)) ? res.items : []
   const items = []
@@ -14,9 +16,9 @@ function planItems(res, prefix, fallback) {
   const slugs = new Set()
   for (const r of raw) {
     const prompt = (r && typeof r.prompt === 'string') ? r.prompt.trim() : ''
-    if (!prompt) continue
     const id = String((r && r.id) || '').trim() || ('item' + (items.length + 1))
-    if (ids.has(id)) continue
+    if (!prompt) { cover('dropped-plan-item', id, prefix + ': the planner returned this item with no prompt — it was dropped from the fan-out'); continue }
+    if (ids.has(id)) { cover('dropped-plan-item', id, prefix + ': duplicate item id — the second copy was dropped from the fan-out'); continue }
     let slug = (prefix + '-' + id).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 48)
     if (!slug) slug = prefix + '-item' + (items.length + 1)
     while (slugs.has(slug)) slug = slug + '-' + (items.length + 1)
@@ -28,11 +30,47 @@ function planItems(res, prefix, fallback) {
       title: String((r && r.title) || id),
       prompt,
       dependsOn: (r && Array.isArray(r.dependsOn)) ? r.dependsOn.map(String) : [],
+      ok: false,
     })
   }
-  if (!items.length) return [{ id: 'all', slug: prefix + '-all', title: prefix, prompt: fallback, dependsOn: [] }]
-  for (const it of items) it.dependsOn = it.dependsOn.filter((d) => d !== it.id && ids.has(d))
+  if (!items.length) {
+    if (raw.length) cover('empty-plan', prefix, 'the planner returned ' + raw.length + ' item(s), none of them usable — the phase ran as ONE worker on its whole goal')
+    return [{ id: 'all', slug: prefix + '-all', title: prefix, prompt: fallback, dependsOn: [], ok: false }]
+  }
+  for (const it of items) {
+    const edges = it.dependsOn.filter((d) => d !== it.id && ids.has(d))
+    // A dangling edge is not a typo to swallow: dropping it can float the item into an EARLIER level
+    // than the planner intended, so it may run before work it was told to build on.
+    if (edges.length !== it.dependsOn.length) {
+      cover('dangling-depends-on', it.id, prefix + ': dependsOn named ' + it.dependsOn.filter((d) => !edges.includes(d)).join(', ')
+        + ' — no such planned item, so the edge was dropped and this item may run earlier than intended')
+    }
+    it.dependsOn = edges
+  }
   return items
+}
+
+// A worker's self-asserted boolean is not evidence. The conductor DISPATCHED a known set of per-item
+// worktrees/branches, so it asks for that exact set back and compares: a setup that created 2 of 3
+// worktrees, or an integrate that merged 2 of 3 branches while returning true, must STOP the run
+// rather than hand every downstream gate an incomplete diff while reporting on the whole plan.
+// Returns '' when the sets match, otherwise what is missing (or unexpectedly extra).
+function planSetDiff(what, expected, actual) {
+  if (!Array.isArray(actual)) {
+    // ponytail: the schema REQUIRES the list, so an absent one means a runtime that did not enforce
+    // the schema, not a worker claiming a partial result. Loud, not fatal; make it fatal if a
+    // non-enforcing runtime ever becomes real.
+    log('plan: ' + what + ' answered without the set it acted on — cross-check skipped (the schema requires that list)')
+    return ''
+  }
+  const got = new Set(actual.map(String))
+  const want = new Set(expected.map(String))
+  const missing = expected.filter((e) => !got.has(String(e)))
+  const extra = Array.from(got).filter((g) => !want.has(g))
+  if (!missing.length && !extra.length) return ''
+  return (missing.length ? 'missing: ' + missing.join(', ') : '')
+    + (missing.length && extra.length ? '; ' : '')
+    + (extra.length ? 'unexpected: ' + extra.join(', ') : '')
 }
 
 // Dependency LEVELS: every item whose dependsOn is already satisfied lands in the same level (one
@@ -45,7 +83,9 @@ function planLevels(items) {
   while (pending.length) {
     let level = pending.filter((it) => it.dependsOn.every((d) => settled.has(d)))
     if (!level.length) {
-      log('plan: dependency cycle among [' + pending.map((it) => it.id).join(', ') + '] — dispatching them as ONE level')
+      // Collapsing the cycle keeps the run alive, but it dispatches items IN PARALLEL that the
+      // planner said depend on each other — a real coverage hole, not just a log line.
+      cover('dependency-cycle', pending.map((it) => it.id).join('+'), 'a dependency cycle collapsed into ONE level — these items ran in parallel despite the edges between them')
       level = pending
     }
     const inLevel = new Set(level)
