@@ -34,6 +34,44 @@ entire cost; the work phase matched raw's total.
 | notes-sync-merge (xhard) | raw | sonnet-5 | ✅ 4/4 | ~25 min | — |
 | notes-selective-sync (unregistered reserve) | raw | sonnet-5 | ✅ 5/5 | ~25 min | $1.63 |
 
+## Headroom probe — the whole registered suite, raw arm (2026-08-01)
+
+Ran the control arm across every **registered graded** task: bare `claude -p`, no skill, no
+conductor, no `--plugin-dir`. Same bundle clone, same base sha, task content inlined, same
+`swe-grade.mjs` as `swe-run`. All five graders passed `--validate` first (p2p green on base, 3/3 f2p
+RED, zero leaks), so a failure would have been the agent's, not the grader's.
+
+| task | difficulty | raw sonnet-5 | time | cost |
+|---|---|---|---|---|
+| notes-add-tags | easy | ✅ 3/3 | 62s | $0.42 |
+| notes-archive | easy | ✅ 3/3 | 55s | $0.37 |
+| notes-search | medium | ✅ 3/3 | 71s | $0.43 |
+| notes-import-export | medium-hard | ✅ 3/3 | 57s | $0.39 |
+| notes-fix-data-loss | **hard** | ✅ 3/3 | **84s** | $0.51 |
+| notes-sync-merge | xhard | ✅ 4/4 | ~25 min | prior (above) |
+| uglify-corner-cases | xxhard | ✅ 6/6 | ~53 min | prior (above) |
+
+**HEADROOM: 0 of 7. Total spend $2.12.** Reproduce: `scripts/raw-headroom-probe.mjs`.
+
+The difficulty ladder is not a ladder for the control arm — the task labelled *hard* fell in 84
+seconds, faster than two labelled *easy* in the older probes. Recorded conductor runs on these same
+tasks took 17–47 minutes.
+
+**Consequence.** Lift is bounded at zero on a task the control already passes, so this suite cannot
+discriminate any skill, config, model or version — and the pairwise Bradley-Terry half ranks ties,
+which is noise. The Harbor port (plan W3) is **cancelled** by its own stop condition (`<4 headroom`),
+and repointing `suite.json` at a "low-end tier" (W4.2) is moot: sonnet-5 is not low-end and saturates
+in a minute.
+
+**The diagnosis is not "too easy" — it is "wrong dimension."** These tasks ask *did the feature get
+built*, which a raw session does trivially. They do not ask what conductor exists for: surviving
+interruption, enforcing gates, resuming after a crash, leaving an auditable trail, coordinating
+parallel work. Making the fixtures harder does not fix this, and per the note below, hard-at-the-top
+degenerates into a timeout benchmark.
+
+*Limits, stated plainly: n=1 per task, one model, no repetitions. 7/7 at full marks in ~60s is not a
+result repetitions would overturn, but a genuinely weak model was not tested.*
+
 ## The theory the matrix supports
 
 - **Fair spec + hermetic tests = self-verifiable** → an unbounded frontier session always

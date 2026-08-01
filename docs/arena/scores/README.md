@@ -1,5 +1,32 @@
 # Conductor scoreboard — absolute SWE-style scores
 
+> ## ⛔ EVERY ROW ON THIS PAGE WAS MEASURED AT THE CEILING — 2026-08-01
+>
+> A raw-arm headroom probe measured **all 7 registered graded tasks against a bare `claude -p`
+> session with no skill, no conductor and no plugin injection**. Raw resolved **7 of 7**, at full
+> marks, and five of them in **under 90 seconds** ($2.12 total).
+>
+> | task | difficulty | raw sonnet-5 | time |
+> |---|---|---|---|
+> | notes-add-tags | easy | 3/3 | 62s |
+> | notes-archive | easy | 3/3 | 55s |
+> | notes-search | medium | 3/3 | 71s |
+> | notes-import-export | medium-hard | 3/3 | 57s |
+> | notes-fix-data-loss | **hard** | 3/3 | **84s** |
+> | notes-sync-merge | xhard | 4/4 | ~25m (prior, experiments.md) |
+> | uglify-corner-cases | xxhard | 6/6 | ~53m (prior, experiments.md) |
+>
+> **Lift is bounded at zero on a task the control already passes.** Every comparison recorded below
+> is therefore between two configurations solving problems neither needed help with, and no row here
+> supports a claim that one config is better than another. The numbers are real; what they measure
+> is the fixtures' difficulty, not the skill.
+>
+> This also explains the engagement finding called out further down: on a saturated suite the only
+> quantity that *can* vary between arms is whether the harness engaged at all.
+>
+> **Do not add rows to this board until the suite discriminates.** Reproduce the probe with
+> `scripts/raw-headroom-probe.mjs`. Full analysis: [../../loop-consolidation.md](../../loop-consolidation.md).
+
 **Score = resolution rate over the frozen suite** (hidden F2P turn green + fixture P2P stays green,
 per cell). Runs are INDEPENDENT: benchmark a new config/version alone, compare against the rows below.
 **Only rows with the same suite hash are comparable** (current: `68fc7b29894a`, tasks: notes-add-tags, notes-archive, notes-fix-data-loss, notes-import-export, notes-search, notes-sync-merge, uglify-corner-cases);
