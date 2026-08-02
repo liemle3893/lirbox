@@ -68,11 +68,20 @@ keep it specific; it decides when Claude invokes it. Skills resolve as `lirbox:<
 `evals/checks-manifest.json`, green under `node scripts/evals-all.mjs --fast`). **Tiers 1–2 are
 required** — a skill with no floor is ungated forever *and* unimprovable by `whetstone`.
 
-**Tier 3 — Harbor (containerised behavioural test): ASK THE USER, never assume.** Tier 2 is
-artifact-level only; swap the model and every tier-2 check stays green. Building the task and running
-the discrimination gate (`-a nop` / `-a oracle`) is **free**; a real behavioural run
-(`-a claude-code -m <model>`) is **~$5–15 per task** and is a separate ask. Declined → skip it and
-say so.
+**Tier 3 — Harbor (containerised behavioural test): REQUIRED for a skill change, not offered.**
+Tier 2 is artifact-level only; swap the model and every tier-2 check stays green. **A new feature or
+a change to a shipped skill is not done until a Harbor run shows it BETTER or NO WORSE than the
+baseline.** A frozen check proves the text changed; only this proves the behaviour did.
+
+Run it **paired** — same task, same model, two skill trees (baseline = the skill at `git HEAD`,
+pruned the same way; after = the working tree). **Report the lift, not the score:** a bare "1.000"
+says nothing without the arm it is being compared against. One task can answer both halves when its
+dimensions split into pre-existing contract (→ *no worse*) and new capability (→ *better*).
+
+Build + the discrimination gate (`-a nop` / `-a oracle`) is **free** and is a precondition, never
+the deliverable. The paired behavioural run costs **~$5–15 per task** — state the estimate and
+proceed; do not stall on permission already given. Ask only to *skip* it, and if it is skipped say
+so in the summary and treat the change as **unverified behaviourally**, never as done.
 
 A task **is** its declaration: `plugins/lirbox/skills/<skill>/harbor/tasks/<id>/`. Harbor runs that
 directory — there is no staging copy, so the thing you edit is the thing that runs. Its one derived

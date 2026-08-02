@@ -1,0 +1,24 @@
+[task]
+name = "lirbox/plan-check__execution-shape"
+version = "1.0.0"
+description = "plan-check skill task: verify a plan whose declared task graph contradicts its own Files: lists and step prose (undeclared edge + undeclared file collision)"
+
+[metadata]
+skill = "plan-check"
+difficulty = "medium"
+category = "plan-verification"
+
+[environment]
+cpus = 2
+memory_mb = 2048
+build_timeout_sec = 900
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+# Deterministic only — a static verifier, no judge and no model calls, so seconds not minutes.
+# No [verifier.env]: nothing here needs a credential. Harbor validates that table before the run
+# and aborts on any unset variable, so declaring one we do not need would make the task
+# unrunnable for anyone missing it.
+timeout_sec = 300.0

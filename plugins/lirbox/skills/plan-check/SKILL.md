@@ -55,6 +55,10 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
 2. **Decompose** into atomic checkable propositions — not the plan as a blob:
    preconditions, each step's claimed effect, ordering & hidden dependencies,
    expected outcomes, rollback, and the **unstated assumptions** it drags in.
+   Where the plan declares a task graph, invert its own `Files:` lists into a
+   file → tasks table and test the declared edges against it: a file claimed by two
+   tasks, or an edge stated only in step prose, is a proposition (see
+   `references/blind-spot.md` → *Execution shape*).
 3. **Verify from evidence — demand references, not assertions** ("show me the doc /
    the state / the code," never "trust me"). *Ops:* web docs, version release notes,
    deprecations, known-issue/CVE trackers for the stated version. *Code:* repo
@@ -76,7 +80,10 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
    `BLIND-SPOT-RISK`.
 7. **Verdict** — `NO-GO` if any `REFUTED` on a critical path; else
    `GO-WITH-CONDITIONS` if any open item (`UNVERIFIED` / `BLIND-SPOT-RISK`) remains;
-   else `GO`. Every open item becomes a condition-to-clear.
+   else `GO`. Every open item becomes a condition-to-clear. Tag each open row
+   `fix: mechanical` (the repair is determined by the finding) or `fix: needs-decision`.
+   A `NO-GO` must state, per `REFUTED` row, **what would have to change to clear it** —
+   a verdict with no route is a dead end, not a finding.
 8. **Emit the report** — copy `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/assets/template.html`
    to `./plan-check-<slug>.html` and fill it. **Lead with the verdict-changing risks**
    (refutations, blind-spots, conditions); mechanically-verified rows last. Keep the
@@ -90,8 +97,15 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
    ```bash
    node ${CLAUDE_PLUGIN_ROOT}/skills/plan-check/assets/validate.mjs ./plan-check-<slug>.html
    ```
-10. **Offer the handoff** — offer to launch `deep-understanding` on the risky
-    assumptions so you internalize what could break. Don't auto-run it.
+10. **Offer autofix — never automatic.** Apply only `fix: mechanical` rows. Rules:
+    `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/references/autofix.md`.
+    - The input plan is **never modified** — write a sibling `<plan>.autofix.md`.
+    - An applied fix invalidates the report: re-run steps 3–6 on every touched row, re-emit,
+      then recompute the verdict.
+    - `REFUTED` is never autofixed, so autofix cannot clear a `NO-GO` — only shrink it.
+11. **Offer the handoff** — offer to launch `deep-understanding` on the risky
+    assumptions so you internalize what could break, or `plan-deck` to re-author against
+    the `REFUTED` rows. Don't auto-run either.
 
 ## Quality bar
 
