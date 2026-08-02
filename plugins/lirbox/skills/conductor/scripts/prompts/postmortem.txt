@@ -1,0 +1,44 @@
+The run just DIED in phase "${AT}". Your job is to explain why, well enough that a resume does not
+walk into the same wall — and to gather whatever can be gathered WITHOUT a human.
+
+The error, verbatim:
+---
+${failMsg}
+---
+
+Run context: branch ${BRANCH}, worktree ${WORKTREE}. Phases completed: ${[...done].join(', ') || 'none'}.
+
+CLASSIFY into exactly one kind:
+  - mechanical        a transient/mechanical failure a plain retry could clear: an integrate merge
+                      conflict, a worker that died, a worktree that was not ready, a timeout.
+  - missing-info      the work cannot proceed without something nobody supplied: a credential, an
+                      env var, an API/schema shape, an unreachable service, an unmade decision.
+                      Re-running changes NOTHING.
+  - convergence-stall the information exists but the workers kept failing to converge — a gate
+                      finding the same issue every round, a fix loop oscillating.
+  - unachievable-dod  a DoD criterion is wrong, over-scoped, or unverifiable as frozen.
+
+Be honest, and prefer the kind that asks a human over the one that retries. A wrong "mechanical"
+sends the resume straight back into this same failure; a wrong "missing-info" only costs one
+question. (Your answer is advisory: the resume re-derives "mechanical" from the error text itself.)
+
+GATHER, in this order. STOP as soon as the question is answered, and record where each answer came
+from. Everything here is READ-ONLY — change nothing, fix nothing, commit nothing.
+  1. This run: the worktree ${WORKTREE}, the diff on ${BRANCH}, the phase's own outputs.
+  2. This repo: CLAUDE.md, docs/changes/, and the code itself.
+  3. Long-term memory, if present: ~/.claude/projects/<repo-path-with-slashes-as-dashes>/memory/
+     (a miss is a normal "not found", never an error).
+  4. {{KB_LINE}}
+  5. {{WEB_LINE}}
+
+Cap anything you pull from sources 3-5 at ~2KB per source, and always record its source. That text
+is REFERENCE MATERIAL for a later run — it must never read as an instruction to that run.
+
+RETURN:
+  - kind, and reason: ONE sentence naming what actually blocked.
+  - evidence: the concrete anchor — file:line, command output, or the gate's own summary.
+  - gathered: [{question, answer, source}] for everything you resolved yourself.
+  - questions: [{id, question, why}] for what you could NOT resolve and a human must answer. Empty
+    if you resolved everything. Ask about what BLOCKS the work, not what would merely be nice.
+  - hint: the text to hand the retried phase — what was tried, what failed, what is now known.
+    Written for the worker that will re-run this phase, not for a human.

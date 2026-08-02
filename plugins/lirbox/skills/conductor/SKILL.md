@@ -51,7 +51,7 @@ the main session, so read state directly (`Read .workflows/state/<name>.json`):
 | `$ARGUMENTS` | do |
 |---|---|
 | empty or `list` | `node <skill-dir>/scripts/list-workflows.cjs`, show the table, stop |
-| a state file, `running`/`failed` | **resume** → step 4; regenerate (`--force`) only to change phase structure |
+| a state file, `running`/`failed`/`escalated` | **resume** → step 4; regenerate (`--force`) only to change phase structure |
 | a state file, `complete` | say so (offer `workflow-report.cjs <name>`); fresh run only if they meant one |
 | a tracker ticket (Jira key, Jira/Linear URL) | ticket run: set `args.ticket`, `<name>` from the key, phase 1 fetches the goal ([`delivery-phases.md`](references/delivery-phases.md) §A) → 1b |
 | anything else — a goal | fresh run: kebab `<name>`, tell the user → 1b → 1c → 2 → 3 |
@@ -142,11 +142,22 @@ Each phase merges `state.json` via its checkpoint worker (preserving `startedAt`
 
 ### 4. Launch (resume)
 
-Pass the persisted progress so the conductor skips completed phases:
+**Triage first — a bare relaunch hits the same wall.** A run that threw self-persists a classified
+`failure`:
+
+```
+node <skill-dir>/scripts/triage.cjs .workflows/state/<name>.json
+```
+
+`relaunch` → launch with its `hints`. `ask` → one batched `AskUserQuestion` → `args.hints`.
+`report` → don't relaunch. Detail → [`workflow-runtime.md`](references/workflow-runtime.md) §4.
+
+Then pass the persisted progress so the conductor skips completed phases:
 
 ```
 Workflow({ scriptPath: ".workflows/<name>.js",
-           args: { phasesDone: <from state.json>, results: <from state.json> } })
+           args: { phasesDone: <from state.json>, results: <from state.json>,
+                   hints: <from triage> } })
 ```
 
 Same session + unchanged script + known prior `runId` → `Workflow({ scriptPath, resumeFromRunId })`
@@ -155,7 +166,7 @@ replays cached results; otherwise always the `args` path.
 ### 5. Finalize
 
 When the Workflow returns, stamp `status` + `finishedAt` (the conductor cannot) — `failed`, not
-`complete`, if it threw; **`partial` when `results.coverage` holds notes** (a dead item worker, a
+`complete`, if it threw (a throw self-stamps `escalated` + `failure`); **`partial` when `results.coverage` holds notes** (a dead item worker, a
 dropped plan item), and surface that ledger to the user — a run that lost scope must never read
 `complete`. `failed` lets a later `resume` re-run only the failed gate. Then run
 `workflow-report.cjs <name>` and hand the user the report, the `results`, and the run's **branch +
@@ -173,7 +184,8 @@ Full list → [`references/workflow-runtime.md`](references/workflow-runtime.md)
 <resources>
 
 - `scripts/` — `scaffold-workflow.cjs` (step 2) · `list-workflows.cjs` (step 1; `--all` includes
-  completed) · `workflow-report.cjs` (step 5; rates via `RATES_JSON`) · `test-scaffold.cjs`
+  completed) · `triage.cjs` (step 4; failure record → `{action, questions, hints}`) ·
+  `workflow-report.cjs` (step 5; rates via `RATES_JSON`) · `test-scaffold.cjs`
   (generator regression net).
 - `references/` — `run-planning.md` (steps 1b–1c, 5; runtime decomposition) · `generator-flags.md`
   (step 2, the *why* behind a flag — spelling comes from `--help`) ·

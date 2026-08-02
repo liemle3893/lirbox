@@ -1,18 +1,13 @@
-# Graph Report - lirbox  (2026-08-02)
+# Graph Report - /Users/liemlhd/Documents/git/Personal/lirbox  (2026-07-30)
 
 ## Corpus Check
-- 366 files · ~386,053 words
+- 68 files · ~323,615 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3033 nodes · 3221 edges · 321 communities (269 shown, 52 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 284 edges (avg confidence: 0.81)
-- Token cost: 0 input · 0 output
-
-## Graph Freshness
-- Built from commit: `48b4678b`
-- Run `git rev-parse HEAD` and compare to check if the graph is stale.
-- Run `graphify update .` after code changes (no API cost).
+- 2677 nodes · 2804 edges · 302 communities (251 shown, 51 thin omitted)
+- Extraction: 90% EXTRACTED · 10% INFERRED · 0% AMBIGUOUS · INFERRED: 276 edges (avg confidence: 0.81)
+- Token cost: 318,616 input · 0 output
 
 ## Community Hubs (Navigation)
 - Conductor Generator Flags
@@ -316,36 +311,18 @@
 - skill-lint SKILL
 - README
 - README
-- scaffold-delivery-gates/tests/reward/checks.py
-- lift-probe.mjs
-- test-loom.cjs
-- dodgate-plan-of-record.check.mjs
-- 08-parallel-isolation.test.mjs
-- hints-injected.check.mjs
-- dead-item-worker-recorded-as-done.check.mjs
-- integrate-and-setup-trusted-on-a-bare-boolean.check.mjs
-- plan-fanout-levels-never-checkpointed.check.mjs
-- triage-routing.check.mjs
-- failure-record.check.mjs
-- raw-headroom-probe.mjs
-- Conductor — failure triage on resume
-- prove-checks.mjs
-- body-harness.mjs
-- scaffold-delivery-gates/tests/test.sh
-- triage.cjs
-- scaffold-delivery-gates/solution/solve.sh
 
 ## God Nodes (most connected - your core abstractions)
 1. `conductor skill` - 13 edges
 2. `loom skill (shape-changing multi-subagent delivery workflow)` - 13 edges
 3. `graph.json — the execution spec loom's generated conductor interprets` - 13 edges
 4. `inWorktree (shared-worktree instruction + judgment-gated notes)` - 12 edges
-5. `runBody()` - 11 edges
+5. `analyzeSkill()` - 10 edges
 6. `_workflow()` - 10 edges
-7. `lintFile()` - 10 edges
-8. `analyzeSkill()` - 10 edges
-9. `App()` - 9 edges
-10. `whetstone skill` - 9 edges
+7. `lintFile()` - 9 edges
+8. `App()` - 9 edges
+9. `whetstone skill` - 9 edges
+10. `validate.mjs headless gate` - 8 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Tests must fail for the RIGHT reason (RED step)` --semantically_similar_to--> `Per-concern acceptance check (RED on baseline)`  [INFERRED] [semantically similar]
@@ -398,7 +375,7 @@
 - **Whetstone keep-or-revert trust boundary (floor + frozen check + surface lock)** — plugins_lirbox_skills_whetstone_references_loop_runtime_keep_or_revert, plugins_lirbox_skills_whetstone_references_checks_floor, plugins_lirbox_skills_whetstone_references_checks_acceptance_check, plugins_lirbox_skills_whetstone_references_checks_discrimination_gate, plugins_lirbox_skills_whetstone_references_checks_locked_set, plugins_lirbox_skills_whetstone_references_loop_runtime_surfaceallows, plugins_lirbox_skills_whetstone_references_loop_runtime_unresolved_verdict [EXTRACTED 1.00]
 - **Generator regression net (rule + nets job + per-skill test-*.cjs)** — _github_workflows_evals_nets_job, plugins_lirbox_skills_conductor_scripts_test_scaffold, plugins_lirbox_skills_prospector_scripts_test_optimize, plugins_lirbox_skills_whetstone_scripts_test_improve, plugins_lirbox_skills_arena_scripts_test_arena [EXTRACTED 1.00]
 
-## Communities (321 total, 52 thin omitted)
+## Communities (302 total, 51 thin omitted)
 
 ### Community 0 - "Conductor Generator Flags"
 Cohesion: 0.05
@@ -406,15 +383,15 @@ Nodes (49): --cycle TDD reordering (RED→GREEN→Verify→PathGap→CodeGate→
 
 ### Community 1 - "Arena Judging & Loop Runtime"
 Cohesion: 0.05
-Nodes (49): bradleyTerry, Forfeit filter (engagement + gate failure), Oversized diff judging policy, Pairwise judging rubric (delivered diff only), pickPairSamples, Even-pass position balance, resolveForfeit, SWE grade correctness gate (+41 more)
+Nodes (47): bradleyTerry, Forfeit filter (engagement + gate failure), Oversized diff judging policy, Pairwise judging rubric (delivered diff only), pickPairSamples, Even-pass position balance, resolveForfeit, SWE grade correctness gate (+39 more)
 
 ### Community 2 - "C4 Model & Codewalk Assets"
-Cohesion: 0.06
-Nodes (43): LikeC4 DSL, model block (elements + typed relationships), LikeC4 pitfalls (undeclared kinds, empty views), specification block (element kinds), views block (drill-down predicates), c4-model skill, likec4.sh throwaway docker toolchain, C4 quality bar (hierarchy earns its place) (+35 more)
+Cohesion: 0.05
+Nodes (45): Arena Finalize phase (promote leaderboard, open PR, never merge), LikeC4 DSL, model block (elements + typed relationships), LikeC4 pitfalls (undeclared kinds, empty views), specification block (element kinds), views block (drill-down predicates), c4-model skill, likec4.sh throwaway docker toolchain (+37 more)
 
 ### Community 3 - "scaffold-workflow Generator"
 Cohesion: 0.04
-Nodes (43): activeDescriptors, agentCode, agentDocs, agentMobile, agentRed, agentTests, agentWeb, base (+35 more)
+Nodes (42): activeDescriptors, agentCode, agentDocs, agentMobile, agentRed, agentTests, agentWeb, base (+34 more)
 
 ### Community 4 - "Prospector Report & Contamination"
 Cohesion: 0.08
@@ -429,8 +406,8 @@ Cohesion: 0.09
 Nodes (24): cap, card, cells, effort, graded, HERE, keep, model (+16 more)
 
 ### Community 7 - "Prose Lint & Workflow Report"
-Cohesion: 0.06
-Nodes (34): badQuotedScalar(), checkFrontmatterYaml(), collectMarkdown(), countSyllables(), fleschReadingEase(), isFenceDelimiter(), lintFile(), main() (+26 more)
+Cohesion: 0.10
+Nodes (24): badQuotedScalar(), checkFrontmatterYaml(), collectMarkdown(), countSyllables(), fleschReadingEase(), isFenceDelimiter(), lintFile(), main() (+16 more)
 
 ### Community 8 - "Whetstone Regression Net"
 Cohesion: 0.07
@@ -441,8 +418,8 @@ Cohesion: 0.09
 Nodes (27): Conflict-fix loop (never silently drop an item), Integrate phase (merge per-item branches), Per-dimension read-only panel review, CodeGate guard (is this a code change?), knownOpen / skippedFindings audit trail, Review-panel LEAD (rank, fix Critical/High, build must pass), Finding confidence scoring (verify one finding against code), PATH-GAP (uncovered changed branches: test or justify) (+19 more)
 
 ### Community 10 - "Loom Purity Scan & Tests"
-Cohesion: 0.13
-Nodes (11): FORBIDDEN, g, gf, HERE, netSrc, netTok, out, ownTok (+3 more)
+Cohesion: 0.08
+Nodes (21): FORBIDDEN, g, gf, HERE, netSrc, netTok, out, ownTok (+13 more)
 
 ### Community 11 - "skill-lint Analyzer"
 Cohesion: 0.14
@@ -469,8 +446,8 @@ Cohesion: 0.09
 Nodes (19): argv, dodFile, dodJudgedFile, { execFileSync }, FORBIDDEN, fs, GEN, genFails() (+11 more)
 
 ### Community 17 - "Repo Conventions & Loom Motivation"
-Cohesion: 0.16
-Nodes (15): Delivery-artifact promotion exception, Runtime artifacts are gitignored, At-least-once execution requires idempotent nodes, Problem: conductor executes a fixed linear phase list, Four generators, 2,895 lines, zero shared code, loom — a graph runtime for lirbox orchestration skills, Resume must restore structure, not just progress, conductor skill (+7 more)
+Cohesion: 0.12
+Nodes (23): Delivery-artifact promotion exception, Orchestration / loop skill family, Runtime artifacts are gitignored, Quality beyond correctness stays pairwise, Orphan tasks idle outside the suite, Train/val split over the task suite, At-least-once execution requires idempotent nodes, Problem: conductor executes a fixed linear phase list (+15 more)
 
 ### Community 18 - "Dynamic Fan-out Check"
 Cohesion: 0.09
@@ -481,8 +458,8 @@ Cohesion: 0.10
 Nodes (17): assertBuildEvidence(), codegateSub, delivery, generated, HERE, leadSub, merged, ok() (+9 more)
 
 ### Community 20 - "Eval Engine & Arena Scoreboard"
-Cohesion: 0.11
-Nodes (22): Pin [judge].model, Engagement discipline as the discriminating dimension, Conductor scoreboard (absolute SWE-style scores), † engagement assumed, not measured, Read the Engaged column before the headline, Minimum detectable effect ~20pp, No usable cross-model engagement comparison exists, Null control: benchmark the same config twice (+14 more)
+Cohesion: 0.13
+Nodes (20): Pin [judge].model, Engagement discipline as the discriminating dimension, Conductor scoreboard (absolute SWE-style scores), † engagement assumed, not measured, Read the Engaged column before the headline, Minimum detectable effect ~20pp, No usable cross-model engagement comparison exists, Null control: benchmark the same config twice (+12 more)
 
 ### Community 21 - "Skilltrain Config Scaffold"
 Cohesion: 0.10
@@ -513,8 +490,8 @@ Cohesion: 0.12
 Nodes (14): assert(), eq(), { execFileSync }, fail(), FORBIDDEN, fs, GEN, { isBetter, shouldStop, deriveEvalCap, withinEditBudget } (+6 more)
 
 ### Community 28 - "Loom Graph Runtime Plan"
-Cohesion: 0.24
-Nodes (10): Conductor layer is restricted pure JS, Generator regression net (test-*.cjs), Never hand-edit a generated loop script, loom — Graph Runtime Implementation Plan, applyPatchTo is pure and deep-clones patch values, scaffold-loom.cjs — generator emitting the interpreter, test-loom.cjs — agent-free regression net, Dominance proves a patch is safe, never that it is sensible (+2 more)
+Cohesion: 0.15
+Nodes (17): Conductor layer is restricted pure JS, Generator regression net (test-*.cjs), Never hand-edit a generated loop script, A missing cursor node fails closed, Dead-end and orphan nodes rejected before the run starts, dominates() is proof by deletion, with no heuristics on top, graph-core.mjs — single source of graph math, loom — Graph Runtime Implementation Plan (+9 more)
 
 ### Community 29 - "whetstone improve report"
 Cohesion: 0.12
@@ -522,15 +499,15 @@ Nodes (12): DEFAULT_RATES, di, fs, grand, k(), ledgerTokens, os, path (+4 more)
 
 ### Community 30 - "Harbor Reward Checks"
 Cohesion: 0.27
-Nodes (15): _body(), conductor_layer_pure(), every_agent_has_schema(), has_meta(), output_exists(), parses_as_workflow_body(), phase_order_matches_meta(), prompts_as_data() (+7 more)
+Nodes (15): Path, _body(), conductor_layer_pure(), every_agent_has_schema(), has_meta(), output_exists(), parses_as_workflow_body(), phase_order_matches_meta() (+7 more)
 
 ### Community 31 - "conductor 50 import csv.test"
 Cohesion: 0.12
 Nodes (14): assert, badHeader, fs, good, headerOnly, { NoteService }, os, path (+6 more)
 
 ### Community 32 - "conductor 80 snapshot diff.test"
-Cohesion: 0.08
-Nodes (22): HERE, NAMES, REAL_SCORES, rebuild(), REPO, root, SCORE, SCRIPTS (+14 more)
+Cohesion: 0.12
+Nodes (13): assert, badVer, fA, fB, fs, { NoteService }, os, out (+5 more)
 
 ### Community 33 - "arena make fixture"
 Cohesion: 0.13
@@ -609,8 +586,8 @@ Cohesion: 0.17
 Nodes (11): { execFileSync }, existing, failures, feedbackPath, fs, out, path, skillPath (+3 more)
 
 ### Community 52 - "README"
-Cohesion: 0.14
-Nodes (16): HTML-artifact skill family, An artifact skill's floor should run its own headless validator, Dead-end and orphan nodes rejected before the run starts, dominates() is proof by deletion, with no heuristics on top, graph-core.mjs — single source of graph math, Backlog item: wire-output-validator-into-verify, graph-server.mjs (zero-dep loopback HTTP), One validator module imported by both browser and conductor (+8 more)
+Cohesion: 0.18
+Nodes (12): HTML-artifact skill family, An artifact skill's floor should run its own headless validator, Backlog item: wire-output-validator-into-verify, graph-server.mjs (zero-dep loopback HTTP), Pre-flight comment -> replan -> approve loop, React Flow graph editor, codewalk skill, component-diagram skill (+4 more)
 
 ### Community 53 - "conductor 50 cli service.test"
 Cohesion: 0.17
@@ -625,8 +602,8 @@ Cohesion: 0.17
 Nodes (11): assert, fs, { NoteService }, os, other, path, { Replica }, res (+3 more)
 
 ### Community 56 - "loom editor escapes approval gate"
-Cohesion: 0.05
-Nodes (38): Also found: a documented integration that does not exist, Decided — three workstreams, Evidence — what has actually been run, External landscape — what you could stop maintaining, Harbor's own scope, confirmed, Improvement-loop consolidation — replacement status, M0 — Layer map: what is even comparable, M1 — Layer 1: `swe-run.mjs` vs `harbor run` *(the real overlap)* (+30 more)
+Cohesion: 0.17
+Nodes (10): body, EDITOR, external, HERE, html, i, j, js (+2 more)
 
 ### Community 57 - "loom scaffold loom"
 Cohesion: 0.17
@@ -641,8 +618,8 @@ Cohesion: 0.18
 Nodes (5): fs, globToRe(), HELPERS_SRC, path, surfaceAllows()
 
 ### Community 60 - "CONTRIBUTING"
-Cohesion: 0.14
-Nodes (20): Non-destructive default: PR, never auto-merge, Orchestration / loop skill family, Per-run timestamped branches keyed by run slug, Three-tier skill shipping gate, Enforced personal commit identity (.githooks/pre-commit), Discrimination gate: run -a nop alongside -a oracle, main is pull-request-only ruleset, Tier 1 — validate + smoke-test + skill-lint (+12 more)
+Cohesion: 0.22
+Nodes (11): Non-destructive default: PR, never auto-merge, Per-run timestamped branches keyed by run slug, Three-tier skill shipping gate, Enforced personal commit identity (.githooks/pre-commit), main is pull-request-only ruleset, Tier 1 — validate + smoke-test + skill-lint, Tier 2 — evals (the real release gate), Tier 3 — Harbor containerised behavioural test (+3 more)
 
 ### Community 61 - "conductor 10 store load seq.test"
 Cohesion: 0.18
@@ -701,8 +678,8 @@ Cohesion: 0.20
 Nodes (9): checks job — floors + frozen checks (fast gate), desc, fm, here, name, skill, SKILL_DIR, SKILL_DIR (+1 more)
 
 ### Community 75 - "2026 07 27 loom graph"
-Cohesion: 0.29
-Nodes (10): Grader validator copies go stale silently, A missing cursor node fails closed, lockedHash FNV-1a is a drift detector, not a security boundary, Only a gate's LOCKED passing edge may lead onward, Unknown predicate operators fail closed, Declarative edge predicates, never code strings, DoD checks as locked artifacts, Invariants frozen at approval, read from the previous graph (+2 more)
+Cohesion: 0.27
+Nodes (10): Grader validator copies go stale silently, Discrimination gate: run -a nop alongside -a oracle, A test fixture must have the same shape as what ships, lockedHash FNV-1a is a drift detector, not a security boundary, Only a gate's LOCKED passing edge may lead onward, Prove every acceptanceCheck is RED before the whetstone run, DoD checks as locked artifacts, Invariants frozen at approval, read from the previous graph (+2 more)
 
 ### Community 76 - "experiments"
 Cohesion: 0.22
@@ -713,8 +690,8 @@ Cohesion: 0.27
 Nodes (10): frontend-gate-phase (conductor whetstone item), Deliberate omission of tools: on the web verifier, Web verifier dogfood (behavioral proof), Approach B — two sibling verifier agents, Engine freezing protocol (probe once, freeze into dod.json), Writeup promotion gap (HTML-only, evidence never rides the PR), Mobile engine chain: maestro → appium → raw, lirbox-mobile-verifier agent (+2 more)
 
 ### Community 78 - "arena engagement measured not assumed"
-Cohesion: 0.08
-Nodes (23): added, BASE, branches, clone, criteriaSources, diffPath, docEvidence, dodEvidence (+15 more)
+Cohesion: 0.20
+Nodes (7): HERE, NAMES, REAL_SCORES, REPO, root, SCORE, SCRIPTS
 
 ### Community 79 - "conductor 10 store tags.test"
 Cohesion: 0.20
@@ -745,12 +722,12 @@ Cohesion: 0.20
 Nodes (9): CHECKS_DIR, EVALS, HERE, listed, MANIFEST, onDisk, phantom, promote (+1 more)
 
 ### Community 86 - "conductor delivery"
-Cohesion: 0.14
-Nodes (11): checkpoint(), cover(), DOD_CRITERIA, done, meta, PLAN_KEYS, planItems(), planLevels() (+3 more)
+Cohesion: 0.20
+Nodes (4): DOD_CRITERIA, done, meta, results
 
 ### Community 87 - "conductor lite"
-Cohesion: 0.14
-Nodes (11): checkpoint(), cover(), DOD_CRITERIA, done, meta, PLAN_KEYS, planItems(), planLevels() (+3 more)
+Cohesion: 0.20
+Nodes (4): DOD_CRITERIA, done, meta, results
 
 ### Community 88 - "feedback SKILL"
 Cohesion: 0.22
@@ -833,24 +810,24 @@ Cohesion: 0.36
 Nodes (9): at(), camel(), escTpl(), frontendBody(), panelBody(), promptTpl(), SCHEMA(), tpl() (+1 more)
 
 ### Community 108 - "conductor cycle"
-Cohesion: 0.16
-Nodes (9): checkpoint(), cover(), done, meta, planItems(), planLevels(), results, STATE_WRITE_SCHEMA (+1 more)
+Cohesion: 0.22
+Nodes (3): done, meta, results
 
 ### Community 109 - "conductor default"
-Cohesion: 0.16
-Nodes (9): checkpoint(), cover(), done, meta, planItems(), planLevels(), results, STATE_WRITE_SCHEMA (+1 more)
+Cohesion: 0.22
+Nodes (3): done, meta, results
 
 ### Community 110 - "conductor model auto"
-Cohesion: 0.16
-Nodes (9): checkpoint(), cover(), done, meta, planItems(), planLevels(), results, STATE_WRITE_SCHEMA (+1 more)
+Cohesion: 0.22
+Nodes (3): done, meta, results
 
 ### Community 111 - "conductor model inherit"
-Cohesion: 0.16
-Nodes (9): checkpoint(), cover(), done, meta, planItems(), planLevels(), results, STATE_WRITE_SCHEMA (+1 more)
+Cohesion: 0.22
+Nodes (3): done, meta, results
 
 ### Community 112 - "conductor panel"
-Cohesion: 0.16
-Nodes (9): checkpoint(), cover(), done, meta, planItems(), planLevels(), results, STATE_WRITE_SCHEMA (+1 more)
+Cohesion: 0.22
+Nodes (3): done, meta, results
 
 ### Community 113 - "flowchart validate"
 Cohesion: 0.33
@@ -1400,74 +1377,6 @@ Nodes (3): Mobile honest-failure smoke (no stack detected), Tooling failure ≠ 
 Cohesion: 0.67
 Nodes (3): Pinned Mermaid script with SRI integrity, SRI hash recompute procedure, CDN/offline caveat (Mermaid from jsDelivr)
 
-### Community 302 - "scaffold-delivery-gates/tests/reward/checks.py"
-Cohesion: 0.20
-Nodes (21): _body(), conductor_layer_pure(), _dod(), dod_file_exists(), dod_is_falsifiable(), every_agent_has_schema(), has_dod_gate(), has_pr_phase() (+13 more)
-
-### Community 303 - "lift-probe.mjs"
-Cohesion: 0.09
-Nodes (17): all, ARENA, ARM, CAP, cells, graded, HERE, MAX_USD (+9 more)
-
-### Community 304 - "test-loom.cjs"
-Cohesion: 0.12
-Nodes (17): HERE, out, runConductor(), SKILL, src, threw(), tmp, assert (+9 more)
-
-### Community 305 - "dodgate-plan-of-record.check.mjs"
-Cohesion: 0.11
-Nodes (14): dodFile, failed, gateBody, HERE, itemRecord, parEnd, parStart, promptsFile (+6 more)
-
-### Community 306 - "08-parallel-isolation.test.mjs"
-Cohesion: 0.11
-Nodes (12): BR_RE, HERE, [ia, ib, ic], out, perItemWts, NOTE: these names appear inside prose, so a trailing sentence period must NOT be, SKILL, src (+4 more)
-
-### Community 307 - "hints-injected.check.mjs"
-Cohesion: 0.14
-Nodes (14): generate(), parses(), failed, gatePhase, genPlain, HERE, ONE, phaseTitles() (+6 more)
-
-### Community 308 - "dead-item-worker-recorded-as-done.check.mjs"
-Cohesion: 0.12
-Nodes (13): coverage, deadRecord, dispatched, failed, HERE, itemRecords, payloads, PLAN_ITEMS (+5 more)
-
-### Community 309 - "integrate-and-setup-trusted-on-a-bare-boolean.check.mjs"
-Cohesion: 0.12
-Nodes (11): failed, HERE, PLAN_ITEMS, promptsFile, REPO, results, run, src (+3 more)
-
-### Community 310 - "plan-fanout-levels-never-checkpointed.check.mjs"
-Cohesion: 0.12
-Nodes (13): failed, HERE, integratedL1, levelProgress, payloads, PLAN_ITEMS, promptsFile, ranL1 (+5 more)
-
-### Community 311 - "triage-routing.check.mjs"
-Cohesion: 0.12
-Nodes (13): CASES, claimed, dod, failed, HERE, missing, none, repeat (+5 more)
-
-### Community 312 - "failure-record.check.mjs"
-Cohesion: 0.12
-Nodes (14): anyPhase, colZero, failed, gen, HERE, payloads, PLAN_ITEMS, postmortem (+6 more)
-
-### Community 313 - "raw-headroom-probe.mjs"
-Cohesion: 0.12
-Nodes (13): ARENA, CAP, graded, HERE, MAX_USD, MODEL, ONLY, OUT (+5 more)
-
-### Community 314 - "Conductor — failure triage on resume"
-Cohesion: 0.14
-Nodes (13): 1 · Failure record — written by the run, not by whoever is watching, 2 · Gather protocol — ordered, stop as soon as it is answered, 3 · Resume triage — `scripts/triage.cjs`, not prose, 4 · Hint channel — without this, the rest is theatre, 5 · Write-back — the only thing that makes the knowledge base grow, Conductor — failure triage on resume, Design, Files touched (+5 more)
-
-### Community 315 - "prove-checks.mjs"
-Cohesion: 0.22
-Nodes (7): argv, MANIFEST, REPO, SKILL, SKILL_DIR, STRICT, unproven
-
-### Community 316 - "body-harness.mjs"
-Cohesion: 0.70
-Nodes (4): bodyOf(), checkpointPayload(), permissive(), runBody()
-
-### Community 317 - "scaffold-delivery-gates/tests/test.sh"
-Cohesion: 0.67
-Nodes (3): HOME, rewardkit_run(), test.sh script
-
-### Community 318 - "triage.cjs"
-Cohesion: 0.67
-Nodes (3): fs, MECHANICAL, triage()
-
 ## Ambiguous Edges - Review These
 - `First clean parallel conductor cell (notes-wide-features)` → `Review-and-fix in one pass (Critical/High must be resolved)`  [AMBIGUOUS]
   plugins/lirbox/agents/lirbox-code-reviewer.md · relation: conceptually_related_to
@@ -1479,9 +1388,9 @@ Nodes (3): fs, MECHANICAL, triage()
   docs/plans/2026-07-28-flowchart-model-ladder-lift.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1631 isolated node(s):** `HERE`, `SCRIPTS`, `SCORE`, `REPO`, `REAL_SCORES` (+1626 more)
+- **1416 isolated node(s):** `here`, `fm`, `name`, `desc`, `here` (+1411 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **52 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **51 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -1494,9 +1403,9 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `.harbor/ staging layout is gitignored on purpose` and `.harbor/tasks drift gate`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `Read the Engaged column before the headline` connect `Eval Engine & Arena Scoreboard` to `Harbor Declaration & Context Budget`?**
+- **Why does `SWE-bench-style grading (rung 1, hidden F2P/P2P)` connect `arena guide` to `arena guide`, `arena guide`?**
+  _High betweenness centrality (0.003) - this node is a cross-community bridge._
+- **Why does `Forfeit rule (non-engagement, timeout, unresolved)` connect `arena guide` to `arena guide`?**
   _High betweenness centrality (0.003) - this node is a cross-community bridge._
 - **Why does `Engagement discipline as the discriminating dimension` connect `Eval Engine & Arena Scoreboard` to `arena guide`?**
-  _High betweenness centrality (0.003) - this node is a cross-community bridge._
-- **Why does `Forfeited cells (sonnet bypassed conductor)` connect `arena guide` to `Eval Engine & Arena Scoreboard`?**
   _High betweenness centrality (0.003) - this node is a cross-community bridge._
