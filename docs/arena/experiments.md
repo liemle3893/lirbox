@@ -26,6 +26,23 @@ entire cost; the work phase matched raw's total.
 | conductor v1 ×2 | opus-4-8[1m]/high | ❌ 0/6 | 17–18 min | — | driver backgrounded the Workflow and ended its turn → orphaned run, empty wf/ (→ `headless-background-workflow-orphan`) |
 | conductor v1 | opus-4-8[1m]/high | ❌ 2/6 | timeout 3600s | — | sequential Report1…6 phases, ~5-min full-suite verify each; surgical gold-quality fixes, too slow |
 | conductor v2 (post-whetstone) | opus-4-8[1m]/high | ❌ 0/6 | 22–25 min | — | first run: `--plugin-dir` at checkout root silently shadowed by installed plugin (fixed in swe-run); true run: driver READ `--independent` and correctly declined (all fixes share one file) → `independent-work-needs-per-worker-worktrees` |
+| **conductor (current)** | **sonnet-5** | **✅ 6/6** | **>90 min (cap hit)** | unknown | **2026-08-02.** Engaged (`wf/uglify-miscompile-fixes`), f2p 6/6 zero failures, p2p green. Reached Setup → DoDBaseline → implement, then the 5400 s cap fired **before** the gates, Writeup and Finalize. See the correction below. |
+
+> **CORRECTION (2026-08-02): the three ❌ conductor rows above are HARNESS ARTIFACTS, not capability
+> verdicts.** Both causes they name — the driver backgrounding the Workflow and orphaning the run,
+> and `--plugin-dir` being shadowed by the installed plugin — have since been fixed. With both fixed,
+> conductor resolves this task **6/6 with p2p green**, matching raw. Do not cite those rows as
+> evidence that conductor cannot do hard work; the earlier reading was wrong.
+>
+> **It still shows no lift.** Raw does the same 6/6 in ~53 min, complete, for ~$24. Conductor matched
+> the score but was slower and had *not finished* when the cap fired. Two numbers from that run must
+> not be read as scores: `docs 0.00` is a timeout artifact (the Writeup phase never ran), and the
+> `$0.00` in the runner output means **cost unknown** — the process was killed before the stream's
+> final `total_cost_usd` event, not that the run was free.
+>
+> So across all seven registered tasks, easy through xxhard, conductor's measured **correctness lift
+> is zero** — it matches raw everywhere and exceeds it nowhere, at 7.7× the cost on the cheap tasks
+> and >1.7× the wall-clock on the hardest one.
 
 ## Older rung probes (uncapped, registration-gate probes)
 
