@@ -40,11 +40,13 @@ arena pairwise (BT, relative) — both survive W3 unchanged in output, changed i
 - After touching a generator, run its net: prospector → `test-optimize.cjs`, whetstone →
   `test-improve.cjs`, arena → `test-arena.cjs`. Floor stays green:
   `node scripts/evals-all.mjs --fast`.
-- **`.harbor/` is gitignored, per-machine, and has no drift gate** (verified: `git ls-files .harbor`
-  → 0). The tracked declaration under `<skill>/harbor/tasks/` is the source of truth. **Editing the
-  declaration does not change what runs** — re-copy into `.harbor/` before every run.
+- ~~**A per-machine staging tree sits between the declaration and the run, with no drift gate, so
+  editing the declaration does not change what runs.**~~ **Resolved 2026-08-02:** the staging tree is
+  gone. `harbor run -p` takes the declaration under `<skill>/harbor/tasks/<id>` directly, so the
+  directory you edit is the one that runs. Only `environment/skill/` is generated
+  (`scripts/harbor-prep.mjs`), and it holds no grading material by construction.
 - **Never inject `plugins/lirbox/skills` unpruned** into a container: it hands the agent its own
-  graders. Copy to `.harbor/skills/` and strip every skill's `evals/`, `harbor/`, `arena/`.
+  graders. Copy to a pruned skill catalog and strip every skill's `evals/`, `harbor/`, `arena/`.
 - **Never commit runtime artifacts**: `jobs/`, `.workflows/`, `.optimize/`, `.improve/`, `.arena/`,
   `.worktrees/`.
 - `main` is pull-request-only; `.githooks/pre-commit` enforces commit identity.
@@ -145,9 +147,9 @@ the documented **false-green** failure mode. Harbor is the only layer that survi
 ## Tasks
 
 - [ ] **W2.1 — Prove the shape by hand, once, before writing any generator code.** Take
-      `conductor/scaffold-multiphase` (the one task proven end-to-end), re-sync `.harbor/`, run the
+      `conductor/scaffold-multiphase` (the one task proven end-to-end), re-sync the former Harbor staging tree, run the
       free arms, and confirm the reward key is a usable scalar:
-      `harbor run -p .harbor/tasks/conductor__scaffold-multiphase -a nop -y` (→ 0.000) and
+      `harbor run -p plugins/lirbox/skills/conductor/harbor/tasks/scaffold-multiphase -a nop -y` (→ 0.000) and
       `-a oracle -y` (→ 1.000 on **every** dimension — the oracle previously scored quality 0.750,
       so check each key separately, not the headline). Record the exact `jq` expression that
       extracts `reward` from `jobs/<ts>/<task>/verifier/reward.json`. **Free — no ask needed.**
@@ -349,7 +351,7 @@ their own runs and are out of scope.
       Run the free gate on each. **The 2 orphan tasks (`notes-selective-sync`, `notes-wide-features`,
       13 criteria) join the suite here** — eval-engine-plan §4 item 5, closed for free.
 - [ ] **W3.3 — Solve the skill-injection problem.** These tasks require `conductor` in the
-      container. Build the pruned `.harbor/skills/` copy (strip every skill's `evals/`, `harbor/`,
+      container. Build the pruned a pruned skill catalog copy (strip every skill's `evals/`, `harbor/`,
       `arena/`, `*.bundle`), then **assert** no `verify.sh` and no `fail_to_pass` survived before any
       run. A grader leaked into the agent's discovery path invalidates every number after it.
 - [ ] **W3.4 — Rewrite `swe-score.mjs`'s input layer.** Same output schema, same Wilson maths, same

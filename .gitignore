@@ -23,11 +23,12 @@ docs/superpowers/
 # Build-time scratch left by loom (graph, state, checks, editor action files)
 .loom/
 
-# Harbor scratch. The TRACKED source of a tier-3 task is its declaration under
-# plugins/lirbox/skills/<skill>/harbor/tasks/<id>/; .harbor/ is the local staging tree you
-# assemble into Harbor's on-disk format to run one, plus any skill catalog you inject. Both
-# are per-machine and reproducible from tracked files — never committed.
-.harbor/
+# Harbor derived build input. A tier-3 task IS its declaration under
+# plugins/lirbox/skills/<skill>/harbor/tasks/<id>/ — Harbor runs that directory directly. The only
+# untrackable piece is environment/skill/, the PRUNED copy of the skill the image installs for the
+# agent (evals/, harbor/, arena/ stripped, so it cannot read its own graders). Derived from tracked
+# files by scripts/harbor-prep.mjs — never committed, because a committed copy goes stale silently.
+plugins/lirbox/skills/*/harbor/tasks/*/environment/skill/
 
 # Harbor run output (`harbor run` writes jobs/<job>/<trial>/ with agent logs, verifier
 # results and artifacts). Runtime, per-run, often large — never committed.
