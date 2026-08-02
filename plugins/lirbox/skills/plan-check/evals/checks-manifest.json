@@ -1,0 +1,71 @@
+{
+  "_comment": [
+    "Expectation manifest for this skill's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern / in-flight item). MUST exit 0 or 1;",
+    "                 >=2 is harness rot (it failed to RUN). A red check that turns GREEN does NOT",
+    "                 fail the gate -- it prints a promote-me notice; move it to green when its fix lands.",
+    "",
+    "A check file missing from this manifest FAILS the gate: an unlisted check is an unguarded check.",
+    "LOCKED (evals/**): improvement loops may never edit this file -- otherwise a loop could flip a",
+    "regressing check to \"red\" and escape its own fence."
+  ],
+  "checks": {
+    "autofix-bounded": {
+      "expect": "green",
+      "note": "Added 2026-08-03. plan-check adjudicated and stopped: a finding whose repair is fully determined by the finding itself still had to be re-applied by hand, and NO-GO arrived with no route out. Autofix closes that -- but the risk it introduces is worse than the gap it fills, so this check guards the BOUNDARY, not the feature: the input plan is never overwritten (it is the evidence that justified the edits), REFUTED is never autofixed (repairing a wrong model of reality is design, not transcription -- and a laundered REFUTED makes the plan READ as verified), and an applied fix re-opens its proposition so the verdict can never improve merely because the map was redrawn.",
+      "mutations": [
+        {
+          "why": "lets autofix overwrite the plan it audited, destroying the evidence for its own edits",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "The input plan is **never modified** — write a sibling `<plan>.autofix.md`.",
+          "replace": "Apply the fixes to the plan."
+        },
+        {
+          "why": "removes the REFUTED exclusion, allowing verdict laundering -- the failure mode with the worst blast radius",
+          "env": "PLAN_CHECK_AUTOFIX_MD",
+          "file": "references/autofix.md",
+          "find": "- **`REFUTED`** — the plan's model of reality is wrong. Choosing the new approach is\n  design. Autofix must not touch it, and must not let the plan read as if it had.",
+          "replace": "- **Hard ones** — use judgement."
+        },
+        {
+          "why": "drops the re-verification requirement, so an edited plan keeps a verdict that was never re-earned",
+          "env": "PLAN_CHECK_AUTOFIX_MD",
+          "file": "references/autofix.md",
+          "find": "An autofixed row is UNVERIFIED again until re-checked. Applying a fix invalidates the\nreport that motivated it. Re-run steps 3–6 on every touched proposition and re-emit the\nreport before the verdict is recomputed.",
+          "replace": "Apply the fixes and note them in the report."
+        }
+      ]
+    },
+    "execution-shape": {
+      "expect": "green",
+      "note": "Added 2026-08-03. plan-check verified whether a plan was CORRECT but never whether its declared task graph was HONEST -- and an agentic runner dispatches from those declarations literally, so an undeclared edge runs concurrently what must not be. Found in two plans plan-check had itself reviewed: a task declaring 'Consumes: nothing' whose own step 6 said 'run it after Task 1 has landed', and one function claimed by five of eight tasks with no task declaring the overlap. Guards the invariant that the declared graph is tested against the file-level truth the plan itself states -- NOT that the plan be parallel. Parallelism is an output of an honest graph; asking for it directly produces a plan claiming independence it does not have.",
+      "mutations": [
+        {
+          "why": "removes the file -> tasks inversion from decomposition, so an undeclared collision is never derived",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "a file claimed by two\n   tasks, or an edge stated only in step prose, is a proposition",
+          "replace": "hidden dependencies are propositions"
+        },
+        {
+          "why": "deletes the collision test from the blind-spot checklist while leaving the section heading intact -- a check anchored to the heading would not notice",
+          "env": "PLAN_CHECK_BLIND_SPOT_MD",
+          "file": "references/blind-spot.md",
+          "find": "- **A file claimed by more than one task** — invert the `Files:` lists. Any file with two\n  or more owning tasks is a serialization point the plan never declared, and two tasks\n  editing one *function* is a guaranteed conflict, not a risk.",
+          "replace": "- **Files** — check them."
+        },
+        {
+          "why": "deletes the undeclared-edge test (prose edge vs dependency block), the failure mode a runner actually trips on",
+          "env": "PLAN_CHECK_BLIND_SPOT_MD",
+          "file": "references/blind-spot.md",
+          "find": "- **Undeclared dependency edges** — an edge stated in step prose (\"run this after Task 1\n  has landed\") while the task's own dependency block says it consumes nothing. The block\n  is what a runner reads; the prose is invisible to it. `UNSTATED-ASSUMPTION`.",
+          "replace": "- **Edges** — look at them."
+        }
+      ]
+    }
+  }
+}

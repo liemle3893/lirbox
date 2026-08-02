@@ -1,0 +1,22 @@
+[task]
+name = "lirbox/plan-check__autofix-bounded"
+version = "1.0.0"
+description = "plan-check skill task: verify a plan with one refutable claim and one mechanically-fixable undeclared edge, then autofix only the mechanical one without mutating the input"
+
+[metadata]
+skill = "plan-check"
+difficulty = "medium"
+category = "plan-verification"
+
+[environment]
+cpus = 2
+memory_mb = 2048
+build_timeout_sec = 900
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+# Deterministic only — a static verifier, no judge and no model calls. No [verifier.env]:
+# nothing here needs a credential, and Harbor aborts the run on any declared-but-unset variable.
+timeout_sec = 300.0

@@ -50,3 +50,32 @@ form to rubber-stamp — the goal is to generate risks the plan is silent on.
 - **Observability gaps** — if this breaks in prod, would anyone see it?
 - **Tests that don't exist** — the plan claims "add tests"; do they cover the
   actual failure mode or just the happy path?
+
+### Execution shape — is the declared task graph honest?
+
+An agentic runner dispatches from the plan's dependency declarations *literally*. A
+graph that under-declares its edges does not merely run slowly — it runs concurrently
+what must not be, and the damage arrives as a merge conflict or as a test that passed
+against a half-built base. Build the file → tasks table from the plan's own `Files:`
+lists before judging any of this; the table is the evidence.
+
+- **Undeclared dependency edges** — an edge stated in step prose ("run this after Task 1
+  has landed") while the task's own dependency block says it consumes nothing. The block
+  is what a runner reads; the prose is invisible to it. `UNSTATED-ASSUMPTION`.
+- **A file claimed by more than one task** — invert the `Files:` lists. Any file with two
+  or more owning tasks is a serialization point the plan never declared, and two tasks
+  editing one *function* is a guaranteed conflict, not a risk. Report the table, not a
+  verdict — the fix (merge the tasks, or state they are serial) is the author's call.
+- **Ordering prose that hides a graph** — an "implementation order" section flattens a DAG
+  into a line, making independent work indistinguishable from dependent work. Ask which of
+  those edges are real; the ones that aren't are cost the plan pays for nothing.
+- **Repo rules that force collisions** — a convention obliging one change to touch N files
+  (env var → every consumer, a locale pair, a generated client) makes every task obeying it
+  collide with every other. Batched into one task it is zero conflicts; scattered across
+  three it is three.
+- **Vertical slices are chains** — schema → writer → API → UI is serial by data contract:
+  each layer's test needs the layer below to exist. Legitimate, but it must be *declared*,
+  not discovered at layer three.
+- **Cross-plan contention** — when two plans are meant to run together, check them as one
+  program. Shared files and a "supersedes task X" note mean they are one plan with an
+  unresolved merge, not two that can proceed in parallel.

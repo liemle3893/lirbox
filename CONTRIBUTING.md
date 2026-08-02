@@ -207,14 +207,46 @@ so locally-committed checks are invisible and the floor silently runs a smaller 
 improve-PR merges, **prune** resolved items from `feedback/<skill>.jsonl` — it is the queue of OPEN
 concerns only.
 
-### Tier 3 — Harbor: containerised behavioural test — OFFER IT, DO NOT ASSUME IT
+### Tier 3 — Harbor: containerised behavioural test — REQUIRED, NOT OFFERED
 
 Tier 2 is **artifact-level**: it checks what a skill's text and generators *contain*. Swap the
 model underneath and every tier-2 check stays green while behaviour changes completely. A
 containerised run is the only layer that sees that.
 
-**An agent implementing a skill MUST ask the user before doing any of this, and MUST state the
-cost split — the two halves differ by three orders of magnitude:**
+> **A new feature or a change to a shipped skill is not done until a Harbor run shows it BETTER
+> or NO WORSE than the baseline.** A frozen check proves the text changed; only this proves the
+> behaviour did.
+
+**Run it paired, and report the lift — not the score.** A bare `reward 1.000` is meaningless
+without the arm it is measured against. Two arms, same task and same model, differing only in the
+skill tree:
+
+| arm | skill tree | answers |
+|---|---|---|
+| baseline | the skill at `git HEAD`, pruned the same way | the floor the change has to beat |
+| after | the working tree | better, or at least not worse |
+
+Build the baseline tree straight from git so it cannot drift from what is actually shipped:
+
+```bash
+git archive HEAD plugins/lirbox/skills/<skill> | tar -x -C /tmp/base
+rm -rf /tmp/base/plugins/lirbox/skills/<skill>/{evals,harbor,arena}   # same prune harbor-prep does
+```
+
+Then swap it into `environment/skill/`, run the arm, regenerate with `harbor-prep.mjs`, run again.
+**Run the arms sequentially** — they share `environment/skill/`, so overlapping them corrupts both.
+
+One task can answer both halves when its dimensions split into **pre-existing contract**
+(→ *no worse*) and **new capability** (→ *better*). `plan-check/execution-shape` is built that
+way: `report_exists` · `validator_passes` · `verdict_not_go` · `plan_untouched` are the old
+contract; `collision_reported` · `undeclared_edge_reported` · `fix_tags_present` are the change.
+
+**`setsid` is not on macOS.** Detaching a long run with it fails silently — the `&` backgrounds a
+command that was never found, and the run never starts. Use the harness's own background
+execution (which survives across turns) or a tracked job runner; a bare `nohup` is not enough
+either, because a killed waiter takes harbor down and orphans its containers.
+
+**The cost split — the two halves differ by three orders of magnitude:**
 
 | | cost | what it buys |
 |---|---|---|
@@ -225,9 +257,11 @@ Keep quoting the $5–15 range when *asking* — it is the honest upper bound fo
 agent build something. Just know a scaffold-only task lands far under it, and an agent judge adds a
 few cents per criterion on top.
 
-- If the user **declines** — skip it and **say so in your summary**. Never silently omit it.
-- If the user **accepts** — write the Harbor task and run the **free** gate. The paid run is a
-  separate ask, made separately.
+The free gate is a **precondition**, never the deliverable: `-a nop` must be 0 and `-a oracle`
+must be 1.0 before a paid arm is worth running at all. State the cost estimate and proceed —
+permission already given for the change is permission for the run that verifies it. Ask only in
+order to **skip**; if it is skipped, say so in the summary and call the change
+**behaviourally unverified**, never done.
 
 A skill declares its own tasks. **The declaration is the tracked source of truth** — it is what a
 reviewer reads and the only copy anyone edits:
@@ -239,9 +273,27 @@ plugins/lirbox/skills/<skill>/harbor/
     instruction.md        REQUIRED — what the agent is asked to do
     <grader>              REQUIRED — either form, see below
     task.toml             optional — resources/network/artifacts/[verifier.env]
-    environment/          optional — Dockerfile, when the stock image is not enough
+    environment/          optional — Dockerfile + everything it COPYs, when the stock image
+                                     is not enough. Fixtures live HERE (see below).
     solution/solve.sh     optional — the reference solution `-a oracle` runs
-    files/                optional — copied into /app before the agent runs
+```
+
+**There is no `files/` directory.** Earlier revisions of this guide documented
+`files/ — copied into /app before the agent runs`; **harbor 0.20 implements no such
+convention** — nothing in the installed package reads that path, so a fixture placed there
+never reaches the container and the agent starts with an empty `/app`. Measured 2026-08-03 on
+`plan-check/execution-shape`: the task graded 0 on every content dimension because the plan it
+was told to check was not there. `feedback/scrub-and-shape` still carries a
+`files/session-notes.md` and is affected the same way.
+
+Put fixtures **inside `environment/`** and `COPY` them in the Dockerfile — the docker build
+context is that directory, so a `COPY files/…` reaching for a sibling fails outright with
+*"/files/plan.md: not found"*. When the verifier needs a pristine reference to diff against, copy
+the **same tracked source** to two destinations rather than committing a second copy:
+
+```dockerfile
+COPY plan.md /app/plan.md            # the agent's input
+COPY plan.md /opt/fixture/plan.md    # pristine, for `cmp -s` in tests/test.sh
 ```
 
 Grading always ends at `tests/test.sh` writing `/logs/verifier/reward.json`. One scalar → a single
