@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan check — Conductor failure triage on resume</title>
+<style>
+:root{
+  --bg:#f2efe6; --paper:#fffdf8; --ink:#22201c; --muted:#6d675c; --line:#e4ded0;
+  --go:#3f7d3f; --cond:#b8862b; --nogo:#b23b32;
+  --kk:#3f7d3f; --ku:#b8862b; --uk:#8a6d3b; --uu:#b23b32;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:900px;margin:0 auto;padding:40px 22px 96px;}
+h1{font-family:Georgia,serif;font-size:34px;line-height:1.15;margin:0 0 4px;}
+.sub{color:var(--muted);font-size:14px;margin-bottom:26px;}
+.verdict{display:flex;align-items:center;gap:16px;border-radius:14px;padding:20px 24px;margin:22px 0 8px;background:var(--paper);border:1px solid var(--line);border-left-width:8px;}
+.verdict[data-verdict="GO"]{border-left-color:var(--go);}
+.verdict[data-verdict="GO-WITH-CONDITIONS"]{border-left-color:var(--cond);}
+.verdict[data-verdict="NO-GO"]{border-left-color:var(--nogo);}
+.verdict .badge{font-family:Georgia,serif;font-weight:700;font-size:26px;letter-spacing:-.5px;}
+.verdict[data-verdict="GO"] .badge{color:var(--go);}
+.verdict[data-verdict="GO-WITH-CONDITIONS"] .badge{color:var(--cond);}
+.verdict[data-verdict="NO-GO"] .badge{color:var(--nogo);}
+.verdict .summary{color:#403b33;font-size:15px;}
+h2{font-family:Georgia,serif;font-size:22px;margin:44px 0 10px;padding-top:10px;border-top:1px solid var(--line);}
+.lead{color:var(--muted);font-size:13px;margin:-4px 0 14px;}
+ul.conditions{list-style:none;padding:0;margin:0;}
+ul.conditions li.condition{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:8px 0;display:flex;gap:12px;}
+ul.conditions li.condition::before{content:"☐";color:var(--cond);font-weight:700;flex:none;}
+ul.conditions li.condition .cbody{flex:1;min-width:0;}
+ul.risks{list-style:none;padding:0;margin:0;}
+ul.risks li{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:8px 0;}
+ul.risks li .q{font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--uu);}
+table{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px;}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;}
+th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+tr:last-child td{border-bottom:none;}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;padding:2px 8px;border-radius:999px;white-space:nowrap;}
+.q-known-known{background:#e6f0e6;color:var(--kk);}
+.q-known-unknown{background:#f6ecd4;color:var(--ku);}
+.q-unknown-known{background:#efe6d2;color:var(--uk);}
+.q-unknown-unknown{background:#f4dedb;color:var(--uu);}
+.s-VERIFIED{color:var(--go);font-weight:700;}
+.s-REFUTED{color:var(--nogo);font-weight:700;}
+.s-UNVERIFIED{color:var(--cond);font-weight:700;}
+.s-UNSTATED-ASSUMPTION{color:var(--uk);font-weight:700;}
+.s-BLIND-SPOT-RISK{color:var(--uu);font-weight:700;}
+code{background:#efeadd;padding:1px 5px;border-radius:5px;font-size:13px;}
+code[data-copy]{cursor:copy;position:relative;}
+code[data-copy]:hover{outline:1px solid var(--line);}
+code[data-copy].copied::after{content:"copied";position:absolute;left:50%;bottom:calc(100% + 4px);transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:10px;letter-spacing:.04em;padding:2px 6px;border-radius:4px;white-space:nowrap;pointer-events:none;}
+footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;}
+@media print{code[data-copy]{cursor:auto;}code[data-copy]:hover{outline:none;}code[data-copy].copied::after{display:none;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Conductor — failure triage on resume</h1>
+  <div class="sub">plan-check · code · 2026-08-02 · checking <code>docs/plans/2026-07-31-conductor-failure-triage.md</code> (r3, after a blind-spot resolution pass)</div>
+
+  <!-- data-verdict MUST be GO | GO-WITH-CONDITIONS | NO-GO and match the claim rows -->
+  <div class="verdict" data-verdict="GO-WITH-CONDITIONS">
+    <span class="badge">GO-WITH-CONDITIONS</span>
+    <span class="summary">Two defects were found against the real generator and both are now designed around. <strong>REFUTED:</strong> r1's <code>unachievable-dod</code> route claimed an amendment to <code>.dod.json</code> would reach the resumed run, but <code>scaffold-workflow.cjs:1010</code> bakes the criteria into the emitted script and the gate reads that constant — the amended run would have enforced the old criteria and escalated again, reproducing the exact wall the design exists to remove. Route dropped. <strong>Second, subtler:</strong> Harbor's <code>phase_order_matches_meta()</code> anchors its phase regex at column 0, so the obvious <code>try {</code> wrap would have indented the body, emptied the match, and silently zeroed a tier-3 dimension — the wrap now emits unindented and a check asserts it. Everything else resolved: the floor baseline is green with a documented snapshot-regen path, the purity scan permits the wrap, the schema count stays balanced, the derived memory path exists, and <code>kind</code> is no longer trusted as a self-report. <strong>One item stays open</strong>, and it is one only a run can close.</span>
+  </div>
+
+  <!-- LEAD WITH THE RISKS. Conditions-to-clear: one <li class="condition"> per
+       open item (UNVERIFIED or BLIND-SPOT-RISK). Count MUST equal open rows.
+       The li is display:flex, so its body MUST be a single .cbody wrapper —
+       putting bare text/inline <code> straight in the li fragments per word. -->
+  <h2>Conditions to clear before GO</h2>
+  <p class="lead">Every open risk below must be resolved first. Delete this whole section only if there are none.</p>
+  <ul class="conditions">
+    <li class="condition"><div class="cbody"><strong>Score a regenerated scaffold against the Harbor reward checks before calling this done.</strong> The column-0 hazard in <code>phase_order_matches_meta()</code> was found by reading the grader's regex, not by running it — strong evidence, but the proof is a run. <code>every_agent_has_schema()</code> is settled by inspection (it counts <code>agent(</code> against <code>schema:</code>, and the postmortem carries one), so this condition is specifically about the phase regex surviving the <code>try</code> wrap. Tracked as <code>d7</code>.</div></li>
+  </ul>
+
+  <h2>Blind spots &amp; unstated assumptions</h2>
+  <p class="lead">Unknown-unknowns found beyond the plan's own claims, and tacit assumptions surfaced by interrogation. All but the last are now closed in r3 — kept here because a design is only as trustworthy as the record of what nearly went wrong in it.</p>
+  <ul class="risks">
+    <li><span class="q">unknown-unknown</span><br><strong>The <code>try</code> wrap would have silently zeroed a Harbor dimension.</strong> <code>phase_order_matches_meta()</code> matches <code>^phase\('…'\)</code> with <code>re.M</code> — column-0 anchored. Indenting the body inside <code>try {</code>, which is what anyone would write, empties <code>called</code> and returns <code>False</code>. Nothing in the tier-1 or tier-2 nets would have caught it; the failure surfaces only as a tier-3 score quietly dropping. <em>Closed in r3: emit the body unindented, and <code>failure-record</code> asserts column 0.</em></li>
+    <li><span class="q">unknown-unknown</span><br><strong>The design trusted a single worker to decide whether you get asked.</strong> The postmortem's <code>kind</code> is exactly the kind of claim this repo elsewhere refuses to take at face value — <code>dodgate-verify.txt</code> states outright that worker self-reports are untrusted. Every other route ends at a human; <code>mechanical</code> did not, which made it the one place a wrong answer is invisible and self-perpetuating. <em>Closed in r3: <code>triage.cjs</code> re-derives <code>mechanical</code> from the error text; unrecognised routes to a question.</em></li>
+    <li><span class="q">unknown-unknown</span><br><strong>Roughly two thirds of the design's value would have shipped ungated.</strong> §1 (the record) and §4 (the hint channel) are emit-level and checkable by string scan. §3 — the routing — was prose. Tier-2 checks are artifact-level by construction; prose is not even that. <em>Closed in r3: routing became <code>scripts/triage.cjs</code> with fixtures per kind.</em></li>
+    <li><span class="q">unknown-unknown</span><br><strong>The gather protocol quietly crossed two trust boundaries the plan never named.</strong> Step 5 sends failure text off the machine; step 4 reads notes whose content may originate anywhere and pipes them toward a prompt that edits code. <em>Closed in r3: web is a launch-time <code>args.web</code> opt-in, external content is capped at 2 KB per source, attributed, and fenced.</em></li>
+    <li><span class="q">unknown-unknown</span><br><strong>The floor was red by construction.</strong> Pinned golden snapshots byte-compare the generator's output. Any change to the emit — the entire point of §1 and §4 — breaks them, and r1's file list did not mention snapshots at all. <em>Closed in r3: baseline verified green (22/22 combos) and the regen path exists (<code>--snapshot-dir</code> / <code>SNAPSHOT_DIR</code>), so this is a known step rather than an unknown.</em></li>
+    <li><span class="q">unknown-known</span><br><strong>The catch must rethrow the ORIGINAL error.</strong> Never stated. A postmortem that dies, returns <code>null</code>, or is itself aborted must not replace the failure it was sent to explain — otherwise the diagnostic layer becomes the thing that hides the diagnosis.</li>
+    <li><span class="q">unknown-known</span><br><strong>The try must begin after the resume reachability guard.</strong> Never stated. A corrupt-<code>phasesDone</code> throw would otherwise burn a postmortem worker classifying garbage, and produce a confident record about a run that never started.</li>
+    <li><span class="q">unknown-known</span><br><strong>"Every work phase" glosses three distinct dispatch shapes.</strong> A phase runs as a level fan-out, as a single worker when the plan holds one item (<code>items.length === 1</code>), or as one serial worker under <code>--no-plan-fanout</code>. A hint reaching only the fan-out path silently does nothing on the other two — the quietest possible failure for a feature whose job is to carry information forward.</li>
+    <li><span class="q">unknown-known</span><br><strong>Hint injection must be conditional.</strong> The generator's token cost was cut ~42% one commit ago (#51). Unconditional prompt text on every phase hands part of that back for a block that is empty on every happy-path run.</li>
+    <li><span class="q">unknown-known</span><br><strong>The long-term-memory path is an undocumented internal convention.</strong> Gather step 3 derives <code>~/.claude/projects/&lt;slug&gt;/memory/</code> from the repo path. It is stable today and nothing else depends on it; treat a miss there as "not found", never as an error.</li>
+    <li><span class="q">unknown-known</span><br><strong>The plan was silent on <code>loom</code>,</strong> which has the same no-record problem at 3 throw sites — and which is where this whole diagnosis came from. Its gate failures already route back by edge, so it needs cross-run triage less. <em>Decided 2026-08-02: out of scope, not filed; now an explicit Non-goal.</em></li>
+  </ul>
+
+  <h2>Definition of done</h2>
+  <p class="lead">The plan's success criteria, refined to checkable form — extracted from the plan's own ACs, or derived (and flagged) when the plan never stated any. Machine-readable copy in the <code>#dod</code> block for lirbox:conductor.</p>
+  <ul class="risks">
+    <li><span class="q">checkable</span><br>d1 — The generator's own regression net still passes with the new emit. <code>node plugins/lirbox/skills/conductor/scripts/test-scaffold.cjs</code></li>
+    <li><span class="q">checkable</span><br>d2 — The repo floor is green, including the 7 regenerated golden snapshots. <code>node scripts/evals-all.mjs --fast</code></li>
+    <li><span class="q">checkable</span><br>d3 — Every new check still measures its invariant under mutation; none report UNPROVEN. <code>node scripts/prove-checks.mjs --skill conductor</code></li>
+    <li><span class="q">checkable</span><br>d4 — Each new check was proven RED on the baseline before the fix landed (a check never seen failing is not a gate). <code>node plugins/lirbox/skills/whetstone/scripts/check-baseline.cjs "node plugins/lirbox/skills/conductor/evals/checks/failure-record.check.mjs"</code> reports DISCRIMINATING</li>
+    <li><span class="q">checkable</span><br>d5 — Routing is data and behaves per kind, including the repeat-signature escalation. <code>node plugins/lirbox/skills/conductor/evals/checks/triage-routing.check.mjs</code></li>
+    <li><span class="q">judged</span><br>d6 — On a real resumed run whose prior attempt failed with <code>kind: missing-info</code>, exactly one batched question is asked and the answer reaches the retried phase's prompt. Evidence: the <code>failure</code> and <code>hints</code> blocks in <code>.workflows/state/&lt;name&gt;.json</code>, plus the retried phase's prompt showing the <code>PRIOR-RUN CONTEXT</code> block.</li>
+    <li><span class="q">judged</span><br>d7 — A regenerated scaffold still scores 1.0 on the Harbor task's deterministic dimensions, confirming the <code>try</code> wrap did not break <code>phase_order_matches_meta()</code>. Evidence: the reward output for <code>harbor/tasks/scaffold-multiphase</code> with <code>-a oracle</code>.</li>
+  </ul>
+
+  <h2>Claim ledger</h2>
+  <p class="lead">Every proposition, tagged to its quadrant and adjudicated. Verified/mechanical rows last.</p>
+  <table>
+    <thead><tr><th>Proposition</th><th>Quadrant</th><th>Status</th><th>Evidence</th><th>Conf.</th></tr></thead>
+    <tbody>
+      <!-- One <tr class="claim"> per proposition. data-quadrant and data-status are REQUIRED
+           and machine-checked. Put "(needs: …)" detail in the Status cell text, not the attribute. -->
+      <tr class="claim" data-quadrant="known-unknown" data-status="UNVERIFIED">
+        <td>The <code>try</code> wrap leaves <code>phase_order_matches_meta()</code> passing on a regenerated scaffold.</td>
+        <td><span class="tag q-known-unknown">known-unknown</span></td>
+        <td><span class="s-UNVERIFIED">UNVERIFIED</span> (needs: regenerate and score <code>harbor/tasks/scaffold-multiphase</code> with <code>-a oracle</code>) — hazard identified and designed around, but confirmed only by reading the regex</td>
+        <td><code>tests/reward/checks.py</code> — <code>re.findall(r"^phase\('([^']+)'\)", …, re.M)</code>, column-0 anchored; r3 emits the body unindented</td>
+        <td>medium</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-unknown" data-status="UNSTATED-ASSUMPTION">
+        <td>Indenting the body inside <code>try {</code> is harmless.</td>
+        <td><span class="tag q-unknown-unknown">unknown-unknown</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — false; closed in r3 by emitting at column 0 and asserting it</td>
+        <td>Column-0 anchored phase regex in <code>tests/reward/checks.py</code>; invisible to every tier-1/tier-2 check</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-unknown" data-status="UNSTATED-ASSUMPTION">
+        <td>A worker's self-reported <code>kind</code> can be trusted to decide whether the human is consulted.</td>
+        <td><span class="tag q-unknown-unknown">unknown-unknown</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — closed in r3: <code>triage.cjs</code> re-derives <code>mechanical</code> from the error text; unrecognised asks</td>
+        <td>Repo's own rule: <code>scripts/prompts/dodgate-verify.txt</code> — "Worker self-reports are untrusted claims"</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-unknown" data-status="UNSTATED-ASSUMPTION">
+        <td>Routing logic in SKILL.md prose is adequately gated.</td>
+        <td><span class="tag q-unknown-unknown">unknown-unknown</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — closed in r3: routing became <code>scripts/triage.cjs</code> + <code>triage-routing.check.mjs</code></td>
+        <td>Both r1 checks are static emit scans; <code>CLAUDE.md</code> requires a discrimination-gated frozen check per skill change</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-unknown" data-status="UNSTATED-ASSUMPTION">
+        <td>The gather protocol's external reach (web, vault notes) needs no consent or provenance.</td>
+        <td><span class="tag q-unknown-unknown">unknown-unknown</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — closed in r3: <code>args.web</code> opt-in at launch, 2 KB cap, source-attributed, fenced</td>
+        <td>r1 §2 listed WebSearch as an unconditional step and treated vault paths as equal in trust to repo files</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>The floor can go green after the emit changes; snapshot regeneration is a known step.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span> — baseline green, regen path documented</td>
+        <td><code>test-scaffold.cjs</code> exits 0, all 22 combos pass; override via <code>--snapshot-dir</code> or <code>SNAPSHOT_DIR</code> (flag wins), <code>test-scaffold.cjs:428-431</code></td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>The postmortem <code>agent()</code> keeps <code>every_agent_has_schema()</code> satisfied.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span> — settled by inspection, no run needed</td>
+        <td><code>tests/reward/checks.py</code> counts <code>agent(</code> vs <code>schema:</code> and requires <code>schemas &gt;= calls</code>; the postmortem carries a schema</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>The project-memory path the gather protocol derives actually exists.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span></td>
+        <td><code>~/.claude/projects/-Users-liemlhd-Documents-git-Personal-lirbox/memory</code> present; slug = repo path with <code>/</code> → <code>-</code></td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION">
+        <td>The <code>catch</code> rethrows the ORIGINAL error even when the postmortem dies or returns <code>null</code>.</td>
+        <td><span class="tag q-unknown-known">unknown-known</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — now explicit in r2 §1</td>
+        <td><code>parallel()</code>/<code>agent()</code> yield <code>null</code> on terminal agent error; r1 never said which error propagates</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION">
+        <td>The <code>try</code> begins after the resume reachability guard, not around it.</td>
+        <td><span class="tag q-unknown-known">unknown-known</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — now explicit in r2 §1</td>
+        <td>Guard is a prelude IIFE in <code>scaffold-workflow.cjs</code> that throws on non-prefix <code>phasesDone</code></td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION">
+        <td>Hints must reach all three dispatch shapes, not just the level fan-out.</td>
+        <td><span class="tag q-unknown-known">unknown-known</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — now explicit in r2 §4 and in the <code>hints-injected</code> mutations</td>
+        <td><code>scaffold-workflow.cjs</code> — <code>items.length === 1</code> single-worker branch; <code>usePlanFanout</code> flag</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION">
+        <td>Hint injection is conditional, so an empty hint adds no prompt bytes.</td>
+        <td><span class="tag q-unknown-known">unknown-known</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — now explicit in r2 §4</td>
+        <td>PR #51 cut ~42% of per-scaffold tokens; unconditional text partially reverses it</td>
+        <td>medium</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION">
+        <td>The project-memory path <code>~/.claude/projects/&lt;slug&gt;/memory/</code> is a stable, derivable convention.</td>
+        <td><span class="tag q-unknown-known">unknown-known</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — treat a miss as "not found", never an error</td>
+        <td>Internal Claude Code layout; undocumented as an API</td>
+        <td>medium</td>
+      </tr>
+      <tr class="claim" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION">
+        <td>The fix is conductor-only; <code>loom</code> keeps the same defect.</td>
+        <td><span class="tag q-unknown-known">unknown-known</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span> — decided 2026-08-02: out of scope, not filed; explicit Non-goal in r3</td>
+        <td><code>scaffold-loom.cjs</code> has 3 <code>throw new Error</code> sites with no failure record</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>A top-level <code>try/catch</code> wrapping the body and its <code>return</code> parses in the emitted script.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span></td>
+        <td>Runtime wraps the script in an async function (top-level <code>await</code> AND <code>return</code>) — <code>tests/reward/checks.py</code> <code>parses_as_workflow_body()</code>; <code>test-scaffold.cjs</code> gate 1 <code>PARSE_PROBE</code></td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td><code>try/catch</code> plus an <code>agent()</code> call in the catch does not violate the conductor purity rule.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span></td>
+        <td><code>test-scaffold.cjs</code> <code>FORBIDDEN</code> = <code>require(</code>, <code>fs.</code>, <code>Date.now</code>, <code>new Date</code>, <code>Math.random</code>, scanned after stripping template literals</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>Per-dependency-level durable progress already exists, so the plan is right not to rebuild it.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span></td>
+        <td><code>scaffold-workflow.cjs</code> — <code>results.&lt;key&gt;Levels</code>, checkpoint before dispatch, <code>entry.integrated</code> skip, <code>kept</code>/<code>pending</code> re-dispatch</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>The failure reason is persisted nowhere — the premise the whole design rests on.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span> for every throw site <em>except</em> DoDGate — corrected 2026-08-02 during implementation</td>
+        <td><code>scaffold-workflow.cjs:920-931</code> already persists <code>status:'escalated'</code> + <code>unmet[]</code> via the <code>checkpoint.txt</code> writer, then throws. The other ~12 throw sites (CodeGate, TestGate, FrontendGate, setup/integrate guards, level-produced-nothing, RED/Verify/ReVerify, DocsGate, Writeup) record nothing. The design now <strong>generalizes DoDGate's existing pattern</strong> rather than inventing one, and reuses the <code>escalated</code> status already in the vocabulary.</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>A second, independent state-file writer would drift — so the postmortem must return its record and let <code>checkpoint()</code> write it.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span> — r1 said the worker writes the record; r2 corrects it</td>
+        <td><code>prompts/checkpoint.txt</code> clobbers via <code>cat &gt; … &lt;&lt;'DURABLE_JSON'</code> preserving only <code>startedAt</code>; <code>workflow-runtime.md</code> §6 names worker-authored state as a drift bug</td>
+        <td>high</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>Free-text <code>reason</code>/<code>evidence</code>/<code>hint</code> cannot break the checkpoint heredoc.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span> — suspicion raised and cleared</td>
+        <td>Delimiter is quoted (<code>&lt;&lt;'DURABLE_JSON'</code>, no expansion) and <code>JSON.stringify</code> escapes newlines, so no value can emit a bare delimiter line</td>
+        <td>medium</td>
+      </tr>
+      <tr class="claim" data-quadrant="known-known" data-status="VERIFIED">
+        <td>r2 takes no automated action on an unachievable DoD; the human re-scaffolds.</td>
+        <td><span class="tag q-known-known">known-known</span></td>
+        <td><span class="s-VERIFIED">VERIFIED</span> — r1's automated route was refuted and removed</td>
+        <td><code>scaffold-workflow.cjs:1010</code> — <code>const DOD_CRITERIA = ${JSON.stringify(dodCriteria)}</code>; the gate reads the constant, nothing re-reads <code>.dod.json</code></td>
+        <td>high</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <footer>Generated by lirbox:plan-check. Read-only verification — no live systems were touched. A plan is a map; this report is what the territory says back.</footer>
+</div>
+<script>
+// Click any <code> snippet (command / path / evidence) to copy it. Self-contained,
+// offline: no network, no external deps. A brief "copied" flag confirms the write.
+(function(){
+  function flash(el){
+    el.classList.add('copied');
+    setTimeout(function(){ el.classList.remove('copied'); }, 1100);
+  }
+  function copy(el){
+    var text = el.innerText || el.textContent || '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function(){ flash(el); }).catch(function(){ fallback(text, el); });
+    } else {
+      fallback(text, el);
+    }
+  }
+  function fallback(text, el){
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); flash(el); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  var codes = document.querySelectorAll('code');
+  for (var i = 0; i < codes.length; i++) {
+    var c = codes[i];
+    c.setAttribute('data-copy', '');
+    c.setAttribute('title', 'Click to copy');
+    c.addEventListener('click', (function(el){ return function(){ copy(el); }; })(c));
+  }
+})();
+</script>
+<!-- Machine-readable DoD consumed by lirbox:conductor (--dod-file seed). REQUIRED, exactly one.
+     Shape: {"criteria":[{"id","text","tier":"checkable"|"judged","check"?}]} — check required
+     for checkable. Must mirror the visible Definition-of-done section above. -->
+<script type="application/json" id="dod">{"criteria":[{"id":"d1","text":"The generator's regression net still passes with the new emit","tier":"checkable","check":"node plugins/lirbox/skills/conductor/scripts/test-scaffold.cjs"},{"id":"d2","text":"The repo floor is green, including the 7 regenerated golden snapshots","tier":"checkable","check":"node scripts/evals-all.mjs --fast"},{"id":"d3","text":"Every new check still measures its invariant under mutation; none report UNPROVEN","tier":"checkable","check":"node scripts/prove-checks.mjs --skill conductor"},{"id":"d4","text":"Each new check was proven RED on the baseline before the fix landed","tier":"checkable","check":"node plugins/lirbox/skills/whetstone/scripts/check-baseline.cjs \"node plugins/lirbox/skills/conductor/evals/checks/failure-record.check.mjs\" | grep -q DISCRIMINATING"},{"id":"d5","text":"Routing is data and behaves per kind, including the repeat-signature escalation","tier":"checkable","check":"node plugins/lirbox/skills/conductor/evals/checks/triage-routing.check.mjs"},{"id":"d6","text":"On a real resumed run whose prior attempt failed with kind missing-info, exactly one batched question is asked and the answer reaches the retried phase prompt","tier":"judged"},{"id":"d7","text":"A regenerated scaffold still scores 1.0 on the Harbor task's deterministic dimensions, confirming the try wrap did not break phase_order_matches_meta()","tier":"judged"}]}</script>
+</body>
+</html>

@@ -60,11 +60,30 @@ top of this. It does not replace dispatch.
     "phaseA": { "...": "validated output of phase A's agent" },
     "phaseB": [ { "...": "per-item outputs" } ]
   },
+  "failure": {
+    "phase": "the phase that threw",
+    "kind": "mechanical | missing-info | convergence-stall | unachievable-dod | unknown",
+    "reason": "one sentence — what actually blocked",
+    "evidence": "file:line / command output / gate summary",
+    "gathered": [{ "question": "…", "answer": "…", "source": "…" }],
+    "questions": [{ "id": "q1", "question": "…", "why": "…" }],
+    "hint": "text to inject into the retried phase",
+    "signature": "<phase> :: <head of the error>",
+    "attempts": 1
+  },
   "startedAt": "ISO-8601 — set once by the first checkpoint worker",
   "updatedAt": "ISO-8601 — refreshed by every checkpoint worker",
   "finishedAt": "ISO-8601 — set by the skill (main session) at finalize"
 }
 ```
+
+`failure` is written by the run itself, not by whoever is watching: the phase body is wrapped so any
+throw dispatches a **postmortem worker** (which classifies and gathers, read-only), the conductor
+serializes the record through the same `statePayload()` used by `checkpoint()`, a `failure:<phase>`
+worker writes the bytes, and the **original** error is then rethrown. `status` becomes `escalated` —
+the same terminal marker DoDGate already used for its own record-then-throw, which this generalizes.
+`kind` is advisory (a worker self-report); `scripts/triage.cjs` re-derives `mechanical` from the
+error text. Absent on a clean run.
 
 `startedAt`/`finishedAt` drive the duration and the token/cost report
 (`scripts/workflow-report.cjs`, which sums transcript usage within `[startedAt, finishedAt]`).
@@ -104,7 +123,19 @@ so the skill reads/writes `state.json` directly (only the *conductor* is restric
 On (re)entry:
 1. **Read** `.workflows/state/<name>.json`.
 2. If absent or `status: complete` → **fresh run** (launch with no resume `args`).
-3. If present and `status` ∈ {`running`,`failed`} → **resume**:
+3. If present and `status` ∈ {`running`,`failed`,`escalated`} → **resume**:
+   - **Triage first if `failure` is present.** `node scripts/triage.cjs <state.json>` returns
+     `{action: relaunch|ask|report, questions, hints}`. `ask` means one batched `AskUserQuestion`
+     whose answers become `args.hints`; `report` means do not relaunch at all. Skipping this is what
+     makes a resume re-run the failed phase with byte-identical inputs and die the same way.
+   - `args.hints` is a `{ <phase title>: text }` map injected into that phase's worker and gate
+     prompts under a fenced `PRIOR-RUN CONTEXT` header — conditional, so no hint costs no tokens.
+     `args.kb` (note paths the postmortem may read) and `args.web` (may it search) are opt-in and
+     default to none/off: a failure's evidence can carry code context, and searching publishes it.
+   - **Write good answers back.** An answer a human gave to a `missing-info` question belongs in
+     project memory (`~/.claude/projects/<slug>/memory/`), which is gather-step 3 of the postmortem
+     protocol — so the next run finds it instead of asking again. This is the only thing that makes
+     the knowledge base grow; without it every run re-interrogates the human from scratch.
    - **Primary (cross-session, robust):** pass `args = { phasesDone, results }` into the
      Workflow launch. The conductor skips done phases (`if (done.has('PhaseA')) …`) and
      reuses `results`. Works across sessions, machines, and after edits to later phases.

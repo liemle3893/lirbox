@@ -38,9 +38,6 @@
     "conductor-warn-before-overkill-run": {
       "expect": "green"
     },
-    "dod-gate": {
-      "expect": "green"
-    },
     "dead-item-worker-recorded-as-done": {
       "expect": "green",
       "note": "Fixed by whetstone run conductor-fanout-cluster (8057005), promoted 2026-07-30. A dead item worker is recorded ok:false and noted in results.coverage; checkpoint persists the notes and marks the run partial; Writeup renders 'Coverage and uncertainty'. Only a level where NOTHING landed still throws -- there is no diff to integrate and every later level would branch off a base missing the whole level. Continuing past a PARTIAL death is safe only because dodgate-plan-of-record's plan verifier adjudicates every planned item against the real diff; do not weaken that check thinking this one covers it.",
@@ -53,6 +50,9 @@
           "replace": "it.ok = true"
         }
       ]
+    },
+    "dod-gate": {
+      "expect": "green"
     },
     "dodgate-plan-of-record": {
       "expect": "green",
@@ -77,6 +77,33 @@
     "effort-think": {
       "expect": "green"
     },
+    "failure-record": {
+      "expect": "green",
+      "note": "Landed 2026-08-02. Generalizes DoDGate's existing record-then-throw (it already persisted status 'escalated' + unmet[]) to EVERY other throw site: a top-level catch dispatches a postmortem, the conductor serializes the record through the SAME checkpoint writer, and the ORIGINAL error is rethrown. The column-0 assertion is not cosmetic -- Harbor's phase_order_matches_meta() anchors ^phase\\('...'\\) with re.M, so indenting the body inside the try silently zeroes a tier-3 dimension that no tier-1/tier-2 check would notice.",
+      "mutations": [
+        {
+          "why": "swallows the failure - the Workflow would report success on a dead run",
+          "env": "GEN_OVERRIDE",
+          "file": "scripts/scaffold-workflow.cjs",
+          "find": "  throw err\n}",
+          "replace": "  /* swallowed */\n}"
+        },
+        {
+          "why": "records nothing - the resume is blind again",
+          "env": "GEN_OVERRIDE",
+          "file": "scripts/scaffold-workflow.cjs",
+          "find": "{ status: 'escalated', failure: results.failure }",
+          "replace": "{}"
+        },
+        {
+          "why": "indents the body inside the try, emptying Harbor's column-0 phase regex",
+          "env": "GEN_OVERRIDE",
+          "file": "scripts/scaffold-workflow.cjs",
+          "find": "\nphase('${title}')",
+          "replace": "\n  phase('${title}')"
+        }
+      ]
+    },
     "flag-error-echo": {
       "expect": "green"
     },
@@ -86,6 +113,33 @@
     "headless-driver-still-ends-turn": {
       "expect": "green",
       "note": "SUCCESSOR CHECK -- supersedes the earlier concern 'headless-background-workflow-orphan' (a headless -p driver backgrounded the workflow, ended its turn, and the exiting process killed the orphan). That fix is assertion 1 here (SKILL.md pins run_in_background: false); assertions 2-3 add the blocking-call and state-file re-verify requirements on top."
+    },
+    "hints-injected": {
+      "expect": "green",
+      "note": "Landed 2026-08-02. args.hints[<phase title>] reaches the workers of that phase in all THREE dispatch shapes (level fan-out, single-item branch, --no-plan-fanout) plus the gates. Label-scoped on purpose: the planner shares the phase, so a phase-wide assertion would pass on an implementation that fed the hint only to the planner and never to the worker doing the work. Injection is conditional -- an empty hint adds zero bytes, protecting #51's ~42% token cut on every happy-path run.",
+      "mutations": [
+        {
+          "why": "hint never reaches the fan-out item workers",
+          "env": "GEN_OVERRIDE",
+          "file": "scripts/scaffold-workflow.cjs",
+          "find": "promptTpl('independent-concurrency.txt') })} + hintFor('${p}')",
+          "replace": "promptTpl('independent-concurrency.txt') })}"
+        },
+        {
+          "why": "hint never reaches gate workers, so a convergence stall re-runs blind",
+          "env": "GEN_OVERRIDE",
+          "file": "scripts/scaffold-workflow.cjs",
+          "find": "const apply = (dod ? ' + dod + carry' : ' + carry') + ` + hintFor('${ph}')`;",
+          "replace": "const apply = dod ? ' + dod + carry' : ' + carry';"
+        },
+        {
+          "why": "makes injection unconditional, taxing every happy-path run with an empty context block",
+          "env": "GEN_OVERRIDE",
+          "file": "scripts/scaffold-workflow.cjs",
+          "find": "const hintFor = (title) => (HINTS[title]",
+          "replace": "const hintFor = (title) => (true"
+        }
+      ]
     },
     "integrate-and-setup-trusted-on-a-bare-boolean": {
       "expect": "green",
@@ -119,12 +173,6 @@
     "panel-codegate": {
       "expect": "green"
     },
-    "scaffold-golden-snapshots": {
-      "expect": "green"
-    },
-    "scaffold-prompts-as-data": {
-      "expect": "green"
-    },
     "plan-fanout-levels-never-checkpointed": {
       "expect": "green",
       "note": "Fixed by whetstone run conductor-fanout-cluster (43a3890), promoted 2026-07-30. results.<key>Levels records per-level integration plus per-item {id,title,ok,summary}; the checkpoint moved to the TOP of the level loop so it persists the plan on the first pass and each completed level after, with no extra call site. A resume skips levels already marked integrated and re-dispatches only items with no recorded ok. Shares the per-item ok flag with dead-item-worker-recorded-as-done by design.",
@@ -135,6 +183,39 @@
           "file": "scripts/scaffold-workflow.cjs",
           "find": "await checkpoint('${p}')",
           "replace": ""
+        }
+      ]
+    },
+    "scaffold-golden-snapshots": {
+      "expect": "green"
+    },
+    "scaffold-prompts-as-data": {
+      "expect": "green"
+    },
+    "triage-routing": {
+      "expect": "green",
+      "note": "Landed 2026-08-02. Resume routing is DATA (scripts/triage.cjs), not SKILL.md prose, because it decides whether the human is consulted at all and prose cannot be gated. The load-bearing rule: failure.kind is a worker self-report (see scripts/prompts/dodgate-verify.txt) and 'mechanical' is the only route that skips the human, so triage RE-DERIVES it from the error text and treats an unrecognised error as a reason to ask, never to retry.",
+      "mutations": [
+        {
+          "why": "trusts the worker's self-reported kind, so a misclassified failure auto-relaunches into the same wall",
+          "env": "TRIAGE_OVERRIDE",
+          "file": "scripts/triage.cjs",
+          "find": "const recognised = MECHANICAL.some((re) => re.test(text))",
+          "replace": "const recognised = true"
+        },
+        {
+          "why": "ignores the repeat guard, so an identical failure relaunches forever",
+          "env": "TRIAGE_OVERRIDE",
+          "file": "scripts/triage.cjs",
+          "find": "const repeat = Number(f.attempts || 1) >= 2",
+          "replace": "const repeat = false"
+        },
+        {
+          "why": "lets the loop act on an unachievable DoD instead of handing it to a human",
+          "env": "TRIAGE_OVERRIDE",
+          "file": "scripts/triage.cjs",
+          "find": "action: 'report'",
+          "replace": "action: 'ask'"
         }
       ]
     },
