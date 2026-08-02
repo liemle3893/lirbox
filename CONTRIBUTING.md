@@ -479,6 +479,46 @@ conductor skill correctly, then ignored the foreground directive, backgrounded t
 its turn — orphaning the run — and reported success. Engagement 0, and nothing to do with its
 coding ability.
 
+#### Running against first-party Anthropic
+
+The recipe above is for a **third-party endpoint**. Against Anthropic directly, none of the
+`ANTHROPIC_BASE_URL` / autocompact / tool-trimming ceremony applies — the context window is detected
+and MCP tool search works, so the invocation is just the agent, the model, and the credential:
+
+```bash
+P=plugins/lirbox/skills/<skill>/harbor/tasks/<id>
+harbor run -p $P -a claude-code -m claude-sonnet-5 -k 3 \
+  -n 1 --agent-setup-timeout-multiplier 5 -r 1 --env-file .env -y
+```
+
+`--env-file .env` supplies `CLAUDE_CODE_OAUTH_TOKEN` (declared in the task's `[verifier.env]`);
+Harbor validates that table *before* the run and aborts if it is unset.
+
+**`-n 1 --agent-setup-timeout-multiplier 5` is not optional here, measured 2026-08-02.** Harbor's
+agent setup runs `apt-get update && install`, *then* downloads the Claude Code bootstrap, against a
+**360 s** budget. At the default `-n 4` the trials race for bandwidth and all of them miss it:
+`AgentSetupTimeoutError` ×3, 0 completed trials, and the run reports `Mean 0.000` — which is a
+tooling failure wearing a score's clothes. Serialising and widening the setup budget cleared it
+outright (0 errors). `-r 1` is cheap insurance: a setup failure burns no tokens.
+
+#### What this task can and cannot measure
+
+Measured across nine `claude-code` / `claude-sonnet-5` k=3 runs on
+`conductor/scaffold-multiphase` (2026-07-30, recovered from `jobs/`):
+
+| dimension | observed | consequence |
+|---|---|---|
+| `reward` | **1.000 in every run** (opus-5 too) | saturated — **zero** discriminating power for a before/after on this task |
+| `quality` | 0.833 · 0.854 · 0.896 · 0.917 · 0.938 · 0.938 · 0.958 · 0.979 · 1.000 | a k=3 difference under **~0.17** is judge noise, not signal |
+
+So a paid before/after here can only catch a *catastrophic* regression, and a null result is weak
+evidence of safety rather than proof. Budget for repetitions or pick a task with headroom before
+spending on a subtle question — the saturation finding in `docs/` applies to this suite too.
+
+The oracle's own `quality` is stochastic: **0.750** in two historical runs, **1.000** in three. Read
+a single oracle quality figure as a draw, not a property — which is why a judged dimension is
+advisory and never a gate.
+
 ### Then ship
 
 Commit with a clear message (`feat(lirbox): add <skill>` / `feat(marketplace): add <plugin>`),
