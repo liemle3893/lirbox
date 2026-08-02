@@ -72,6 +72,48 @@ degenerates into a timeout benchmark.
 *Limits, stated plainly: n=1 per task, one model, no repetitions. 7/7 at full marks in ~60s is not a
 result repetitions would overturn, but a genuinely weak model was not tested.*
 
+## Variance / "insurance" probe — the paired arms, k=5 (2026-08-02)
+
+The remaining conductor claim was *insurance*: the value shows up in the tail, not the mean. Tested
+by repeating ONE task per arm under an **identical contract** (branch it, document it, record a
+verified DoD checklist — both arms told the same thing, so the control could satisfy every
+dimension). Task: `notes-fix-data-loss` (hard; the only cell in the suite that had ever scored below
+1.0). Grader: `multi-grade.mjs`, four deterministic dimensions. Runner: `scripts/lift-probe.mjs`.
+
+| | raw (n=5) | conductor, ENGAGED (n=4) | lift |
+|---|---|---|---|
+| correctness | 1.000 | 1.000 | **0** |
+| docs | 1.000 | 1.000 | **0** |
+| isolation | 1.000 | 1.000 | **0** |
+| dod | 0.900 | 0.375 | **−0.525** |
+| cost | $0.72–0.85 | $4.52–7.57 | **7.7×** |
+| wall-clock | 184–223s | 1243–1865s | **7.7×** |
+
+**Spend $28.98. The hypothesis is falsified in the direction opposite to the claim.**
+
+**Engagement was 4/5.** One "conductor" cell produced `fix/…` rather than `wf/…` — the skill never
+ran, and a raw delivery sat in the conductor arm at 205s/$0.86. Excluded from the means above and
+reported separately. This is arena #41's confound, reintroduced because `multi-grade.mjs` is
+arm-agnostic; `lift-probe.mjs` now measures engagement as a tri-state. **The single largest source of
+outcome variance in either arm is conductor failing to execute at all** — which inverts the insurance
+claim rather than supporting it.
+
+**Do not over-read the −0.525 on `dod`.** That dimension scores *verification vocabulary*, not
+verification: raw earned 1.0 partly on the sentence "npm test passes". Conductor's write-ups were
+consistently **better prose** — root cause, fix, tests, files touched — but never a ticked checklist,
+in 5/5 runs. The defensible claim is narrow: *conductor did not produce the verified checklist the
+shared contract asked for; raw did, 4 times in 5.* Fixing the anchor is open work.
+
+What is grader-independent: three of four dimensions are pinned at 1.000 for **both** arms, and
+conductor takes 7.7× the cost and 7.7× the wall-clock to reach the identical result.
+
+**Scope, stated plainly.** This tests the region the owner already predicted conductor would lose —
+*"for simple task, of course, the without skill may even better."* It says nothing about work too
+large for one context, or genuinely colliding parallel items. Those remain unmeasured, and this task
+could never reach them. Stopping at n=5 was deliberate: the sign is unambiguous, and more runs would
+only tighten an interval around a negative. Resolving a 20%→0% effect would need ~20–25 runs per arm
+(see the MDE note in [scores/README.md](./scores/README.md)).
+
 ## The theory the matrix supports
 
 - **Fair spec + hermetic tests = self-verifiable** → an unbounded frontier session always

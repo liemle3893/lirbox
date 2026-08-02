@@ -40,6 +40,7 @@ const MODEL = String(arg('model', 'claude-sonnet-5'));
 const CAP = Number(arg('cap', 2700));
 const MAX_USD = Number(arg('max-usd', 25));
 const ONLY = arg('task', null);
+const RUNS = Number(arg('runs', 1));
 const OUT = String(arg('out', join(tmpdir(), 'lift-probe')));
 if (/^(opus|sonnet|haiku|fable|default)$/i.test(MODEL)) die(`--model "${MODEL}" is a floating alias — pin an exact ID`);
 
@@ -63,10 +64,13 @@ console.log(`grading: correctness · docs · isolation · dod  (identical contra
 const results = [];
 let spent = 0;
 
-for (const t of graded) {
+const cells = [];
+for (const t of graded) for (let r = 0; r < RUNS; r++) cells.push({ t, r });
+
+for (const { t, r: runIdx } of cells) {
   if (spent > MAX_USD) { console.log(`ABORT — $${spent.toFixed(2)} exceeded --max-usd ${MAX_USD}`); break; }
 
-  const clone = join(OUT, `${ARM}--${t.id}`);
+  const clone = join(OUT, `${ARM}--${t.id}--run${runIdx}`);
   if (existsSync(clone)) rmSync(clone, { recursive: true, force: true });
   execFileSync('git', ['clone', '-q', join(REPO, t.bundle), clone]);
   execFileSync('git', ['-C', clone, 'checkout', '-q', t.sha]);
@@ -79,11 +83,11 @@ for (const t of graded) {
   const args = ['-p', prompt, '--model', MODEL, '--permission-mode', 'auto', '--output-format', 'stream-json', '--verbose'];
   if (ARM === 'conductor') args.push('--plugin-dir', join(REPO, 'plugins/lirbox'));
 
-  process.stdout.write(`  ${t.id} (${t.difficulty}) … `);
+  process.stdout.write(`  ${t.id}${RUNS > 1 ? ' run' + runIdx : ''} (${t.difficulty}) … `);
   const t0 = Date.now();
   const res = spawnSync('claude', args, { cwd: clone, timeout: CAP * 1000, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 });
   const secs = Math.round((Date.now() - t0) / 1000);
-  writeFileSync(join(OUT, `${ARM}--${t.id}.trace`), (res.stdout || '') + (res.stderr || ''));
+  writeFileSync(join(OUT, `${ARM}--${t.id}--run${runIdx}.trace`), (res.stdout || '') + (res.stderr || ''));
 
   let cost = null;
   for (const line of (res.stdout || '').split('\n')) {
@@ -94,9 +98,18 @@ for (const t of graded) {
 
   const timedOut = res.error && res.error.code === 'ETIMEDOUT';
   const mg = spawnSync('node', [join(ARENA, 'multi-grade.mjs'), '--task', t.id, '--repo', clone, '--json'], { encoding: 'utf8' });
-  let rec = { task: t.id, difficulty: t.difficulty, arm: ARM, model: MODEL, secs, costUsd: cost, timedOut: !!timedOut };
-  try { const j = JSON.parse(mg.stdout); rec.dimensions = j.dimensions; rec.mean = j.mean; rec.deliveryRef = j.deliveryRef; rec.evidence = j.evidence; }
-  catch { rec.error = 'multi-grade-parse-error'; writeFileSync(join(OUT, `${ARM}--${t.id}.grade.stdout`), mg.stdout || ''); }
+  let rec = { task: t.id, run: runIdx, difficulty: t.difficulty, arm: ARM, model: MODEL, secs, costUsd: cost, timedOut: !!timedOut };
+  try {
+    const j = JSON.parse(mg.stdout);
+    rec.dimensions = j.dimensions; rec.mean = j.mean; rec.deliveryRef = j.deliveryRef; rec.evidence = j.evidence;
+    // ENGAGEMENT, measured — never assumed. A `conductor` cell that produced no wf/ branch never ran
+    // the skill: it is a RAW delivery wearing the conductor label, and averaging it into the arm
+    // silently mixes the two populations. This is the confound arena #41 fixed for swe-run and that
+    // this grader reintroduced by being arm-agnostic. Tri-state: null where the concept
+    // does not apply (the raw arm has no branch convention to satisfy).
+    rec.engaged = ARM === 'conductor' ? /^wf\//.test(j.deliveryRef || '') : null;
+  }
+  catch { rec.error = 'multi-grade-parse-error'; writeFileSync(join(OUT, `${ARM}--${t.id}--run${runIdx}.grade.stdout`), mg.stdout || ''); }
 
   results.push(rec);
   const d = rec.dimensions;
@@ -106,9 +119,34 @@ for (const t of graded) {
   writeFileSync(join(OUT, `${ARM}.json`), JSON.stringify({ arm: ARM, model: MODEL, cap: CAP, contract: CONTRACT, results, spentUsd: spent }, null, 2));
 }
 
-const scored = results.filter((r) => r.dimensions);
+const all = results.filter((r) => r.dimensions);
+const notEngaged = all.filter((r) => r.engaged === false);
+// Means are computed over ENGAGED cells only; non-engaged ones are reported, never averaged in.
+const scored = all.filter((r) => r.engaged !== false);
 const avg = (k) => scored.length ? scored.reduce((s, r) => s + r.dimensions[k], 0) / scored.length : 0;
-console.log(`\n=== ARM ${ARM} — mean over ${scored.length} task(s) ===`);
-for (const k of ['correctness', 'docs', 'isolation', 'dod']) console.log(`  ${k.padEnd(12)} ${avg(k).toFixed(3)}`);
+const spread = (k) => { const v = scored.map((r) => r.dimensions[k]); return { min: Math.min(...v), max: Math.max(...v) }; };
+console.log(`\n=== ARM ${ARM} — ${scored.length} engaged cell(s) of ${all.length} ===`);
+if (notEngaged.length) {
+  console.log(`  !! ${notEngaged.length} cell(s) NEVER ENGAGED the skill (no wf/ branch) and are EXCLUDED from the means:`);
+  for (const r of notEngaged) console.log(`     run${r.run} ref='${r.deliveryRef}' ${r.secs}s $${(r.costUsd || 0).toFixed(2)} — a raw delivery under the conductor label`);
+  console.log(`  engagement rate: ${all.length - notEngaged.length}/${all.length}`);
+}
+for (const k of ['correctness', 'docs', 'isolation', 'dod']) {
+  const sp = spread(k);
+  // The MEAN is the least interesting number here. Insurance lives in the spread: a dimension that
+  // is sometimes 1 and sometimes 0 is a catastrophe an arm may or may not prevent; a dimension that
+  // is always the same value cannot be insured against, whatever its mean.
+  console.log(`  ${k.padEnd(12)} mean ${avg(k).toFixed(3)}   min ${sp.min.toFixed(2)}  max ${sp.max.toFixed(2)}${sp.min !== sp.max ? '   <-- VARIES' : ''}`);
+}
+if (RUNS > 1) {
+  const costs = scored.map((r) => r.costUsd).filter((c) => typeof c === 'number');
+  const secs = scored.map((r) => r.secs);
+  if (costs.length) console.log(`  cost         $${Math.min(...costs).toFixed(2)}–$${Math.max(...costs).toFixed(2)}`);
+  console.log(`  wallclock    ${Math.min(...secs)}s–${Math.max(...secs)}s`);
+  const varying = ['correctness', 'docs', 'isolation', 'dod'].filter((k) => spread(k).min !== spread(k).max);
+  console.log(varying.length
+    ? `\nVARIANCE DETECTED on: ${varying.join(', ')} — there IS something for an arm to insure against.`
+    : `\nNO variance detected at n=${scored.length}. NOTE: low n DETECTS variance, it does not RULE IT OUT — a 20%-per-run failure rate shows zero failures in 5 runs about a third of the time.`);
+}
 console.log(`  ${'MEAN'.padEnd(12)} ${((avg('correctness') + avg('docs') + avg('isolation') + avg('dod')) / 4).toFixed(3)}`);
 console.log(`Spend: $${spent.toFixed(2)}  ·  ${join(OUT, ARM + '.json')}`);
