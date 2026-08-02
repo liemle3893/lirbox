@@ -23,7 +23,7 @@
 > deliberately. Neither described flowchart.
 >
 > **What was banked anyway** (all independent of this plan, all landed):
-> - the `.harbor/tasks` drift gate — a tracked-but-derived mirror left unguarded when `13fae03`
+> - the the former Harbor staging tree drift gate — a tracked-but-derived mirror left unguarded when `13fae03`
 >   deleted the previous check;
 > - five stale doc references pointing at the deleted `harbor-port.mjs`;
 > - the e2b capability-floor finding in Task 0 below;
@@ -40,13 +40,13 @@
 
 ## Global Constraints
 
-- **THE MATRIX IS ALWAYS PAIRED: every model runs `{with skill} × {without skill}`.** An absolute score is not admissible evidence — a model may pass without the skill entirely. The measured quantity is the **lift** (with-skill − no-skill), never the raw number. The no-skill arm is identical except that `--skill .harbor/skills` is dropped.
+- **THE MATRIX IS ALWAYS PAIRED: every model runs `{with skill} × {without skill}`.** An absolute score is not admissible evidence — a model may pass without the skill entirely. The measured quantity is the **lift** (with-skill − no-skill), never the raw number. The no-skill arm is identical except that `--skill <pruned catalog>` is dropped.
 - **Do NOT hand-edit `plugins/lirbox/skills/flowchart/SKILL.md`** — every change flows through `feedback/flowchart.jsonl` → whetstone. This plan's only repo writes are backlog appends and this file.
 - The backlog is at repo root: `feedback/flowchart.jsonl`. (`plugins/lirbox/skills/feedback/` is the *feedback skill*, not a backlog.) One JSON object per line, append-only, newline-terminated; do not touch existing lines.
 - Existing ids — do not duplicate: `node-nonascii`, `floor-breaker`, `prettier`, `pan-zoom-fullscreen`, `harvest-03-edge-dashlabel-nonascii`, `harvest-04-round-node-special`.
 - **Hold everything except the skill constant.** Same `--ak disallowed_tools=…` on every arm including big-window models; same `-k`; same task. Varying two things at once makes the lift uninterpretable.
 - **Do not touch `plugins/lirbox/skills/flowchart/harbor/`** mid-ladder. Changing the task or its harness breaks comparability with arms already run.
-- Never commit runtime artifacts (`jobs/`, `.workflows/`, `.worktrees/`, `.improve/`). `.harbor/tasks` is tracked but derived — never hand-edit; the `Harbor tasks in sync` CI step rebuilds and fails on drift.
+- Never commit runtime artifacts (`jobs/`, `.workflows/`, `.worktrees/`, `.improve/`). the former Harbor staging tree is tracked but derived — never hand-edit; the `Harbor tasks in sync` CI step rebuilds and fails on drift.
 - Commit identity enforced by `.githooks/pre-commit` (author `liemle3893 <33980597+liemle3893@users.noreply.github.com>`). `main` is pull-request-only.
 - Credentials live in gitignored `.env` (`CLAUDE_CODE_OAUTH_TOKEN`). Source it; never echo it, never let it reach a log or a commit.
 - **`total_cost_usd` is fictional on the Ollama endpoint** — a LiteLLM estimate. The e2b run reported `$33.35` for a local model. This Harbor version emits no `cost_source` tag, so the filter CONTRIBUTING prescribes will not catch it automatically. Never let it reach a scorecard.
@@ -98,13 +98,13 @@ The reference model saturating the task would make it a regression guard, not an
 - [ ] Source credentials without echoing: `set -a; . ./.env; set +a`
 - [ ] Sonnet-5 **without** the skill, `-k 3`:
   ```bash
-  harbor run -p .harbor/tasks/flowchart__ci-pipeline \
+  harbor run -p plugins/lirbox/skills/flowchart/harbor/tasks/ci-pipeline \
     -a claude-code -m claude-sonnet-5 -k 3 \
     --ae CLAUDE_FORCE_OAUTH=1 --ae CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
     --ak disallowed_tools="Task,Workflow,TodoWrite,Glob,Grep,CronCreate,CronDelete,CronList,EnterWorktree,ExitWorktree,NotebookEdit,ReportFindings,ScheduleWakeup,SendMessage,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,ToolSearch,WebFetch,WebSearch" \
     -e docker -y
   ```
-- [ ] Sonnet-5 **with** the skill: identical, plus `--skill .harbor/skills`.
+- [ ] Sonnet-5 **with** the skill: identical, plus `--skill <pruned catalog>`.
 - [ ] Archive both arms' `out.html`, `agent/` and `verifier/` outside `jobs/` — verified: `jobs/` does not preserve prior trials.
 
 **Fork on the control result:**

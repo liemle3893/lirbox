@@ -1,10 +1,10 @@
 # Task image for conductor__scaffold-multiphase.
 #
-# ASSEMBLY REQUIREMENT: the `COPY skill` below needs a pruned copy of
-# plugins/lirbox/skills/conductor/ at environment/skill/ in the build context. That copy is DERIVED,
-# so it is not tracked — create it when you assemble .harbor/ (see CONTRIBUTING.md tier 3), and
-# strip evals/, harbor/ and arena/ from it. Shipping those would hand the container the graders it
-# is scored against.
+# BUILD INPUT: the `COPY skill` below installs a PRUNED copy of this skill for the agent, from
+# environment/skill/ in this directory. That copy is derived, not tracked — generate it with
+#     node scripts/harbor-prep.mjs conductor/<task-id>
+# before running the task. The prune strips evals/, harbor/ and arena/; shipping those would hand
+# the container the graders it is scored against.
 #
 # python3 is present for rewardkit (installed at verify time by tests/test.sh via uvx, never baked
 # into the image — test-only deps stay out of the image per Harbor convention).

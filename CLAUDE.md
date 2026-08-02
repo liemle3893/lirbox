@@ -74,14 +74,28 @@ the discrimination gate (`-a nop` / `-a oracle`) is **free**; a real behavioural
 (`-a claude-code -m <model>`) is **~$5–15 per task** and is a separate ask. Declined → skip it and
 say so.
 
-Tasks are declared under `plugins/lirbox/skills/<skill>/harbor/tasks/<id>/`; `.harbor/` is a
-per-machine gitignored copy you assemble by hand. Before touching one, read
-[CONTRIBUTING.md § Tier 3](./CONTRIBUTING.md#tier-3--harbor-containerised-behavioural-test--offer-it-do-not-assume-it)
-and `<skill>/harbor/harness.md` (the tracked instruction preamble). The rules that bite: never inject
-`plugins/lirbox/skills` unpruned (it hands the agent its own graders); re-copy a skill's validator
-when its `assets/` change; re-sync `.harbor/` before every run; always run `-a nop` alongside
-`-a oracle`; the oracle bar is `== 1.0` **per dimension**; a judged dimension is advisory, never a
-gate.
+A task **is** its declaration: `plugins/lirbox/skills/<skill>/harbor/tasks/<id>/`. Harbor runs that
+directory — there is no staging copy, so the thing you edit is the thing that runs. Its one derived
+build input is `environment/skill/` (gitignored); generate it first:
+
+```
+node scripts/harbor-prep.mjs <skill>/<task-id>       # or --all
+harbor run -p plugins/lirbox/skills/<skill>/harbor/tasks/<id> -a nop    -y   # must be 0
+harbor run -p plugins/lirbox/skills/<skill>/harbor/tasks/<id> -a oracle -y   # must be 1.0
+```
+
+**Before proposing ANY paid run, read `jobs/` first.** Job output lands in `<repo-root>/jobs/`
+(harbor's `--jobs-dir` default, relative to cwd) — gitignored, so a **worktree has none; always read
+the main repo root's `jobs/`**. Prior `reward`/`quality`/`cost_usd` are there and the read is free.
+If the metric is already saturated on that task, a before/after run cannot show a lift — say so
+instead of spending. Never assert a path from a directory merely existing: `ls` its contents.
+
+Detail → [CONTRIBUTING.md § Tier 3](./CONTRIBUTING.md#tier-3--harbor-containerised-behavioural-test--offer-it-do-not-assume-it).
+The rules that bite: never hand the container a skill tree with `evals/`/`harbor/`/`arena/` in it
+(that is its answer key — `harbor-prep.mjs` prunes them and refuses if any survive); re-run
+`harbor-prep.mjs` after touching the skill; re-copy a skill's validator when its `assets/` change;
+always run `-a nop` alongside `-a oracle`; the oracle bar is `== 1.0` **per dimension**; a judged
+dimension is advisory, never a gate.
 
 ## graphify
 

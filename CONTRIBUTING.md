@@ -244,38 +244,26 @@ plugins/lirbox/skills/<skill>/harbor/
     files/                optional — copied into /app before the agent runs
 ```
 
-Two grader shapes are in use, both fine — Harbor only requires that `tests/test.sh` end up writing
-`/logs/verifier/reward.json`:
+Grading always ends at `tests/test.sh` writing `/logs/verifier/reward.json`. One scalar → a single
+`tests/test.sh`. More than one dimension → a `tests/` tree, see
+[Reward Kit](#grading-with-reward-kit-multi-dimension) below.
 
-- **a single `verify.sh`** (`flowchart`, `feedback`) — assembly renames it to `tests/test.sh`. Right
-  when one scalar answers the question.
-- **a `tests/` directory copied verbatim** (`conductor/scaffold-multiphase`) — right when grading has
-  more than one dimension. See [Reward Kit](#grading-with-reward-kit-multi-dimension) below.
-
-Harbor wants a different on-disk layout. There is **no builder script** — a task is run rarely and
-by hand, so assemble it by hand into `.harbor/` (gitignored, per-machine, rebuildable from the
-declaration at any time):
-
-```
-.harbor/tasks/<skill>__<id>/
-  instruction.md          harness.md + "---" + the declaration's instruction.md
-  task.toml               [task] name/version/description, [environment] cpus/memory_mb,
-                          [agent] timeout_sec, [verifier] timeout_sec, [verifier.env]
-  environment/
-    Dockerfile            node:22-bookworm-slim + git ca-certificates curl ripgrep, WORKDIR /app
-    files/                ← the declaration's files/
-  solution/solve.sh       ← the declaration's solution/ (chmod +x)
-  tests/
-    test.sh               ← the declaration's verify.sh, or its whole tests/ tree (chmod +x)
-    skill-assets/         ← any skill asset the grader invokes (see the caveat below)
-```
-
-**Run the free gate as three arms, not one** — each answers a different question, and a task is only
-trustworthy when all three land where they should:
+**The declaration is the task.** `harbor run -p` points straight at it; there is no staging copy and
+no assembly step, so the directory you edit is the directory that runs. Its one derived input is
+`environment/skill/` — the PRUNED copy of the skill the image installs for the agent — which is
+gitignored and generated:
 
 ```bash
-harbor run -p .harbor/tasks/<skill>__<id> -a nop     -y   # must score 0 — else the grader passes on nothing
-harbor run -p .harbor/tasks/<skill>__<id> -a oracle  -y   # must score 1 — else the grader is unsatisfiable
+node scripts/harbor-prep.mjs <skill>/<task-id>     # or --all; re-run after touching the skill
+```
+
+**Run the free gate as two arms, not one** — each answers a different question, and a task is only
+trustworthy when both land where they should:
+
+```bash
+P=plugins/lirbox/skills/<skill>/harbor/tasks/<id>
+harbor run -p $P -a nop     -y   # must score 0 — else the grader passes on nothing
+harbor run -p $P -a oracle  -y   # must score 1 — else the grader is unsatisfiable
 ```
 
 `-y` is not optional in an agent's hands: Harbor prompts `Proceed? (Y/n)` and **aborts on a
@@ -300,12 +288,12 @@ Harbor now has **one task proven end-to-end** (`conductor/scaffold-multiphase`: 
 a paid `claude-code` run, both dimensions scoring). `swe-run.mjs` is still the execution engine for
 scorecards; treat tier 3 as a working instrument for one task, not yet the default path.
 
-When injecting the skill catalog into a container, **never point at `plugins/lirbox/skills`** —
-skills keep their eval material inside their own directory, so an unpruned inject puts every task's
-hidden graders in the agent's own discovery path and it can read the answer key. Copy the tree to
-`.harbor/skills/` and strip every skill's `evals/`, `harbor/` and `arena/` (and any `*.bundle`)
-first, then confirm no `verify.sh` or `fail_to_pass` survived — that pruned copy is what
-`--skill` points at below.
+When putting a skill in front of the agent, **never point at `plugins/lirbox/skills`** — skills keep
+their eval material inside their own directory, so an unpruned tree puts every task's hidden graders
+in the agent's own discovery path and it can read the answer key. `scripts/harbor-prep.mjs` is what
+prunes it: it strips `evals/`, `harbor/`, `arena/` and any `*.bundle`, then walks the result and
+**refuses** if grading material survived. Use it for the multi-skill catalog `--skill` points at
+below too, rather than hand-copying.
 
 A grader that runs a skill's own validator — `flowchart`'s `verify.sh` calls
 `/tests/skill-assets/validate.mjs` — needs a **copy** of it under `tests/skill-assets/`. That copy
@@ -313,11 +301,13 @@ is manual and has nothing watching it: change `plugins/lirbox/skills/<skill>/ass
 and every stale copy keeps silently grading against the old version. Re-copy when you touch the
 assets.
 
-`.harbor/` is the staging layout, and it is **gitignored on purpose**. Tracking it was tried
-(`988f81d`) and reverted (`d857e41`): it duplicates every grading file byte-for-byte with nothing
-keeping the copies in sync, which is the exact drift the tracked declaration exists to prevent.
-Consequence to remember while iterating: **editing the declaration does not change what runs.**
-Re-copy into `.harbor/` before every run, or you will spend a paid run scoring the old grader.
+**History worth not repeating.** A staging tree used to sit between the declaration and the run.
+Tracking it was tried (`988f81d`) and reverted (`d857e41`) because it duplicated every grading file
+with nothing keeping the copies in sync; leaving it untracked kept the duplication and added a worse
+failure mode — *editing the declaration did not change what ran*, so a stale copy could quietly score
+a paid run against the old grader. Both problems are gone now that `harbor run -p` takes the
+declaration itself. The only thing still generated is `environment/skill/`, which holds no grading
+material by construction.
 
 #### Grading with Reward Kit (multi-dimension)
 
@@ -451,7 +441,8 @@ docker run --rm curlimages/curl -s $URL/api/version
 **Run:**
 
 ```bash
-harbor run -p .harbor/tasks/<skill>__<id> -a claude-code -m <model> --skill .harbor/skills \
+CAT=$(mktemp -d) && node scripts/harbor-prep.mjs --catalog $CAT   # pruned; never point --skill at the repo
+harbor run -p plugins/lirbox/skills/<skill>/harbor/tasks/<id> -a claude-code -m <model> --skill $CAT \
   --ae ANTHROPIC_BASE_URL=$URL --ae ANTHROPIC_AUTH_TOKEN=<any-non-empty> \
   --ae CLAUDE_CODE_AUTO_COMPACT_WINDOW=26000 --ae CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=85 \
   --ak disallowed_tools="CronCreate,CronDelete,CronList,EnterWorktree,ExitWorktree,NotebookEdit,ReportFindings,ScheduleWakeup,SendMessage,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,ToolSearch,WebFetch,WebSearch" \
@@ -487,6 +478,46 @@ drove it and got the work wrong (quality). Measured example: a 2B-class local mo
 conductor skill correctly, then ignored the foreground directive, backgrounded the workflow, ended
 its turn — orphaning the run — and reported success. Engagement 0, and nothing to do with its
 coding ability.
+
+#### Running against first-party Anthropic
+
+The recipe above is for a **third-party endpoint**. Against Anthropic directly, none of the
+`ANTHROPIC_BASE_URL` / autocompact / tool-trimming ceremony applies — the context window is detected
+and MCP tool search works, so the invocation is just the agent, the model, and the credential:
+
+```bash
+P=plugins/lirbox/skills/<skill>/harbor/tasks/<id>
+harbor run -p $P -a claude-code -m claude-sonnet-5 -k 3 \
+  -n 1 --agent-setup-timeout-multiplier 5 -r 1 --env-file .env -y
+```
+
+`--env-file .env` supplies `CLAUDE_CODE_OAUTH_TOKEN` (declared in the task's `[verifier.env]`);
+Harbor validates that table *before* the run and aborts if it is unset.
+
+**`-n 1 --agent-setup-timeout-multiplier 5` is not optional here, measured 2026-08-02.** Harbor's
+agent setup runs `apt-get update && install`, *then* downloads the Claude Code bootstrap, against a
+**360 s** budget. At the default `-n 4` the trials race for bandwidth and all of them miss it:
+`AgentSetupTimeoutError` ×3, 0 completed trials, and the run reports `Mean 0.000` — which is a
+tooling failure wearing a score's clothes. Serialising and widening the setup budget cleared it
+outright (0 errors). `-r 1` is cheap insurance: a setup failure burns no tokens.
+
+#### What this task can and cannot measure
+
+Measured across nine `claude-code` / `claude-sonnet-5` k=3 runs on
+`conductor/scaffold-multiphase` (2026-07-30, recovered from `jobs/`):
+
+| dimension | observed | consequence |
+|---|---|---|
+| `reward` | **1.000 in every run** (opus-5 too) | saturated — **zero** discriminating power for a before/after on this task |
+| `quality` | 0.833 · 0.854 · 0.896 · 0.917 · 0.938 · 0.938 · 0.958 · 0.979 · 1.000 | a k=3 difference under **~0.17** is judge noise, not signal |
+
+So a paid before/after here can only catch a *catastrophic* regression, and a null result is weak
+evidence of safety rather than proof. Budget for repetitions or pick a task with headroom before
+spending on a subtle question — the saturation finding in `docs/` applies to this suite too.
+
+The oracle's own `quality` is stochastic: **0.750** in two historical runs, **1.000** in three. Read
+a single oracle quality figure as a draw, not a property — which is why a judged dimension is
+advisory and never a gate.
 
 ### Then ship
 

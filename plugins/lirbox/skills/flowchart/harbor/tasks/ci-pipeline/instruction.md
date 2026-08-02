@@ -1,3 +1,12 @@
+Invoke the Skill tool with skill: "flowchart" — that exact bare value, not "lirbox:flowchart". Do
+not call "flowchart" as a tool directly; it is not one. The skills list advertises names, it does
+not create tools.
+
+This session is headless and non-interactive — do not end your turn until the HTML file is written
+to disk. Write the output to /app/out.html (exactly that path).
+
+---
+
 Diagram this deployment pipeline as an interactive flowchart, written to `/app/out.html`.
 
 A push to `main` runs lint and typecheck. If either fails the pipeline stops and the commit is

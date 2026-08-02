@@ -15,7 +15,7 @@
 # tooling, never source. A prior run of this dir carried 1197 files / ~1.5M words,
 # which pushed the corpus past graphify's 500-file gate on its own.
 jobs/
-.harbor/
+plugins/lirbox/skills/*/harbor/tasks/*/environment/skill/
 
 # Arena delivery fixtures: notes-app v3/v4/v5 are three near-identical copies of
 # one synthetic toy app, present only as a task substrate for arena runs. In the
