@@ -84,6 +84,12 @@ harbor run -p plugins/lirbox/skills/<skill>/harbor/tasks/<id> -a nop    -y   # m
 harbor run -p plugins/lirbox/skills/<skill>/harbor/tasks/<id> -a oracle -y   # must be 1.0
 ```
 
+**Before proposing ANY paid run, read `jobs/` first.** Job output lands in `<repo-root>/jobs/`
+(harbor's `--jobs-dir` default, relative to cwd) — gitignored, so a **worktree has none; always read
+the main repo root's `jobs/`**. Prior `reward`/`quality`/`cost_usd` are there and the read is free.
+If the metric is already saturated on that task, a before/after run cannot show a lift — say so
+instead of spending. Never assert a path from a directory merely existing: `ls` its contents.
+
 Detail → [CONTRIBUTING.md § Tier 3](./CONTRIBUTING.md#tier-3--harbor-containerised-behavioural-test--offer-it-do-not-assume-it).
 The rules that bite: never hand the container a skill tree with `evals/`/`harbor/`/`arena/` in it
 (that is its answer key — `harbor-prep.mjs` prunes them and refuses if any survive); re-run
