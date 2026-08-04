@@ -94,6 +94,11 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
    each to `checkable` (a concrete command, exit 0 = met) or `judged` (needs cited evidence),
    never dropping plan-stated ACs. If the plan stated none, derive them — and the missing DoD
    is a `BLIND-SPOT-RISK` (so the verdict can be at best GO-WITH-CONDITIONS).
+   Fill **`#taskgraph`** the same way — the plan's execution shape, machine-checked. Each edge is
+   `needs` (this task needs the other's *output*) or `contention` (both write one file: a merge
+   cost, not an order, since each task gets its own worktree) and carries a `why`. `levels` is
+   **derived** — validate.mjs recomputes it from the `needs` edges — so you can neither invent
+   serialization nor claim parallelism the edges forbid. No task graph → all three arrays empty.
 9. **Verify the output** — must exit 0; fix and re-run until green:
    ```bash
    node ${CLAUDE_PLUGIN_ROOT}/skills/plan-check/assets/validate.mjs ./plan-check-<slug>.html

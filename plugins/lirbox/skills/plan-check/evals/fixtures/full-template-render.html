@@ -81,6 +81,13 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
     <li><span class="q">unknown-unknown</span><br>The plan assumes a single-region deployment; it never says how the shared counter behaves once traffic spans two regions with independent Redis instances.</li>
   </ul>
 
+  <h2>Execution shape</h2>
+  <p class="lead">Levels derived from the plan's own dependency declarations — everything inside one level may run at the same time. A <em>needs</em> edge is a real ordering constraint; a <em>contention</em> edge is two tasks writing one file, which costs a merge, not an order, when each task gets its own worktree. Machine-readable copy in the <code>#taskgraph</code> block.</p>
+  <ul class="risks">
+    <li><span class="q">level 0</span><br><strong>config</strong> — the limit values and their env plumbing. Nothing precedes it.</li>
+    <li><span class="q">level 1</span><br><strong>limiter</strong>, <strong>metrics</strong> — both need <code>config</code>'s shape. They collide on <code>api/middleware.go</code>, which is a merge at integration, not an ordering constraint: each runs in its own worktree.</li>
+  </ul>
+
   <h2>Claim ledger</h2>
   <p class="lead">Every proposition, tagged to its quadrant and adjudicated. Verified/mechanical rows last.</p>
   <table>
@@ -145,5 +152,12 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
   }
 })();
 </script>
+<!-- Exercises the DERIVED-levels path: two tasks wait on `schema` (needs), and they collide on
+     svc/write.go (contention) WITHOUT being pushed apart — a contention edge costs a merge, not
+     an order, so api and writer share level 1. -->
+<!-- Exercises the DERIVED-levels path on this plan's own work: `limiter` and `metrics` both
+     need `config`, and they collide on api/middleware.go WITHOUT being pushed apart — a
+     contention edge costs a merge at integration, not an order, so they share level 1. -->
+<script type="application/json" id="taskgraph">{"nodes":[{"id":"config","title":"Limit values + env plumbing","files":["api/config.go"]},{"id":"limiter","title":"Token-bucket middleware","files":["api/middleware.go","api/config.go"]},{"id":"metrics","title":"Rate-limit counters + dashboards","files":["api/metrics.go","api/middleware.go"]}],"edges":[{"from":"config","to":"limiter","kind":"needs","why":"the middleware reads the limit struct config defines"},{"from":"config","to":"metrics","kind":"needs","why":"counters are labelled by the limit keys config names"},{"from":"limiter","to":"metrics","kind":"contention","why":"both write api/middleware.go; separate worktrees, so this is a merge at integration, not an order"}],"levels":[["config"],["limiter","metrics"]]}</script>
 </body>
 </html>

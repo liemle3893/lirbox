@@ -99,6 +99,15 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
     <!-- repeat per criterion; for checkable add e.g. <code>the check command</code> in DOD_CHECK_NOTE -->
   </ul>
 
+  <!-- What may run CONCURRENTLY and what may not. Delete this section only when the plan declares
+       no task graph at all (then the #taskgraph block below is {"nodes":[],"edges":[],"levels":[]}). -->
+  <h2>Execution shape</h2>
+  <p class="lead">Levels derived from the plan's own dependency declarations — everything inside one level may run at the same time. A <em>needs</em> edge is a real ordering constraint; a <em>contention</em> edge is two tasks writing one file, which costs a merge, not an order, when each task gets its own worktree. Machine-readable copy in the <code>#taskgraph</code> block.</p>
+  <ul class="risks">
+    <li><span class="q">level {{LEVEL_N}}</span><br>{{LEVEL_TASKS}}{{LEVEL_NOTE}}</li>
+    <!-- repeat per level, in order; LEVEL_NOTE names the edge that holds this level back -->
+  </ul>
+
   <h2>Claim ledger</h2>
   <p class="lead">Every proposition, tagged to its quadrant and adjudicated. Verified/mechanical rows last.</p>
   <table>
@@ -154,5 +163,17 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
      Shape: {"criteria":[{"id","text","tier":"checkable"|"judged","check"?}]} — check required
      for checkable. Must mirror the visible Definition-of-done section above. -->
 <script type="application/json" id="dod">{"criteria":[{"id":"{{DOD_ID}}","text":"{{DOD_TEXT}}","tier":"{{DOD_TIER}}","check":"{{DOD_CHECK}}"}]}</script>
+<!-- Machine-readable TASK GRAPH — the plan's declared execution shape. REQUIRED, exactly one.
+     Shape: {"nodes":[{"id","title"?,"files"?}],"edges":[{"from","to","kind","why"}],"levels":[[id]]}
+       kind "needs"      = this task needs the other's OUTPUT (decision, API, schema, code). Orders them.
+       kind "contention" = both write the same file. A merge cost at integration, NOT an order, when
+                           each task runs in its own worktree (lirbox:conductor does). A runner sharing
+                           one working tree must promote it to "needs".
+     `why` is required on every edge — an edge with no stated reason is an invented one.
+     `levels` is DERIVED, not chosen: validate.mjs recomputes it from the "needs" edges and rejects
+     a mismatch, so the report can neither invent serialization nor claim parallelism the edges forbid.
+     Every file claimed by two tasks needs an edge between them; an unclassified collision is rejected.
+     A plan that declares no task graph: {"nodes":[],"edges":[],"levels":[]}. -->
+<script type="application/json" id="taskgraph">{"nodes":[{"id":"{{TASK_ID}}","title":"{{TASK_TITLE}}","files":["{{TASK_FILES}}"]}],"edges":[],"levels":[["{{TASK_ID}}"]]}</script>
 </body>
 </html>

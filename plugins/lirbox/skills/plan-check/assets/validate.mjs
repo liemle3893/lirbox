@@ -20,6 +20,9 @@
 //   6. Exactly one <script type="application/json" id="dod"> block whose JSON is
 //      { criteria: [{ id, text, tier: 'checkable'|'judged', check? }] } — the
 //      machine-readable definition of done consumed by lirbox:conductor.
+//   7. The plan's goal (id="goal") + exactly one data-goal-coverage claim row.
+//   8. Exactly one <script type="application/json" id="taskgraph"> block: the plan's
+//      declared execution shape, with `levels` DERIVED from the edges, not asserted.
 
 import { readFileSync } from 'node:fs';
 
@@ -143,9 +146,150 @@ if (dodBlocks.length !== 1) {
   }
 }
 
+// 8. machine-readable TASK GRAPH — what may run concurrently, and what may not.
+//
+// The point of this block is that `levels` is DERIVED, never asserted: it is recomputed here by
+// longest-path layering over the `needs` edges and must match what the report declared. Without
+// that, a report can emit levels [[a],[b],[c]] with no edges at all and pass — a fully serial
+// claim with nothing backing it, which is exactly the dishonesty this is for.
+//
+// Two edge kinds, because they are not the same constraint and a runner treats them differently:
+//   needs      — B requires A's OUTPUT (a decision, an API, a schema, code that must exist).
+//                A real ordering constraint. Constrains levels.
+//   contention — two tasks write the same file. Under a runner giving each task its own worktree
+//                (lirbox:conductor does) this is a MERGE cost at integration, NOT an ordering
+//                constraint, so it does NOT constrain levels. A runner sharing one working tree
+//                must promote it to `needs`. Recording it as `needs` here would serialize work
+//                that has no data dependency.
+let graphNodes = 0;
+let graphLevels = 0;
+const tgBlocks = [...html.matchAll(/<script type="application\/json" id="taskgraph">([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+if (tgBlocks.length !== 1) {
+  errors.push(`expected exactly one <script type="application/json" id="taskgraph"> block, found ${tgBlocks.length}`);
+} else {
+  let tg = null;
+  try { tg = JSON.parse(tgBlocks[0]); } catch (e) { errors.push(`#taskgraph block is not valid JSON: ${e.message}`); }
+  const nodes = tg && Array.isArray(tg.nodes) ? tg.nodes : null;
+  const edges = tg && Array.isArray(tg.edges) ? tg.edges : null;
+  const levels = tg && Array.isArray(tg.levels) ? tg.levels : null;
+  if (tg && (!nodes || !edges || !levels)) {
+    errors.push('#taskgraph needs arrays: nodes, edges, levels (all three; use [] when the plan declares no task graph)');
+  } else if (tg) {
+    // nodes: unique non-empty ids
+    const ids = new Set();
+    for (const [i, n] of nodes.entries()) {
+      const id = n && typeof n.id === 'string' ? n.id.trim() : '';
+      if (!id) { errors.push(`#taskgraph node ${i + 1}: needs a non-empty id`); continue; }
+      if (ids.has(id)) errors.push(`#taskgraph node ${i + 1}: duplicate id "${id}"`);
+      if (n.files !== undefined && !Array.isArray(n.files)) errors.push(`#taskgraph node "${id}": files must be an array`);
+      ids.add(id);
+    }
+    graphNodes = ids.size;
+
+    // edges: resolve, kind, and a stated reason. `why` is required because an unexplained edge is
+    // the thing this whole block exists to stop being invented.
+    const needs = [];
+    const linked = new Set();
+    for (const [i, e] of edges.entries()) {
+      const from = e && typeof e.from === 'string' ? e.from : '';
+      const to = e && typeof e.to === 'string' ? e.to : '';
+      const where = `#taskgraph edge ${i + 1}`;
+      if (!ids.has(from) || !ids.has(to)) {
+        errors.push(`${where}: ${JSON.stringify(from)} -> ${JSON.stringify(to)} names a node that does not exist`);
+        continue;
+      }
+      if (from === to) { errors.push(`${where}: "${from}" depends on itself`); continue; }
+      if (e.kind !== 'needs' && e.kind !== 'contention') {
+        errors.push(`${where} ("${from}" -> "${to}"): kind must be "needs" (ordering) or "contention" (same file, merge cost)`);
+        continue;
+      }
+      if (typeof e.why !== 'string' || !e.why.trim()) {
+        errors.push(`${where} ("${from}" -> "${to}"): needs a non-empty why — an edge with no stated reason is an invented one`);
+      }
+      linked.add(from < to ? `${from} ${to}` : `${to} ${from}`);
+      if (e.kind === 'needs') needs.push([from, to]);
+    }
+
+    // Every file claimed by two tasks must be CLASSIFIED by an edge between them. Silence here is
+    // the failure mode: the plan reads as if the tasks were independent when they collide.
+    const byFile = new Map();
+    for (const n of nodes) {
+      const id = n && typeof n.id === 'string' ? n.id.trim() : '';
+      if (!id) continue;
+      for (const f of Array.isArray(n.files) ? n.files : []) {
+        if (!byFile.has(f)) byFile.set(f, []);
+        if (!byFile.get(f).includes(id)) byFile.get(f).push(id);
+      }
+    }
+    for (const [f, owners] of byFile) {
+      for (let a = 0; a < owners.length; a++) {
+        for (let b = a + 1; b < owners.length; b++) {
+          const [x, y] = [owners[a], owners[b]];
+          const key = x < y ? `${x} ${y}` : `${y} ${x}`;
+          if (!linked.has(key)) {
+            errors.push(
+              `#taskgraph: "${f}" is claimed by both "${x}" and "${y}" with no edge between them — ` +
+                `classify it (kind "contention" if they may still run concurrently in separate worktrees, "needs" if not)`
+            );
+          }
+        }
+      }
+    }
+
+    // LEVELS ARE DERIVED. Kahn layering over `needs` only: a node sits one level below the latest
+    // thing it needs. contention edges are deliberately absent from this — they cost a merge, not
+    // an ordering. A leftover set after layering is a cycle, and it is named.
+    if (!errors.some((e) => e.startsWith('#taskgraph'))) {
+      const level = new Map([...ids].map((id) => [id, 0]));
+      let settled = new Set([...ids].filter((id) => !needs.some(([, to]) => to === id)));
+      let frontier = settled;
+      let depth = 0;
+      while (frontier.size && settled.size < ids.size) {
+        depth++;
+        const next = new Set(
+          [...ids].filter((id) => !settled.has(id) && needs.every(([from, to]) => to !== id || settled.has(from)))
+        );
+        for (const id of next) level.set(id, depth);
+        frontier = next;
+        settled = new Set([...settled, ...next]);
+      }
+      if (settled.size < ids.size) {
+        errors.push(
+          `#taskgraph: needs-edge cycle among ${[...ids].filter((id) => !settled.has(id)).sort().join(', ')} — ` +
+            `no execution order exists; one of those edges is not a real dependency`
+        );
+      } else {
+        const expected = [];
+        for (const id of [...ids].sort()) {
+          const d = level.get(id);
+          (expected[d] || (expected[d] = [])).push(id);
+        }
+        graphLevels = expected.length;
+        const shown = (ls) => ls.map((l) => `[${[...l].map(String).sort().join(' ')}]`).join(' ');
+        const same =
+          levels.length === expected.length &&
+          expected.every((want, i) => {
+            const got = Array.isArray(levels[i]) ? [...levels[i]].map(String).sort() : null;
+            return got && got.length === want.length && want.every((id, j) => got[j] === id);
+          });
+        if (!same) {
+          errors.push(
+            `#taskgraph levels are not what the edges imply — declared ${shown(levels)}, ` +
+              `derived ${shown(expected)}. Levels are computed from the "needs" edges, not chosen: ` +
+              `extra levels claim serialization no edge justifies, missing ones claim parallelism the edges forbid`
+          );
+        }
+      }
+    }
+  }
+}
+
 if (errors.length) {
   console.error(`INVALID ${path}`);
   for (const e of errors) console.error(`  - ${e}`);
   process.exit(1);
 }
-console.log(`VALID ${path} — verdict ${verdicts[0]}, ${rows.length} claim(s), ${open} open, ${conditions} condition(s), ${dodCount} DoD criteria`);
+console.log(
+  `VALID ${path} — verdict ${verdicts[0]}, ${rows.length} claim(s), ${open} open, ${conditions} condition(s), ` +
+    `${dodCount} DoD criteria, ${graphNodes} task(s) in ${graphLevels} level(s)`
+);
