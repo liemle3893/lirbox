@@ -6,8 +6,10 @@
 </ul>
 <ul class="risks"><li><span class="q">unknown-unknown</span> noout may be left set on failure mid-procedure.</li></ul>
 <table><tbody>
+  <p id="goal"><strong>Goal:</strong> drain and replace the failing OSD without losing data availability</p>
   <tr class="claim" data-quadrant="known-known" data-status="VERIFIED"><td><code>ceph osd out N</code> drains the OSD</td><td>known-known</td><td>VERIFIED</td><td>docs.ceph.com/reef</td><td>high</td></tr>
   <tr class="claim" data-quadrant="known-unknown" data-status="UNVERIFIED"><td>cluster is healthy at start</td><td>known-unknown</td><td>UNVERIFIED (needs: ceph -s)</td><td>—</td><td>—</td></tr>
+  <tr class="claim" data-goal-coverage="true" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION"><td>Meeting every DoD criterion achieves the goal</td><td>unknown-known</td><td>UNSTATED-ASSUMPTION</td><td>the DoD checks OSD state, never data availability</td><td>med</td></tr>
   <tr class="claim" data-quadrant="unknown-unknown" data-status="BLIND-SPOT-RISK"><td>noout not cleared on partial failure</td><td>unknown-unknown</td><td>BLIND-SPOT-RISK</td><td>reasoning</td><td>med</td></tr>
 </tbody></table>
 <script type="application/json" id="dod">{"criteria":[{"id":"ac1","text":"OSD swap complete: replacement OSD is up/in and rebalance finished","tier":"checkable","check":"ceph osd safe-to-destroy osd.N"},{"id":"ac2","text":"no client-visible interruption during the swap","tier":"judged"}]}</script>

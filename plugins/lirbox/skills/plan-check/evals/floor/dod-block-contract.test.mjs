@@ -30,13 +30,20 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SKILL_DIR = resolve(HERE, '..', '..');                       // .../skills/plan-check
 const VALIDATE = resolve(SKILL_DIR, 'assets', 'validate.mjs');
 
-// Minimal otherwise-valid report: one VERIFIED claim → derived verdict GO, 0 open, 0 conditions.
+// Minimal otherwise-valid report: two VERIFIED claims → derived verdict GO, 0 open, 0 conditions.
 // (No <style> block on purpose — keeps this check independent of the css-verdict concern.)
 // `dodBlock` is spliced in verbatim before </body>; pass '' for the missing-#dod case.
+//
+// The id="goal" element and the data-goal-coverage row are REQUIRED by the report contract, so
+// they appear here purely to keep this fixture otherwise-valid — this test is about #dod, and a
+// fixture failing for an unrelated reason would test nothing. Their own contract is pinned by
+// evals/checks/goal-coverage.check.mjs.
 const report = (dodBlock) => `<!DOCTYPE html><html><head><meta charset="utf-8"><title>t</title></head><body>
 <div class="verdict" data-verdict="GO"><span class="badge">GO</span></div>
+<p id="goal"><strong>Goal:</strong> keep the service available during the upgrade</p>
 <table><tbody>
   <tr class="claim" data-quadrant="known-known" data-status="VERIFIED"><td>a claim</td></tr>
+  <tr class="claim" data-goal-coverage="true" data-quadrant="known-known" data-status="VERIFIED"><td>the DoD, fully met, achieves the goal</td></tr>
 </tbody></table>
 ${dodBlock}
 </body></html>

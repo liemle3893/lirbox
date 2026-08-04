@@ -61,6 +61,8 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
   <h1>Add rate-limiting to the public API</h1>
   <div class="sub">plan-check · feature · 2026-07-10</div>
 
+  <p id="goal"><strong>Goal:</strong> stop a single client exhausting the public API for everyone else</p>
+
   <!-- data-verdict MUST be GO | GO-WITH-CONDITIONS | NO-GO and match the claim rows -->
   <div class="verdict" data-verdict="GO-WITH-CONDITIONS">
     <span class="badge">GO-WITH-CONDITIONS</span>
@@ -84,6 +86,13 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
   <table>
     <thead><tr><th>Proposition</th><th>Quadrant</th><th>Status</th><th>Evidence</th><th>Conf.</th></tr></thead>
     <tbody>
+      <tr class="claim" data-goal-coverage="true" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION">
+        <td>Meeting every DoD criterion achieves the goal</td>
+        <td><span class="tag q-unknown-known">unknown-known</span></td>
+        <td><span class="s-UNSTATED-ASSUMPTION">UNSTATED-ASSUMPTION</span></td>
+        <td>the DoD measures per-key limits, not aggregate exhaustion</td>
+        <td>med</td>
+      </tr>
       <tr class="claim" data-quadrant="known-unknown" data-status="UNVERIFIED">
         <td>The token-bucket limiter sustains 10k req/s without exceeding the 50ms p99 budget.</td>
         <td><span class="tag q-known-unknown">known-unknown</span></td>

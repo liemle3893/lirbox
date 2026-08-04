@@ -61,6 +61,13 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
   <h1>{{PLAN_TITLE}}</h1>
   <div class="sub">plan-check · {{PLAN_CLASS}} · {{DATE}}</div>
 
+  <!-- The plan's GOAL, in the plan's own terms — what it is trying to achieve, not what it does.
+       REQUIRED and machine-checked. Without it the DoD below is unanchored: every criterion can
+       be perfectly checkable and still not achieve the objective, and a GO verdict would mean
+       "the claims hold", never "this plan achieves its goal". If the plan states no goal, say so
+       here and adjudicate that as an UNSTATED-ASSUMPTION. -->
+  <p id="goal"><strong>Goal:</strong> {{PLAN_GOAL}}</p>
+
   <!-- data-verdict MUST be GO | GO-WITH-CONDITIONS | NO-GO and match the claim rows -->
   <div class="verdict" data-verdict="{{VERDICT}}">
     <span class="badge">{{VERDICT}}</span>

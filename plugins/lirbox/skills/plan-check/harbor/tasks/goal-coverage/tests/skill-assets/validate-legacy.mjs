@@ -96,30 +96,6 @@ if (conditions !== open) {
   errors.push(`conditions-to-clear count (${conditions}) != open items (${open})`);
 }
 
-// 7. the plan's GOAL, and one adjudicated row tying the DoD back to it.
-//
-// Both halves or neither. A goal printed in the header is decoration: the failure this catches is
-// a plan whose DoD is fully checkable and does not achieve the objective, and only the
-// adjudication sees that. Kept in validate.mjs rather than left to prose because an optional
-// field is one that gets skipped.
-// \1 backreferences the tag name so the capture runs to the element's OWN closing tag. A plain
-// non-greedy `<\/[a-zA-Z]+>` stops at the first nested close (`</strong>` in the template's
-// "<strong>Goal:</strong> …"), which reads as an empty goal on a perfectly good report.
-const goalEl = [...markup.matchAll(/<([a-zA-Z]+)[^>]*\bid="goal"[^>]*>([\s\S]*?)<\/\1>/g)].map((m) => m[2]);
-if (goalEl.length !== 1) {
-  errors.push(`expected exactly one element with id="goal" (the plan's goal), found ${goalEl.length}`);
-} else if (!goalEl[0].replace(/<[^>]+>/g, '').replace(/Goal:/i, '').trim()) {
-  errors.push('id="goal" is empty — state what the plan is trying to achieve, or say the plan states none');
-}
-
-const goalRows = rows.filter((tag) => attr(tag, 'data-goal-coverage') !== null);
-if (goalRows.length !== 1) {
-  errors.push(
-    `expected exactly one claim row with data-goal-coverage (does meeting every DoD criterion ` +
-      `achieve the goal?), found ${goalRows.length}`
-  );
-}
-
 // 6. machine-readable DoD block (consumed by lirbox:conductor)
 let dodCount = 0;
 const dodBlocks = [...html.matchAll(/<script type="application\/json" id="dod">([\s\S]*?)<\/script>/g)].map((m) => m[1]);

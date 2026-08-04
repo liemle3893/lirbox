@@ -5,14 +5,12 @@ description: This skill should be used to rigorously VERIFY a plan before it is 
 
 # plan-check
 
-A plan is a **map**; the codebase, cluster, and real world are the **territory**.
-The gap between them is *unknowns* — what blows up plans mid-execution. plan-check
-**surfaces the unknowns before they get expensive.** It is an unknowns-finder, not
-a reviewer: it interrogates you claim-by-claim, checks each claim against real
-evidence, hunts the potholes the plan never named, and ends with a self-contained
-HTML report and a **GO / GO-WITH-CONDITIONS / NO-GO** verdict.
+A plan is a **map**; the codebase, cluster and real world are the **territory**. plan-check
+is an unknowns-finder, not a reviewer: it interrogates each claim, checks it against real
+evidence, hunts what the plan never named, and ends with a self-contained HTML report and a
+**GO / GO-WITH-CONDITIONS / NO-GO** verdict.
 
-Every gap is tagged to one quadrant — this keeps the report legible:
+Every gap is tagged to one quadrant (`data-quadrant`):
 
 | Quadrant | In a plan | How plan-check handles it |
 |---|---|---|
@@ -52,6 +50,8 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
 ## Workflow
 
 1. **Ingest & classify** the plan: `ops` / `code` / `mixed`. State it back — it routes §3.
+   Capture the plan's **goal** in its own terms (what it is trying to achieve, not what it does);
+   if it states none, say so and adjudicate that as an `UNSTATED-ASSUMPTION`.
 2. **Decompose** into atomic checkable propositions — not the plan as a blob:
    preconditions, each step's claimed effect, ordering & hidden dependencies,
    expected outcomes, rollback, and the **unstated assumptions** it drags in.
@@ -77,7 +77,8 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
    `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/references/interrogation.md`.
 6. **Adjudicate** — every proposition gets a **quadrant** + **status**: `VERIFIED` ·
    `REFUTED` · `UNVERIFIED` (name what would resolve it) · `UNSTATED-ASSUMPTION` ·
-   `BLIND-SPOT-RISK`.
+   `BLIND-SPOT-RISK`. **One row is mandatory** (`data-goal-coverage`, machine-checked): *if every
+   DoD criterion were met, would the stated goal be achieved?*
 7. **Verdict** — `NO-GO` if any `REFUTED` on a critical path; else
    `GO-WITH-CONDITIONS` if any open item (`UNVERIFIED` / `BLIND-SPOT-RISK`) remains;
    else `GO`. Every open item becomes a condition-to-clear. Tag each open row
@@ -109,12 +110,10 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
 
 ## Quality bar
 
-- **Unknowns-first.** The report's value is the unknown-knowns and unknown-unknowns
-  it surfaced, not the checklist it ran — lead with them.
-- **Evidence, not vibes.** Every `VERIFIED` cites a source (doc URL, `file:line`,
-  command output). No source → not verified; `UNVERIFIED` is a valid answer.
+- **Unknowns-first.** Lead with the unknown-knowns and unknown-unknowns, not the checklist.
+- **Evidence, not vibes.** Every `VERIFIED` cites a source (doc URL, `file:line`, command
+  output). No source → `UNVERIFIED`, which is a valid answer.
 - **Honest verdict.** One `REFUTED` critical path is `NO-GO` — don't soften it.
-- **A DoD or no clean GO.** Every report carries the `#dod` block (validate.mjs enforces it).
-  A plan that never stated verifiable success criteria gets a `BLIND-SPOT-RISK` — "done" without
-  a meter is vibes.
+- **A DoD or no clean GO.** Every report carries the `#dod` block (validate.mjs enforces it);
+  a plan that stated no success criteria gets a `BLIND-SPOT-RISK`.
 - **Self-contained report.** No external CSS/JS/fonts/images; opens offline.

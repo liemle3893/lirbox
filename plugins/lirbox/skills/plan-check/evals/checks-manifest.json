@@ -40,6 +40,33 @@
         }
       ]
     },
+    "goal-coverage": {
+      "expect": "green",
+      "note": "Added 2026-08-03. plan-check had NO concept of the plan's goal -- on 9c86ced the only /goal/i match across SKILL.md, template.html and both references was incidental prose. It fell out of the skill's own framing: step 2 keeps only 'atomic checkable propositions' and a goal has no truth value, so it never survived decomposition. Cost: the DoD was unanchored (every criterion checkable, none of them achieving the objective, and the report blind to it), GO meant 'the claims hold' rather than 'this plan achieves its goal', and lirbox:conductor seeds its DoDGate from #dod so it verified faithfully toward a target nobody validated. Guards BOTH halves deliberately -- a goal line without the adjudication is decoration, and decoration is exactly what measured no-better last time.",
+      "mutations": [
+        {
+          "why": "drops the goal slot from the report template, so there is nowhere to state the objective",
+          "env": "PLAN_CHECK_TEMPLATE",
+          "file": "assets/template.html",
+          "find": "<p id=\"goal\"><strong>Goal:</strong> {{PLAN_GOAL}}</p>",
+          "replace": "<p>{{PLAN_GOAL}}</p>"
+        },
+        {
+          "why": "makes the goal-coverage row optional, which is the same as absent -- the adjudication is the half that catches a plan solving the wrong problem",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "const goalRows = rows.filter((tag) => attr(tag, 'data-goal-coverage') !== null);",
+          "replace": "const goalRows = [null];"
+        },
+        {
+          "why": "removes the SKILL.md instruction tying the DoD back to the goal, leaving the validator to demand a row nothing tells the model to produce",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "*if every\n   DoD criterion were met, would the stated goal be achieved?*",
+          "replace": "*is the ledger complete?*"
+        }
+      ]
+    },
     "execution-shape": {
       "expect": "green",
       "note": "Added 2026-08-03. plan-check verified whether a plan was CORRECT but never whether its declared task graph was HONEST -- and an agentic runner dispatches from those declarations literally, so an undeclared edge runs concurrently what must not be. Found in two plans plan-check had itself reviewed: a task declaring 'Consumes: nothing' whose own step 6 said 'run it after Task 1 has landed', and one function claimed by five of eight tasks with no task declaring the overlap. Guards the invariant that the declared graph is tested against the file-level truth the plan itself states -- NOT that the plan be parallel. Parallelism is an output of an honest graph; asking for it directly produces a plan claiming independence it does not have.",
@@ -55,14 +82,14 @@
           "why": "deletes the collision test from the blind-spot checklist while leaving the section heading intact -- a check anchored to the heading would not notice",
           "env": "PLAN_CHECK_BLIND_SPOT_MD",
           "file": "references/blind-spot.md",
-          "find": "- **A file claimed by more than one task** — invert the `Files:` lists. Any file with two\n  or more owning tasks is a serialization point the plan never declared, and two tasks\n  editing one *function* is a guaranteed conflict, not a risk.",
+          "find": "- **A file claimed by more than one task** — an undeclared serialization point. Report the\n  table; merging the tasks or declaring them serial is the author's call.",
           "replace": "- **Files** — check them."
         },
         {
           "why": "deletes the undeclared-edge test (prose edge vs dependency block), the failure mode a runner actually trips on",
           "env": "PLAN_CHECK_BLIND_SPOT_MD",
           "file": "references/blind-spot.md",
-          "find": "- **Undeclared dependency edges** — an edge stated in step prose (\"run this after Task 1\n  has landed\") while the task's own dependency block says it consumes nothing. The block\n  is what a runner reads; the prose is invisible to it. `UNSTATED-ASSUMPTION`.",
+          "find": "- **Undeclared dependency edges** — stated in step prose, absent from the task's own\n  dependency block. The block is what a runner reads. `UNSTATED-ASSUMPTION`.",
           "replace": "- **Edges** — look at them."
         }
       ]
