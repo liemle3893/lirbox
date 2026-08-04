@@ -46,6 +46,7 @@ const report = (dodBlock) => `<!DOCTYPE html><html><head><meta charset="utf-8"><
   <tr class="claim" data-goal-coverage="true" data-quadrant="known-known" data-status="VERIFIED"><td>the DoD, fully met, achieves the goal</td></tr>
 </tbody></table>
 ${dodBlock}
+<script type="application/json" id="taskgraph">{"nodes":[],"edges":[],"levels":[]}</script>
 </body></html>
 `;
 

@@ -1,21 +1,31 @@
 #!/bin/bash
 # STATIC VERIFIER for plan-check__execution-shape. Deterministic only — no judge, no model calls.
 #
-# Grades two things the plan under test plants, both derivable from the plan's own text:
+# Grades what the plan under test plants, all of it derivable from the plan's own text:
 #   * a FILE COLLISION: Tasks 2 and 3 both modify server/internal/schedules/worker.go, and
 #     neither declares the overlap. Task 3 says "Consumes: nothing".
 #   * an UNDECLARED EDGE: Task 4's Interfaces block says "Consumes: nothing" while its own
 #     Step 3 says "Run this after Task 2 has landed".
+#   * REAL PARALLELISM the plan denies: its "Implementation order" flattens the work into
+#     1->2->3->4, but Tasks 2 and 3 have no data dependency on each other. They share a file,
+#     which under a runner giving each task its own worktree is a MERGE at integration — not an
+#     ordering constraint. A report that serializes them has made the plan slower than the truth.
 #
-# Both findings must land as CLAIM ROWS, not as loose prose — a report that merely quotes the
-# plan somewhere in its body has not adjudicated anything. Every content assertion below is
-# scoped to the <tr class="claim"> blocks for exactly that reason.
+# Findings must land as CLAIM ROWS, not loose prose — a report that merely quotes the plan
+# somewhere has adjudicated nothing. Content assertions are scoped to <tr class="claim"> blocks.
+#
+# DIMENSION DESIGN. Two of the dimensions below are GATED on the taskgraph feature existing (a
+# baseline emits no such block, so it scores 0 by construction and its "lift" measures the `if`,
+# not the model). The two that carry real evidence are `concurrency_claimed` and
+# `contention_classified`: each is satisfied by ORDINARY PROSE in a claim row as readily as by the
+# new JSON, so a baseline run can score them. Read those two first.
 set -uo pipefail
 OUT=/logs/verifier; mkdir -p "$OUT"
 
-report_exists=0; validator_passes=0; collision_reported=0
+report_exists=0; validator_passes_legacy=0; collision_reported=0
 undeclared_edge_reported=0; fix_tags_present=0; verdict_not_go=0
-plan_untouched=0
+plan_untouched=0; taskgraph_block=0; taskgraph_levels_valid=0
+concurrency_claimed=0; contention_classified=0
 
 # The skill names its own report plan-check-<slug>.html; do not over-constrain the slug.
 F=$(ls /app/plan-check-*.html 2>/dev/null | head -1)
@@ -33,17 +43,26 @@ if [ -f /opt/fixture/plan.md ] && cmp -s /opt/fixture/plan.md /app/plan.md; then
 fi
 
 if [ "$report_exists" = 1 ]; then
-  # 1. the report contract the skill ships its own validator for
-  node /tests/skill-assets/validate.mjs "$F" >"$OUT/validate.log" 2>&1 && validator_passes=1
+  # NOT-WORSE dimension: the PRE-taskgraph report contract, frozen here on purpose so BOTH arms
+  # can satisfy it. Grading a baseline against the CURRENT validator would only re-measure "the
+  # baseline predates the change" — that is the `if`, not the model.
+  node /tests/skill-assets/validate-legacy.mjs "$F" >"$OUT/validate.log" 2>&1 && validator_passes_legacy=1
 
-  # 2-4. content assertions, scoped to claim rows only
   node -e '
     const fs = require("fs");
     const html = fs.readFileSync(process.argv[1], "utf8");
-    // Claim rows only: <tr class="claim" ...> ... </tr>. A finding must BE a row.
-    const rows = [...html.matchAll(/<tr\b[^>]*\bclass="[^"]*\bclaim\b[^"]*"[^>]*>([\s\S]*?)<\/tr>/g)]
+    // MUST strip <style> first: the template styles the badge with attribute selectors
+    // (.verdict[data-verdict="GO"]{...}), so a raw grep matches CSS in every report ever
+    // produced. validate.mjs strips <style> for the same reason; keep the two in step.
+    const markup = html
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<!--[\s\S]*?-->/g, "");
+
+    // Claim rows only: a finding must BE a row.
+    const rows = [...markup.matchAll(/<tr\b[^>]*\bclass="[^"]*\bclaim\b[^"]*"[^>]*>([\s\S]*?)<\/tr>/g)]
       .map((m) => m[0]);
-    const text = rows.join("\n").replace(/<[^>]+>/g, " ");
+    const rowText = (r) => r.replace(/<[^>]+>/g, " ");
+    const text = rows.map(rowText).join("\n");
 
     // The collided file, named in a row. Tasks 2 and 3 both modify it.
     const collision = /worker\.go/i.test(text);
@@ -52,51 +71,98 @@ if [ "$report_exists" = 1 ]; then
     // Require BOTH task identifiers in ONE row, so a report listing every task somewhere in the
     // ledger cannot satisfy this by accident.
     const edge = rows.some((r) => {
-      const t = r.replace(/<[^>]+>/g, " ");
+      const t = rowText(r);
       return /task\s*4/i.test(t) && /task\s*2/i.test(t);
     });
 
-    // Open rows carry a fix disposition (SKILL.md step 7).
     const fixTags = /fix:\s*(mechanical|needs-decision)/i.test(html);
-
-    // A plan carrying two undeclared structural defects cannot be a clean GO.
-    // MUST strip <style> first: the template styles the badge with attribute selectors
-    // (.verdict[data-verdict="GO"]{...}), so a raw grep matches CSS in every report ever
-    // produced and this check reads 0 unconditionally — a false red that no agent can clear.
-    // validate.mjs strips <style> for the same reason; keep the two in step.
-    const markup = html
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<!--[\s\S]*?-->/g, "");
     const verdictNotGo = !/data-verdict="GO"/.test(markup);
 
-    const out = { collision, edge, fixTags, verdictNotGo };
+    // --- the machine-readable graph (GATED: a baseline has no such concept) -------------------
+    let graph = null;
+    const m = markup.match(/<script[^>]*\bid="taskgraph"[^>]*>([\s\S]*?)<\/script>/);
+    if (m) { try { graph = JSON.parse(m[1]); } catch (e) { graph = null; } }
+    const nodes = graph && Array.isArray(graph.nodes) ? graph.nodes : [];
+    const edges = graph && Array.isArray(graph.edges) ? graph.edges : [];
+    const levels = graph && Array.isArray(graph.levels) ? graph.levels : [];
+    // The plan has four tasks; a graph that models fewer has not modelled THIS plan.
+    const taskgraphBlock = nodes.length >= 4;
+    // Levels must partition the nodes and stay consistent with the needs edges — the same
+    // property validate.mjs enforces, restated here so the grader does not depend on which
+    // validator shipped in the container.
+    const ids = new Set(nodes.map((n) => n && n.id).filter(Boolean));
+    const flat = levels.flat().map(String);
+    const idx = new Map();
+    levels.forEach((l, i) => (Array.isArray(l) ? l : []).forEach((id) => idx.set(String(id), i)));
+    const partitions = flat.length === ids.size && flat.every((id) => ids.has(id)) && new Set(flat).size === flat.length;
+    const needsRespected = edges
+      .filter((e) => e && e.kind === "needs")
+      .every((e) => idx.has(String(e.from)) && idx.has(String(e.to)) && idx.get(String(e.from)) < idx.get(String(e.to)));
+    const taskgraphLevelsValid = taskgraphBlock && levels.length > 0 && partitions && needsRespected;
+
+    // --- the two UNGATED dimensions: satisfiable in plain prose, so a baseline can score ------
+    // Did the report claim that some of this work runs CONCURRENTLY, against the plan`s own
+    // "Implementation order: Task 1, then Task 2, then Task 3, then Task 4"?
+    const PARALLEL = /parallel|concurrent|at the same time|independent(ly)?|need not (?:be )?(?:run )?(?:in )?(?:sequen|order)|no ordering|same level/i;
+    const concurrencyInProse = rows.some((r) => {
+      const t = rowText(r);
+      return /task\s*2/i.test(t) && /task\s*3/i.test(t) && PARALLEL.test(t);
+    });
+    const concurrencyInGraph = levels.some((l) => Array.isArray(l) && l.length >= 2);
+    const concurrencyClaimed = concurrencyInProse || concurrencyInGraph;
+
+    // Was the shared file classified as a MERGE concern rather than an ordering constraint?
+    const MERGE = /merge|integrat|separate worktree|own worktree|not (?:a )?(?:real )?depend|no data depend/i;
+    const contentionInProse = rows.some((r) => {
+      const t = rowText(r);
+      return /worker\.go/i.test(t) && MERGE.test(t);
+    });
+    const contentionInGraph = edges.some((e) => e && e.kind === "contention");
+    const contentionClassified = contentionInProse || contentionInGraph;
+
+    const out = {
+      collision, edge, fixTags, verdictNotGo,
+      taskgraphBlock, taskgraphLevelsValid, concurrencyClaimed, contentionClassified,
+    };
     fs.writeFileSync("/tmp/content.json", JSON.stringify(out));
     console.log(JSON.stringify(out));
   ' "$F" >>"$OUT/validate.log" 2>&1
 
   if [ -f /tmp/content.json ]; then
-    grep -q '"collision":true' /tmp/content.json && collision_reported=1
-    grep -q '"edge":true'      /tmp/content.json && undeclared_edge_reported=1
-    grep -q '"fixTags":true'   /tmp/content.json && fix_tags_present=1
-    grep -q '"verdictNotGo":true' /tmp/content.json && verdict_not_go=1
+    grep -q '"collision":true'            /tmp/content.json && collision_reported=1
+    grep -q '"edge":true'                 /tmp/content.json && undeclared_edge_reported=1
+    grep -q '"fixTags":true'              /tmp/content.json && fix_tags_present=1
+    grep -q '"verdictNotGo":true'         /tmp/content.json && verdict_not_go=1
+    grep -q '"taskgraphBlock":true'       /tmp/content.json && taskgraph_block=1
+    grep -q '"taskgraphLevelsValid":true' /tmp/content.json && taskgraph_levels_valid=1
+    grep -q '"concurrencyClaimed":true'   /tmp/content.json && concurrency_claimed=1
+    grep -q '"contentionClassified":true' /tmp/content.json && contention_classified=1
   fi
 fi
 
-partial=$(( report_exists + validator_passes + collision_reported + undeclared_edge_reported + fix_tags_present + verdict_not_go + plan_untouched ))
+partial=$(( report_exists + validator_passes_legacy + collision_reported + undeclared_edge_reported \
+  + fix_tags_present + verdict_not_go + plan_untouched + taskgraph_block + taskgraph_levels_valid \
+  + concurrency_claimed + contention_classified ))
 reward=0
-[ "$report_exists" = 1 ] && [ "$validator_passes" = 1 ] && [ "$collision_reported" = 1 ] \
+[ "$report_exists" = 1 ] && [ "$validator_passes_legacy" = 1 ] && [ "$collision_reported" = 1 ] \
   && [ "$undeclared_edge_reported" = 1 ] && [ "$fix_tags_present" = 1 ] \
-  && [ "$verdict_not_go" = 1 ] && [ "$plan_untouched" = 1 ] && reward=1
+  && [ "$verdict_not_go" = 1 ] && [ "$plan_untouched" = 1 ] && [ "$taskgraph_block" = 1 ] \
+  && [ "$taskgraph_levels_valid" = 1 ] && [ "$concurrency_claimed" = 1 ] \
+  && [ "$contention_classified" = 1 ] && reward=1
 
 cat > "$OUT/reward.json" <<JSON
 {
   "report_exists": $report_exists,
-  "validator_passes": $validator_passes,
+  "validator_passes_legacy": $validator_passes_legacy,
   "collision_reported": $collision_reported,
   "undeclared_edge_reported": $undeclared_edge_reported,
   "fix_tags_present": $fix_tags_present,
   "verdict_not_go": $verdict_not_go,
   "plan_untouched": $plan_untouched,
+  "taskgraph_block": $taskgraph_block,
+  "taskgraph_levels_valid": $taskgraph_levels_valid,
+  "concurrency_claimed": $concurrency_claimed,
+  "contention_classified": $contention_classified,
   "partial": $partial,
   "reward": $reward
 }

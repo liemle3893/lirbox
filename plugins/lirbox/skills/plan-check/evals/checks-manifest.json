@@ -67,6 +67,68 @@
         }
       ]
     },
+    "task-graph": {
+      "expect": "green",
+      "note": "Added 2026-08-04. execution-shape taught plan-check to FIND a dishonest task graph, but the finding landed as prose in a claim row -- unreadable by anything downstream, and wrong about the one runner this repo ships: blind-spot.md called a file claimed by two tasks 'an undeclared serialization point' while conductor's own planner prompt says 'Touching the SAME file is NOT a dependency: every item runs in its OWN worktree on its OWN branch'. Acting on the old advice makes a plan MORE serial than the work is. Guards two halves, worthless apart: (a) levels are DERIVED -- validate.mjs re-layers the needs edges and rejects a mismatch, so a report can neither invent serialization nor claim parallelism its edges forbid; (b) needs and contention are different constraints, and a contention edge must NOT split its tasks across levels. Asserted by EXECUTING validate.mjs, not grepping it -- the three prior checks in this skill each shipped a FALSE-GREEN from a token surviving in a neighbour.",
+      "mutations": [
+        {
+          "why": "removes the taskgraph block from the report template, so there is nowhere to declare the execution shape",
+          "env": "PLAN_CHECK_TEMPLATE",
+          "file": "assets/template.html",
+          "find": "<script type=\"application/json\" id=\"taskgraph\">",
+          "replace": "<script type=\"application/json\" id=\"othergraph\">"
+        },
+        {
+          "why": "drops the SKILL.md instruction naming both edge kinds, so nothing tells the model contention differs from needs",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "Each edge is\n   `needs` (this task needs the other's *output*) or `contention` (both write one file: a merge\n   cost, not an order, since each task gets its own worktree) and carries a `why`.",
+          "replace": "Declare the edges."
+        },
+        {
+          "why": "deletes only the DERIVED clause, leaving the edge kinds -- proves the check is anchored to levels-are-computed and not merely to the word 'derive', which step 8 already uses for the DoD",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "`levels` is\n   **derived** — validate.mjs recomputes it from the `needs` edges — so you can neither invent\n   serialization nor claim parallelism the edges forbid.",
+          "replace": "State the levels."
+        },
+        {
+          "why": "reverts the blind-spot bullet to calling any shared file a serialization point -- the guidance that contradicts conductor and costs real parallelism",
+          "env": "PLAN_CHECK_BLIND_SPOT_MD",
+          "file": "references/blind-spot.md",
+          "find": "a collision, but classify it before you serialize\n  anything. Where each task gets its own worktree (`lirbox:conductor` does), it is `contention`:\n  a merge cost at integration, not an ordering constraint — recording it as a dependency\n  serializes work that has none. Where the tasks share one working tree it *is* an order.\n  Report the table either way; an unclassified collision is the finding.",
+          "replace": "an undeclared serialization point. Declaring the tasks serial is the author's call."
+        },
+        {
+          "why": "makes the taskgraph block optional, so a report can stay silent on what runs concurrently",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "if (tgBlocks.length !== 1) {",
+          "replace": "if (tgBlocks.length === 0) { /* optional */ } else if (tgBlocks.length !== 1) {"
+        },
+        {
+          "why": "stops levels being derived, so a report may assert any shape -- including a fully serial one no edge justifies",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "        if (!same) {",
+          "replace": "        if (false) {"
+        },
+        {
+          "why": "drops the unclassified-collision rule, so a plan whose tasks silently share a file reads as independent",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "          if (!linked.has(key)) {",
+          "replace": "          if (false) {"
+        },
+        {
+          "why": "lets a contention edge constrain levels -- the regression that hands a runner a needlessly serial plan while every other rule still passes",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "      if (e.kind === 'needs') needs.push([from, to]);",
+          "replace": "      needs.push([from, to]);"
+        }
+      ]
+    },
     "execution-shape": {
       "expect": "green",
       "note": "Added 2026-08-03. plan-check verified whether a plan was CORRECT but never whether its declared task graph was HONEST -- and an agentic runner dispatches from those declarations literally, so an undeclared edge runs concurrently what must not be. Found in two plans plan-check had itself reviewed: a task declaring 'Consumes: nothing' whose own step 6 said 'run it after Task 1 has landed', and one function claimed by five of eight tasks with no task declaring the overlap. Guards the invariant that the declared graph is tested against the file-level truth the plan itself states -- NOT that the plan be parallel. Parallelism is an output of an honest graph; asking for it directly produces a plan claiming independence it does not have.",
@@ -82,7 +144,7 @@
           "why": "deletes the collision test from the blind-spot checklist while leaving the section heading intact -- a check anchored to the heading would not notice",
           "env": "PLAN_CHECK_BLIND_SPOT_MD",
           "file": "references/blind-spot.md",
-          "find": "- **A file claimed by more than one task** — an undeclared serialization point. Report the\n  table; merging the tasks or declaring them serial is the author's call.",
+          "find": "- **A file claimed by more than one task** — a collision, but classify it before you serialize\n  anything. Where each task gets its own worktree (`lirbox:conductor` does), it is `contention`:\n  a merge cost at integration, not an ordering constraint — recording it as a dependency\n  serializes work that has none. Where the tasks share one working tree it *is* an order.\n  Report the table either way; an unclassified collision is the finding.",
           "replace": "- **Files** — check them."
         },
         {

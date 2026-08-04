@@ -58,8 +58,11 @@ plan's own `Files:` lists into a file → tasks table; that table is the evidenc
 
 - **Undeclared dependency edges** — stated in step prose, absent from the task's own
   dependency block. The block is what a runner reads. `UNSTATED-ASSUMPTION`.
-- **A file claimed by more than one task** — an undeclared serialization point. Report the
-  table; merging the tasks or declaring them serial is the author's call.
+- **A file claimed by more than one task** — a collision, but classify it before you serialize
+  anything. Where each task gets its own worktree (`lirbox:conductor` does), it is `contention`:
+  a merge cost at integration, not an ordering constraint — recording it as a dependency
+  serializes work that has none. Where the tasks share one working tree it *is* an order.
+  Report the table either way; an unclassified collision is the finding.
 - **Ordering prose that hides a graph** — an "implementation order" section flattens a DAG
   into a line. Ask which edges are real.
 - **Repo rules that force collisions** — a convention obliging one change to touch N files
