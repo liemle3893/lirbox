@@ -1,0 +1,20 @@
+[task]
+name = "lirbox/plan-check__goal-coverage"
+version = "1.0.0"
+description = "plan-check skill task: a plan whose DoD is fully checkable yet does not achieve its stated goal — the report must name the mismatch"
+
+[metadata]
+skill = "plan-check"
+difficulty = "hard"
+category = "plan-verification"
+
+[environment]
+cpus = 2
+memory_mb = 2048
+build_timeout_sec = 900
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0
