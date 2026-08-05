@@ -52,14 +52,14 @@ def _fail_edges(g, gate):
     ]
 
 
-@criterion("graph_exists")
+@criterion(description="a parseable loom graph was authored under .loom/")
 def graph_exists(workspace: Path) -> bool:
     """A parseable graph with a start, a terminal, nodes and edges."""
     g = _graph(workspace)
     return bool(g and g.get("start") and g.get("terminal") and g.get("nodes") and g.get("edges"))
 
 
-@criterion("two_gates_enforced")
+@criterion(description="two gate nodes exist and both are listed in invariants.mustCross")
 def two_gates_enforced(workspace: Path) -> bool:
     """Both required gates exist as kind=gate AND are listed in invariants.mustCross.
 
@@ -73,7 +73,7 @@ def two_gates_enforced(workspace: Path) -> bool:
     return len(gates) >= 2 and len(_must(g) & gates) >= 2
 
 
-@criterion("failure_edges_route_back")
+@criterion(description="every enforced gate's failing edge targets an earlier node, never the terminal")
 def failure_edges_route_back(workspace: Path) -> bool:
     """Every enforced gate has a failing out-edge, and it targets an EARLIER node, never the terminal.
 
@@ -102,7 +102,7 @@ def failure_edges_route_back(workspace: Path) -> bool:
     return True
 
 
-@criterion("distinct_back_targets")
+@criterion(description="the two gates re-enter at DIFFERENT stages, one of them at planning")
 def distinct_back_targets(workspace: Path) -> bool:
     """The two gates must NOT re-enter at the same place, and one must re-enter at PLANNING.
 
@@ -129,7 +129,7 @@ def distinct_back_targets(workspace: Path) -> bool:
     return any(kind.get(t) in PLAN_KINDS for t in flat)
 
 
-@criterion("back_edges_carry_findings")
+@criterion(description="every back-edge carries the gate's findings forward")
 def back_edges_carry_findings(workspace: Path) -> bool:
     """A back-edge with no `carry` loops blind — the re-entered node never learns why it failed.
 
