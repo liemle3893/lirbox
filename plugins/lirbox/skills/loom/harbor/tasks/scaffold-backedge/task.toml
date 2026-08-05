@@ -1,0 +1,38 @@
+# loom's first Harbor task. The graph is authored, never executed.
+#
+# WHY THIS TASK EXISTS (2026-08-06). loom's tier-2 floor already proves graph-core.mjs handles
+# back-edges (evals/checks/gate-failure-edges-return.check.mjs) and that gates cannot be bypassed
+# (gate-dominance-not-bypassable.check.mjs). Neither says anything about whether a model GIVEN the
+# skill builds a graph that uses them for a goal it has never seen — the artifact-level checks
+# would stay green with SKILL.md trimmed to nothing.
+#
+# The discriminator is `distinct_back_targets` in tests/reward/checks.py: the stock delivery.json
+# seed already ships two mustCross gates with carrying back-edges, so a bare `cp` of the seed
+# scores on every other criterion. It routes BOTH gates back to Implement. This task's instruction
+# requires the security gate to route back to PLAN instead, which a seed copy cannot satisfy.
+
+[task]
+name = "lirbox/loom__scaffold-backedge"
+version = "1.0.0"
+description = "loom must author a graph whose gate failures route BACK to the right earlier stage, with gates un-bypassable"
+
+[metadata]
+skill = "loom"
+difficulty = "medium"
+category = "agent-workflow-authoring"
+
+[environment]
+cpus = 2
+memory_mb = 4096
+
+[agent]
+timeout_sec = 900.0
+
+[verifier]
+timeout_sec = 900.0
+
+# Only the subscription token is declared. Harbor validates this table BEFORE the run and aborts on
+# any unset variable, so declaring ANTHROPIC_API_KEY here would make the task unrunnable for anyone
+# holding only a subscription token; pass an API key ad hoc with --ve instead.
+[verifier.env]
+CLAUDE_CODE_OAUTH_TOKEN = "${CLAUDE_CODE_OAUTH_TOKEN}"
