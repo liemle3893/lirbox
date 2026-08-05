@@ -67,6 +67,47 @@
         }
       ]
     },
+    "fix-disposition": {
+      "expect": "green",
+      "note": "Added 2026-08-05. SKILL.md step 7 has demanded a `fix:` disposition on every open row since #57 and the model largely ignored it: MEASURED at 4/10 in BOTH arms of a 20-trial paired Harbor run on execution-shape (2026-08-04), with a LENIENT grader that scored 1 for a single `fix:` string anywhere in the file -- six of ten reports per arm had none at all, in runs whose reports carried 6-12 open rows each. Every other element of the same contract sat at ~100% over the same runs (#dod 10/10, id=goal 20/20, data-goal-coverage 20/20, #taskgraph 10/10). The one thing they share and this lacked: a template slot and a validate.mjs rule. SKILL.md step 9 loops the model until validate.mjs exits 0, so a rule living only in prose never enters the loop. Guards the invariant PER ROW on purpose -- a file-level `fix:` grep is the exact leniency the Harbor grader had, and it lets one tagged row excuse ten untagged ones.",
+      "mutations": [
+        {
+          "why": "removes the disposition slot from the claim-row specimen, so nothing reaches the model at the moment it writes the HTML -- the precise gap that measured 4/10",
+          "env": "PLAN_CHECK_TEMPLATE",
+          "file": "assets/template.html",
+          "find": "{{STATUS_DETAIL}} <span class=\"fix\">fix: {{FIX_DISPOSITION}}</span></td>",
+          "replace": "{{STATUS_DETAIL}}</td>"
+        },
+        {
+          "why": "drops the restatement from step 8 (the step that writes the report), leaving it only in step 7 where it already measured 4/10",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "   Carry step 7's disposition onto **every open row** — `<span class=\"fix\">fix: mechanical</span>`\n   or `fix: needs-decision`; machine-checked, and drop the span on rows that are not open.\n",
+          "replace": ""
+        },
+        {
+          "why": "removes the validator rule entirely, putting the convention back in prose-only territory",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "if (untagged.length) {",
+          "replace": "if (false) {"
+        },
+        {
+          "why": "makes the rule per-FILE instead of per-row -- the leniency the Harbor grader had, where one tagged row excuses every untagged one",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "  .filter(({ i, s }) => OPEN.has(s) && !FIX.test(fullRows[i - 1]));",
+          "replace": "  .filter(({ s }) => OPEN.has(s) && !FIX.test(markup));"
+        },
+        {
+          "why": "accepts any `fix:` value, so 'fix: later' or 'fix: TODO' passes as a disposition and the mechanical/needs-decision split stops meaning anything",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "const FIX = /\\bfix:\\s*(mechanical|needs-decision)\\b/i;",
+          "replace": "const FIX = /\\bfix:/i;"
+        }
+      ]
+    },
     "task-graph": {
       "expect": "green",
       "note": "Added 2026-08-04. execution-shape taught plan-check to FIND a dishonest task graph, but the finding landed as prose in a claim row -- unreadable by anything downstream, and wrong about the one runner this repo ships: blind-spot.md called a file claimed by two tasks 'an undeclared serialization point' while conductor's own planner prompt says 'Touching the SAME file is NOT a dependency: every item runs in its OWN worktree on its OWN branch'. Acting on the old advice makes a plan MORE serial than the work is. Guards two halves, worthless apart: (a) levels are DERIVED -- validate.mjs re-layers the needs edges and rejects a mismatch, so a report can neither invent serialization nor claim parallelism its edges forbid; (b) needs and contention are different constraints, and a contention edge must NOT split its tasks across levels. Asserted by EXECUTING validate.mjs, not grepping it -- the three prior checks in this skill each shipped a FALSE-GREEN from a token surviving in a neighbour.",

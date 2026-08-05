@@ -23,6 +23,7 @@
 //   7. The plan's goal (id="goal") + exactly one data-goal-coverage claim row.
 //   8. Exactly one <script type="application/json" id="taskgraph"> block: the plan's
 //      declared execution shape, with `levels` DERIVED from the edges, not asserted.
+//   9. Every OPEN row carries a fix disposition: `fix: mechanical` | `fix: needs-decision`.
 
 import { readFileSync } from 'node:fs';
 
@@ -97,6 +98,29 @@ if (verdicts.length === 1 && rows.length > 0) {
 const conditions = (markup.match(/class="[^"]*\bcondition\b[^"]*"/g) || []).length;
 if (conditions !== open) {
   errors.push(`conditions-to-clear count (${conditions}) != open items (${open})`);
+}
+
+// 9. Every OPEN row carries a fix disposition (SKILL.md step 7).
+//
+// This rule exists because the convention did NOT survive without it. Measured over 20 paired
+// Harbor trials, `fix:` appeared in only 4 of 10 reports per arm — while every OTHER element of
+// this contract (#dod, id="goal", data-goal-coverage, #taskgraph) landed at ~100%. The difference
+// was not the instruction; it was that step 9 loops the model until validate.mjs exits 0, and a
+// rule living only in SKILL.md prose never enters that loop.
+//
+// Needs FULL row bodies, not the opening tags `rows` holds — the disposition lives in the Status
+// cell. Rows do not nest, so the non-greedy capture is safe.
+const fullRows = [...markup.matchAll(/<tr\b[^>]*\bclass="[^"]*\bclaim\b[^"]*"[^>]*>[\s\S]*?<\/tr>/g)].map((m) => m[0]);
+const FIX = /\bfix:\s*(mechanical|needs-decision)\b/i;
+const untagged = fullRows
+  .map((r, i) => ({ i: i + 1, s: attr(r, 'data-status') }))
+  .filter(({ i, s }) => OPEN.has(s) && !FIX.test(fullRows[i - 1]));
+if (untagged.length) {
+  errors.push(
+    `${untagged.length} open row(s) carry no fix disposition (row ${untagged.map((u) => u.i).join(', ')}) — ` +
+      `every UNVERIFIED / BLIND-SPOT-RISK row needs "fix: mechanical" (the repair is determined by ` +
+      `the finding) or "fix: needs-decision"; without it a reader cannot tell what can be applied`
+  );
 }
 
 // 7. the plan's GOAL, and one adjudicated row tying the DoD back to it.

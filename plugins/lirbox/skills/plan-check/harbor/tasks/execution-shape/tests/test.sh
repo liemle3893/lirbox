@@ -16,13 +16,18 @@
 #
 # DIMENSION DESIGN. Two of the dimensions below are GATED on the taskgraph feature existing (a
 # baseline emits no such block, so it scores 0 by construction and its "lift" measures the `if`,
-# not the model). The two that carry real evidence are `concurrency_claimed` and
-# `contention_classified`: each is satisfied by ORDINARY PROSE in a claim row as readily as by the
-# new JSON, so a baseline run can score them. Read those two first.
+# not the model). The ones that carry real evidence are `concurrency_claimed`,
+# `contention_classified` and the two fix-disposition dimensions: each is satisfied by ORDINARY
+# markup a baseline can produce — nothing about them requires a feature to exist. Read those first.
+#
+# `fix_tags_present` (lenient: one `fix:` anywhere) and `fix_tags_complete` (strict: EVERY open row
+# carries one) are kept side by side deliberately. The lenient one measured 4/10 in both arms on
+# 2026-08-04 and is frozen so that number stays comparable across runs; the strict one is the
+# invariant SKILL.md step 7 actually states.
 set -uo pipefail
 OUT=/logs/verifier; mkdir -p "$OUT"
 
-report_exists=0; validator_passes_legacy=0; collision_reported=0
+report_exists=0; validator_passes_legacy=0; collision_reported=0; fix_tags_complete=0
 undeclared_edge_reported=0; fix_tags_present=0; verdict_not_go=0
 plan_untouched=0; taskgraph_block=0; taskgraph_levels_valid=0
 concurrency_claimed=0; contention_classified=0
@@ -75,7 +80,19 @@ if [ "$report_exists" = 1 ]; then
       return /task\s*4/i.test(t) && /task\s*2/i.test(t);
     });
 
+    // LENIENT, kept unchanged on purpose: one `fix:` anywhere in the file scores 1. It measured
+    // 4/10 in both arms on 2026-08-04, and keeping it identical is what makes that number
+    // comparable across runs.
     const fixTags = /fix:\s*(mechanical|needs-decision)/i.test(html);
+
+    // STRICT: the invariant SKILL.md step 7 actually states — EVERY open row carries a
+    // disposition. The lenient test above lets one tagged row excuse ten untagged ones, which is
+    // precisely how a reader loses the ability to tell what can be applied. Vacuously true for a
+    // report with no open rows; every observed report carried 6-12, and a free 1 in the baseline
+    // arm only shrinks the measured lift, so the bias is conservative.
+    const OPEN = new Set(["UNVERIFIED", "BLIND-SPOT-RISK"]);
+    const openRows = rows.filter((r) => OPEN.has((r.match(/data-status="([^"]*)"/) || [])[1]));
+    const fixComplete = openRows.every((r) => /\bfix:\s*(mechanical|needs-decision)\b/i.test(r));
     const verdictNotGo = !/data-verdict="GO"/.test(markup);
 
     // --- the machine-readable graph (GATED: a baseline has no such concept) -------------------
@@ -122,7 +139,7 @@ if [ "$report_exists" = 1 ]; then
 
     const out = {
       collision, edge, fixTags, verdictNotGo,
-      taskgraphBlock, taskgraphLevelsValid, concurrencyClaimed, contentionClassified,
+      taskgraphBlock, taskgraphLevelsValid, concurrencyClaimed, contentionClassified, fixComplete,
     };
     fs.writeFileSync("/tmp/content.json", JSON.stringify(out));
     console.log(JSON.stringify(out));
@@ -137,18 +154,19 @@ if [ "$report_exists" = 1 ]; then
     grep -q '"taskgraphLevelsValid":true' /tmp/content.json && taskgraph_levels_valid=1
     grep -q '"concurrencyClaimed":true'   /tmp/content.json && concurrency_claimed=1
     grep -q '"contentionClassified":true' /tmp/content.json && contention_classified=1
+    grep -q '"fixComplete":true'          /tmp/content.json && fix_tags_complete=1
   fi
 fi
 
 partial=$(( report_exists + validator_passes_legacy + collision_reported + undeclared_edge_reported \
   + fix_tags_present + verdict_not_go + plan_untouched + taskgraph_block + taskgraph_levels_valid \
-  + concurrency_claimed + contention_classified ))
+  + concurrency_claimed + contention_classified + fix_tags_complete ))
 reward=0
 [ "$report_exists" = 1 ] && [ "$validator_passes_legacy" = 1 ] && [ "$collision_reported" = 1 ] \
   && [ "$undeclared_edge_reported" = 1 ] && [ "$fix_tags_present" = 1 ] \
   && [ "$verdict_not_go" = 1 ] && [ "$plan_untouched" = 1 ] && [ "$taskgraph_block" = 1 ] \
   && [ "$taskgraph_levels_valid" = 1 ] && [ "$concurrency_claimed" = 1 ] \
-  && [ "$contention_classified" = 1 ] && reward=1
+  && [ "$contention_classified" = 1 ] && [ "$fix_tags_complete" = 1 ] && reward=1
 
 cat > "$OUT/reward.json" <<JSON
 {
@@ -163,6 +181,7 @@ cat > "$OUT/reward.json" <<JSON
   "taskgraph_levels_valid": $taskgraph_levels_valid,
   "concurrency_claimed": $concurrency_claimed,
   "contention_classified": $contention_classified,
+  "fix_tags_complete": $fix_tags_complete,
   "partial": $partial,
   "reward": $reward
 }
