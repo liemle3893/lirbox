@@ -89,6 +89,8 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
    to `./plan-check-<slug>.html` and fill it. **Lead with the verdict-changing risks**
    (refutations, blind-spots, conditions); mechanically-verified rows last. Keep the
    `<style>` block unchanged.
+   Carry step 7's disposition onto **every open row** — `<span class="fix">fix: mechanical</span>`
+   or `fix: needs-decision`; machine-checked, and drop the span on rows that are not open.
    Fill the **Definition of done** section AND its machine-readable twin
    (`<script type="application/json" id="dod">`): extract the plan's success criteria, refine
    each to `checkable` (a concrete command, exit 0 = met) or `judged` (needs cited evidence),

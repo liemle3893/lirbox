@@ -695,8 +695,8 @@
     "semantic_hash": "6adba611f4b6d2f3dc67dcb18686c24a"
   },
   "plugins/lirbox/skills/plan-check/assets/validate.mjs": {
-    "mtime": 1785774026.3474092,
-    "ast_hash": "f1b0db34aa2f56afa89b66ed40f6146c",
+    "mtime": 1785858139.2927127,
+    "ast_hash": "786ba85aa3b4b55e68540dd2596eb70e",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/evals/code-copy-button.test.mjs": {
@@ -710,8 +710,8 @@
     "semantic_hash": "bff722b14917bbb8d7c4fa23a5503b7d"
   },
   "plugins/lirbox/skills/plan-check/evals/floor/dod-block-contract.test.mjs": {
-    "mtime": 1785774188.9394553,
-    "ast_hash": "b001f466b4983639d224f1dc6697de28",
+    "mtime": 1785858662.3570476,
+    "ast_hash": "b7916e4f4a9a7e2bab6d355c8d116511",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/evals/floor/dod-template-and-audit.test.mjs": {
@@ -1645,13 +1645,13 @@
     "semantic_hash": "dc81fd58ebf5dcf0cac4b7f691f22f54"
   },
   "plugins/lirbox/skills/plan-check/SKILL.md": {
-    "mtime": 1785807204.3778021,
-    "ast_hash": "e4ed9801276adf751baee4fa2c17171e",
+    "mtime": 1785858217.776194,
+    "ast_hash": "287c6bfc50584248c013b93a942c157f",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/assets/template.html": {
-    "mtime": 1785773964.7963674,
-    "ast_hash": "89041a494370a8df1e7b0fe925f74e02",
+    "mtime": 1785858168.3842316,
+    "ast_hash": "ad440c334da3fb82f9016b47f141fb62",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/evals/README.md": {
@@ -1665,8 +1665,8 @@
     "semantic_hash": "0066bb067b645169ba7a7a878840e799"
   },
   "plugins/lirbox/skills/plan-check/evals/fixtures/clean.html": {
-    "mtime": 1785774008.9247482,
-    "ast_hash": "e0310bff3f2438ebc61b0c8575adfe68",
+    "mtime": 1785858603.376737,
+    "ast_hash": "c6802e0d08423e6cc76714e42dfd6d5c",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/evals/fixtures/conditions-mismatch.html": {
@@ -1675,8 +1675,8 @@
     "semantic_hash": "d8ae22a6e2a6a258fd8aeca333384dc0"
   },
   "plugins/lirbox/skills/plan-check/evals/fixtures/full-template-render.html": {
-    "mtime": 1785774008.9254012,
-    "ast_hash": "82054e1d0d9b56af999c69bb1bc74a6b",
+    "mtime": 1785858634.7740452,
+    "ast_hash": "a4017a602fd29fa49197bd8c81ecb503",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/evals/fixtures/placeholder-left.html": {
@@ -1690,8 +1690,8 @@
     "semantic_hash": "74a9adcfc3bddd48d822304f0e94f1fe"
   },
   "plugins/lirbox/skills/plan-check/references/blind-spot.md": {
-    "mtime": 1785807113.9187973,
-    "ast_hash": "f4197fd391ac79cc3cca9896a757397f",
+    "mtime": 1785858236.018959,
+    "ast_hash": "6688ca50a6de78d0027d244027077bee",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/references/interrogation.md": {
@@ -2310,8 +2310,8 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/evals/checks-manifest.json": {
-    "mtime": 1785807298.138584,
-    "ast_hash": "4d03227a39aa51332840ac62ac811601",
+    "mtime": 1785858459.5378308,
+    "ast_hash": "358ce0c0e39fa6bc93595fadf51dad3f",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/evals/checks/execution-shape.check.mjs": {
@@ -2360,18 +2360,13 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/execution-shape/solution/solve.sh": {
-    "mtime": 1785700657.6078584,
-    "ast_hash": "4375e29195e0cd1565219d4b7730050a",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/plan-check/harbor/tasks/execution-shape/tests/skill-assets/validate.mjs": {
-    "mtime": 1785700657.6084435,
-    "ast_hash": "2b77fadc4f2e49fcc888e53ac296b974",
+    "mtime": 1785859077.9979925,
+    "ast_hash": "fa0ab392d41fd97da9fa443be82f1c66",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/execution-shape/tests/test.sh": {
-    "mtime": 1785700657.6087487,
-    "ast_hash": "bf482ee1032dd50491dd67d7fe0c6d89",
+    "mtime": 1785859021.6491685,
+    "ast_hash": "ea4b86d876d98c7dbbe8844c2cb50f2c",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/autofix-bounded/environment/plan.md": {
@@ -2395,38 +2390,48 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/evals/checks/goal-coverage.check.mjs": {
-    "mtime": 1785774320.408734,
-    "ast_hash": "0ce5ddd01307cbe13b38a17622fbb8c4",
+    "mtime": 1785858828.4674106,
+    "ast_hash": "22928526cab8696dddd43aac0169fb35",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/goal-coverage/solution/solve.sh": {
-    "mtime": 1785774513.4656565,
+    "mtime": 1785855319.6186438,
     "ast_hash": "4db2e24fda7965190858c4df190cfa93",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/goal-coverage/tests/skill-assets/validate-legacy.mjs": {
-    "mtime": 1785774440.512914,
+    "mtime": 1785855319.6190996,
     "ast_hash": "2b77fadc4f2e49fcc888e53ac296b974",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/goal-coverage/tests/skill-assets/validate.mjs": {
-    "mtime": 1785774440.4929094,
+    "mtime": 1785855319.6192548,
     "ast_hash": "f1b0db34aa2f56afa89b66ed40f6146c",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/goal-coverage/tests/test.sh": {
-    "mtime": 1785774463.6564484,
+    "mtime": 1785855319.6194367,
     "ast_hash": "42af030d3a94f3be06d2dfe01f09e07f",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/goal-coverage/environment/plan.md": {
-    "mtime": 1785774417.885748,
+    "mtime": 1785855319.618,
     "ast_hash": "261999cc4f60233449613c1711df5345",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/plan-check/harbor/tasks/goal-coverage/instruction.md": {
-    "mtime": 1785774479.5152516,
+    "mtime": 1785855319.6182246,
     "ast_hash": "c3a360416f75e8dc01e000302a0b96c2",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/plan-check/evals/checks/task-graph.check.mjs": {
+    "mtime": 1785858396.7335308,
+    "ast_hash": "53596627df2d884b54ec235dd1c8f3bd",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/plan-check/harbor/tasks/execution-shape/tests/skill-assets/validate-legacy.mjs": {
+    "mtime": 1785700657.6084435,
+    "ast_hash": "2b77fadc4f2e49fcc888e53ac296b974",
     "semantic_hash": ""
   }
 }

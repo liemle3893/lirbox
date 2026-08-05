@@ -48,6 +48,7 @@ tr:last-child td{border-bottom:none;}
 .s-UNVERIFIED{color:var(--cond);font-weight:700;}
 .s-UNSTATED-ASSUMPTION{color:var(--uk);font-weight:700;}
 .s-BLIND-SPOT-RISK{color:var(--uu);font-weight:700;}
+.fix{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;background:#efeadd;color:var(--muted);white-space:nowrap;margin-left:6px;}
 code{background:#efeadd;padding:1px 5px;border-radius:5px;font-size:13px;}
 code[data-copy]{cursor:copy;position:relative;}
 code[data-copy]:hover{outline:1px solid var(--line);}
@@ -114,11 +115,15 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
     <thead><tr><th>Proposition</th><th>Quadrant</th><th>Status</th><th>Evidence</th><th>Conf.</th></tr></thead>
     <tbody>
       <!-- One <tr class="claim"> per proposition. data-quadrant and data-status are REQUIRED
-           and machine-checked. Put "(needs: …)" detail in the Status cell text, not the attribute. -->
+           and machine-checked. Put "(needs: …)" detail in the Status cell text, not the attribute.
+           Every OPEN row (UNVERIFIED / BLIND-SPOT-RISK) MUST also carry a fix disposition —
+           <span class="fix">fix: mechanical</span> when the repair is fully determined by the
+           finding, <span class="fix">fix: needs-decision</span> when it is not. Machine-checked;
+           drop the span on rows that are not open. -->
       <tr class="claim" data-quadrant="{{QUADRANT}}" data-status="{{STATUS}}">
         <td>{{PROPOSITION}}</td>
         <td><span class="tag q-{{QUADRANT}}">{{QUADRANT}}</span></td>
-        <td><span class="s-{{STATUS}}">{{STATUS}}</span>{{STATUS_DETAIL}}</td>
+        <td><span class="s-{{STATUS}}">{{STATUS}}</span>{{STATUS_DETAIL}} <span class="fix">fix: {{FIX_DISPOSITION}}</span></td>
         <td>{{EVIDENCE}}</td>
         <td>{{CONFIDENCE}}</td>
       </tr>
