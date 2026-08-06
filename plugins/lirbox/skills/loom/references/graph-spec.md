@@ -7,6 +7,35 @@ grounded in what the code actually reads — `scripts/graph-core.mjs` (validatio
 (what the browser reads). Where a field is purely descriptive — read by nothing, enforced by
 nothing — that is called out explicitly rather than implied.
 
+## What this graph is, and what it is not
+
+**It is a single-cursor state machine, not a schedulable DAG.** Read this before choosing loom
+over `conductor` on the strength of the word "graph".
+
+One cursor walks the graph. `pickEdge()` returns **exactly one** edge, and out-edges are
+conditional transitions evaluated against the previous node's result — so two out-edges mean
+*branch: take one*, never *fork: do both*. The emitted interpreter's walk is
+`while (node && node !== graph.terminal)` over awaited single `agent()` calls; there is no
+`parallel()`, no `pipeline()`, no `Promise.all`. **An N-node run is N sequential agent
+invocations, and there is no way to declare that two nodes are independent.**
+
+What loom buys over `conductor` is therefore the **reshapeable failure path** — a gate that
+fails routes control backwards, carrying its findings, and the shape itself is human-approved
+and frozen — not concurrency. If your work is a DAG because it has independent branches you
+want overlapped, this model does not schedule them and `conductor` is cheaper.
+
+The workaround that exists today: fan out *inside* a work node, so its worker spawns parallel
+subagents and applies their results serially. For git-serialized delivery (one branch, a gate
+before each commit) serial application is correct anyway. But that concurrency is invisible to
+the graph, to `visitCaps` and to the report — the approved shape stops describing what ran, so
+prefer it for read-only fan-out (surveying, searching) over concurrent mutation.
+
+Making this a real fork/join is an open design question, tracked in
+[#67](https://github.com/liemle3893/lirbox/issues/67). The constraint any scheduler has to
+meet: `dominates()` must stay provable across concurrent branches — no path may reach the
+terminal without crossing every `mustCross` gate — and visit accounting has to become
+per-branch rather than global.
+
 ## Top level
 
 | Field | Type | Meaning |

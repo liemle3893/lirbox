@@ -33,12 +33,19 @@
 </head>
 <body>
 <div id="app">
-  <div id="canvas"><div id="bar">
+  <!-- #bar is a SIBLING of #canvas, never a child. editor.js mounts React with
+       createRoot($('canvas')), and React clears its mount target's children before the
+       effect that assigns these buttons' onclick handlers runs — nesting the bar inside
+       #canvas made $('save') null and took the whole editor down on first render, which
+       blocks the mandatory approval gate. It is position:absolute with no positioned
+       ancestor, so this placement is visually identical. -->
+  <div id="bar">
     <button id="save">Save</button>
     <button id="replan">Replan from comments</button>
     <button id="approve">Approve &amp; run</button>
     <span id="status"></span>
-  </div></div>
+  </div>
+  <div id="canvas"></div>
   <div id="panel">
     <div id="detail">Select a node.</div>
     <div id="violations"></div>

@@ -37,6 +37,25 @@
     "editor-escapes-approval-gate": {
       "expect": "green"
     },
+    "editor-handles-survive-react-mount": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "nesting #bar back inside #canvas is the original defect — React clears its mount target, $('save') is null, and the whole approval editor dies on first render",
+          "env": "LOOM_EDITOR_HTML_OVERRIDE",
+          "file": "scripts/editor/index.html",
+          "find": "<div id=\"bar\">\n    <button id=\"save\">Save</button>\n    <button id=\"replan\">Replan from comments</button>\n    <button id=\"approve\">Approve &amp; run</button>\n    <span id=\"status\"></span>\n  </div>\n  <div id=\"canvas\"></div>",
+          "replace": "<div id=\"canvas\"><div id=\"bar\">\n    <button id=\"save\">Save</button>\n    <button id=\"replan\">Replan from comments</button>\n    <button id=\"approve\">Approve &amp; run</button>\n    <span id=\"status\"></span>\n  </div></div>"
+        },
+        {
+          "why": "the same failure reached from the other side — moving the mount up to #app swallows every wired element without touching the markup",
+          "env": "LOOM_EDITOR_JS_OVERRIDE",
+          "file": "scripts/editor/editor.js",
+          "find": "ReactDOM.createRoot($('canvas'))",
+          "replace": "ReactDOM.createRoot($('app'))"
+        }
+      ]
+    },
     "lock-freeze-must-be-stamped": {
       "expect": "green"
     },

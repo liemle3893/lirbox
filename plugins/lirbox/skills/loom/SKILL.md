@@ -26,6 +26,11 @@ under invariants that keep every gate un-bypassable.
 All of: multi-step with subagents; a gate failure should re-enter real work rather than a
 narrow fix worker; the decomposition is not knowable up front. Otherwise use `conductor`
 (fixed pipeline) or call `Workflow` directly (one-shot).
+
+**Not for concurrency.** The graph is a single-cursor state machine: `pickEdge` returns one
+edge, the walk is sequential, and independent nodes cannot be declared or overlapped. What
+loom buys is the reshapeable failure path, not scheduling — see
+`references/graph-spec.md` § *What this graph is, and what it is not*.
 </when-to-use>
 
 <core-model>
