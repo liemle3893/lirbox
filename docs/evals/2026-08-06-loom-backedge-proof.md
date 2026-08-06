@@ -160,3 +160,38 @@ Work branch: `wf/ratelimit` in `~/loom-ratelimit/.worktrees/ratelimit`.
 ```
 node plugins/lirbox/skills/loom/scripts/loom-report.cjs ratelimit
 ```
+
+## Backlog outcome
+
+All four concerns this run produced are now closed.
+
+| id | outcome |
+|---|---|
+| `review-gate-repairs-instead-of-routing` | fixed — both seeds' `Review` is adjudicate-only, `findings` is `required` |
+| `dodgate-back-edge-carries-ids-not-evidence` | fixed — `DoDGate` carries `criteria` (required, evidence-bearing) |
+| `pr-node-reports-complete-without-delivering` | fixed — `PR` reports `delivered`, and `PR -> Done` branches on it |
+| `validategraph-fails-open-on-arity` | **withdrawn — filed in error** |
+
+### Why the fourth was withdrawn
+
+The report claimed `validateGraph(next, prev, cursor)` fails open when called with one argument,
+since both lock-enforcement branches are guarded on `prev`. That guard is intended and explicitly
+tested — `scripts/test-loom.cjs`:
+
+```js
+test('pre-approval, the graph may still declare its own invariants', () => {
+  // With no prior graph there is nothing to be frozen against, so seeding works.
+  assert.deepStrictEqual(core.validateGraph(LOCKED, null, null), []);
+});
+```
+
+The supporting evidence does not hold either. The claim was that `scaffold-loom.cjs` rejected a graph
+`validateGraph` had accepted — two components disagreeing. In fact `scaffold-loom.cjs:47` calls
+`core.validateGraph(graph, graph, null)`, passing the graph as its own `prev`, which is the
+pre-approval idiom. The disagreement was between a correct two-argument call and my own incorrect
+one-argument call. **Nothing failed open; the caller was wrong.**
+
+Making the one-argument form strict would break a documented, tested behaviour to close a ticket that
+should not have been opened. The residual complaint is ergonomic — the permissive mode is what
+omission gives you — but no current caller relies on the unsafe shape, so a check for it would be
+green on arrival and therefore not a gate at all.

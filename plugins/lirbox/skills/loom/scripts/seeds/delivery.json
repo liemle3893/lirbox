@@ -195,16 +195,20 @@
     {
       "id": "PR",
       "kind": "work",
-      "prompt": "Push the branch and open a pull request with the GitHub CLI. Never merge. If a PR already exists for this branch, return its URL.",
+      "prompt": "Push the branch and open a pull request with the GitHub CLI. NEVER merge. If a PR already exists for this branch, return its URL.\n\nReport delivered=true ONLY if a pull request now exists and you have its URL. If anything blocked you -- no git remote, no credential, push rejected, the CLI unavailable -- report delivered=false and put the reason in `prUrl`. Do NOT invent an external side effect to get past this node: creating a repository, adding a remote, or force-pushing to unblock yourself is worse than stopping.\n\nReporting delivered=false matches no outgoing edge, so the run hard-fails at this node instead of reaching the terminal. That is the intended outcome: `complete` is the word an operator reads as \"delivered\", and a run that delivered nothing must not claim it. Report honestly; the graph enforces the consequence.",
       "schema": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "prUrl"
+          "prUrl",
+          "delivered"
         ],
         "properties": {
           "prUrl": {
             "type": "string"
+          },
+          "delivered": {
+            "type": "boolean"
           }
         }
       }
@@ -281,7 +285,10 @@
     {
       "from": "PR",
       "to": "Done",
-      "when": "always"
+      "when": {
+        "field": "delivered",
+        "eq": true
+      }
     }
   ],
   "invariants": {
