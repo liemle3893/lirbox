@@ -440,6 +440,53 @@
           "replace": "  (do not persist anything)"
         }
       ]
+    },
+    "model-policy-follows-enforcement": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "keying the strong tier on the LABEL instead of on invariants.mustCross is wrong in both directions at once: a decorative node called \"gate\" draws the expensive model while a genuinely enforced node labelled \"work\" adjudicates the terminal on the cheap tier",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    const think = must.indexOf(n.id) !== -1 || n.kind === 'plan'",
+          "replace": "    const think = n.kind === 'gate' || n.kind === 'plan'"
+        },
+        {
+          "why": "collapsing the tiers tags every worker with the same model, which looks like a policy in the emitted script and is none",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    out.model = think ? MODEL_THINK : MODEL_WORK",
+          "replace": "    out.model = MODEL_WORK"
+        },
+        {
+          "why": "dropping the authored-model override silently upgrades the seeds' deliberately cheap Setup/DoDBaseline nodes and discards a decision a human approved in the graph",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  if (n.model) out.model = n.model\n",
+          "replace": "  "
+        },
+        {
+          "why": "applying the policy under `inherit` makes the escape hatch decorative \u2014 the one mode that exists to emit nothing would emit everything",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  if (MODEL_MODE === 'auto') {",
+          "replace": "  if (true) {"
+        },
+        {
+          "why": "computing the policy and never passing it to agent() leaves every worker inheriting while the generator looks correct on inspection",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      ...modelOpts(n),\n",
+          "replace": "      "
+        },
+        {
+          "why": "accepting --model-think under inherit lets a caller believe they set a tier that is never read; a flag that cannot take effect must fail loudly",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      die(`${flag} requires the auto model mode (it is ignored under --model-mode inherit) \u2014 `\n        + 'drop the flag or drop --model-mode inherit');",
+          "replace": "      void flag;"
+        }
+      ]
     }
   }
 }

@@ -143,6 +143,13 @@ Workflow({ scriptPath: ".loom/<name>.js" })
 
 **Never hand-edit the generated script** — change the generator and regenerate.
 
+Every worker is model-tagged by default: the strong tier (`opus`, `effort: high`) for
+`invariants.mustCross` nodes and `kind: "plan"`, the work tier (`sonnet`) for the rest, and a
+node's own `model`/`effort` outranking both. Tune with `--model-think`/`--model-work`, or pass
+`--model-mode inherit` to emit no policy. **The tier follows `mustCross`, not the `"gate"`
+label** — see [graph-spec.md](references/graph-spec.md#which-model-each-worker-runs-on) for why
+that distinction is load-bearing.
+
 **Headless (`claude -p`): launch in the FOREGROUND (`run_in_background: false`) and do not
 end your turn while it runs.** The blocking call IS the wait. Afterwards re-read
 `state.json` and confirm `status` is no longer `running`.

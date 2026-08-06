@@ -3,6 +3,9 @@
  * Generator for loom conductors.
  *
  *   node scaffold-loom.cjs --name <name> --graph <graph.json> [--out <path>] [--force]
+ *     [--model-mode auto|inherit]   auto (default) tags every worker by what the node does
+ *     [--model-think <m>]           strong tier: mustCross nodes + plan nodes (default opus)
+ *     [--model-work <m>]            everything else (default sonnet)
  *
  * Emits a Workflow script that is a GRAPH INTERPRETER: the graph travels as DATA and
  * graph-core.mjs is INLINED as source, because the generated conductor is a restricted
@@ -26,6 +29,36 @@ const force = arg('force', false) === true;
 if (!name || name === true) die('--name is required');
 if (!graphPath || graphPath === true) die('--graph <graph.json> is required');
 const outPath = arg('out', path.join('.loom', name + '.js'));
+
+// --- model selection (--model-mode) ---
+// auto (DEFAULT) : every worker gets a `model:` opt chosen by what the node DOES — the strong
+//                  tier for nodes that adjudicate or plan, the work tier for the rest. Without
+//                  this every worker inherited the session model, so a whole run of mechanical
+//                  nodes billed at whatever the human happened to be running.
+// inherit        : emit no policy at all — byte-equivalent to the pre-policy generator. A node's
+//                  own `model` field is still honoured, because that is graph DATA a human
+//                  approved, not a generator default.
+const MODEL_VALUES = ['sonnet', 'opus', 'haiku', 'fable'];
+const modelMode = arg('model-mode', 'auto');
+if (modelMode !== 'auto' && modelMode !== 'inherit') {
+  die(`--model-mode must be 'auto' (the default) or 'inherit' (got '${modelMode}')`);
+}
+// Under `inherit` no policy is emitted, so these would be silently ignored. Say so instead.
+if (modelMode === 'inherit') {
+  for (const flag of ['--model-think', '--model-work']) {
+    if (process.argv.includes(flag)) {
+      die(`${flag} requires the auto model mode (it is ignored under --model-mode inherit) — `
+        + 'drop the flag or drop --model-mode inherit');
+    }
+  }
+}
+const modelThink = arg('model-think', 'opus');
+const modelWork = arg('model-work', 'sonnet');
+for (const [flag, val] of [['--model-think', modelThink], ['--model-work', modelWork]]) {
+  if (val === true || !MODEL_VALUES.includes(val)) {
+    die(`${flag} must be one of: ${MODEL_VALUES.join(', ')}`);
+  }
+}
 
 let graph;
 try { graph = JSON.parse(fs.readFileSync(graphPath, 'utf8')); }
@@ -153,6 +186,39 @@ async function checkpoint(cursor) {
   )
 }
 
+// MODEL POLICY. Resolved at RUNTIME from the LIVE graph, never baked into a table at
+// generation time: a runtime graphPatch can add nodes that did not exist when this script was
+// written, and a frozen table would leave every one of them silently inheriting.
+//
+// The strong tier is keyed on invariants.mustCross — NOT on kind === 'gate'. Per the graph
+// spec, \`kind\` is DESCRIPTIVE for every value except 'fork': calling a node "gate" does not
+// make it one, and an enforced gate is free to be labelled anything at all. Keying on the
+// label would hand the strong model to a node that adjudicates nothing, while the node whose
+// verdict actually decides whether the run may terminate ran on the cheap tier. mustCross is
+// the enforced truth, so that is what this reads.
+//
+// kind === 'plan' gets the strong tier too, but purely as a COST heuristic. Being wrong about
+// a descriptive label there wastes money; it cannot weaken a gate, which is why it is
+// acceptable to key on the label for that one and not for the other.
+const MODEL_MODE = ${JSON.stringify(modelMode)}
+const MODEL_THINK = ${JSON.stringify(modelThink)}
+const MODEL_WORK = ${JSON.stringify(modelWork)}
+
+function modelOpts(n) {
+  const out = {}
+  if (MODEL_MODE === 'auto') {
+    const must = (graph.invariants && graph.invariants.mustCross) || []
+    const think = must.indexOf(n.id) !== -1 || n.kind === 'plan'
+    out.model = think ? MODEL_THINK : MODEL_WORK
+    if (think) out.effort = 'high'
+  }
+  // An explicitly authored model always wins. It is a decision a human made and approved in
+  // the graph itself; the policy is only a default for the nodes that did not make one.
+  if (n.model) out.model = n.model
+  if (n.effort) out.effort = n.effort
+  return out
+}
+
 // Visit accounting. \`visits\` is whichever counter map the caller owns — a region is
 // handed its OWN, which is what makes accounting per-region rather than global.
 function bumpVisit(id, visits, base) {
@@ -205,7 +271,7 @@ async function runNode(id, visits, inRegion) {
     r = await agent(prompt, {
       label: key, phase: id,
       ...(n.agentType ? { agentType: n.agentType } : {}),
-      ...(n.model ? { model: n.model } : {}),
+      ...modelOpts(n),
       ...(n.schema ? { schema: n.schema } : {}),
     })
     results[key] = r
