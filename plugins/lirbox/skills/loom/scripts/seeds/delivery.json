@@ -114,13 +114,14 @@
       "id": "Review",
       "kind": "gate",
       "locked": true,
-      "prompt": "Review the diff on this branch for correctness, security and convention violations. Fix every Critical and High finding, keep the build green, and commit. Report passed=true only when nothing Critical or High is left UNRESOLVED, and only after actually running the build.",
+      "prompt": "You are a production-readiness review GATE for the diff on this branch.\n\nADJUDICATE ONLY. Do not fix anything, do not edit files, do not commit. You are a gate, not a worker -- if you correct the work yourself, the graph's failure path never runs and the defect you fixed is attributed to review rather than to the node that caused it. Run the build/tests to populate buildExit, but change nothing.\n\nJudge correctness, security and convention violations. Rate a finding High when it would cause an incident in production. Tests passing is NOT sufficient evidence -- a test suite exercises the cases its author imagined; read the code for what it does on the cases the tests omit.\n\nReport passed=false if any Critical or High finding exists. Put each one in `findings` as a specific, actionable sentence naming the file and exactly what must change -- the implementer will see ONLY your findings array, nothing else from this review, so a bare criterion name or a vague 'needs hardening' wastes the round trip. Report passed=true, with findings=[], only when nothing Critical or High remains and the build actually ran.",
       "schema": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "passed",
-          "buildExit"
+          "buildExit",
+          "findings"
         ],
         "properties": {
           "passed": {
@@ -265,7 +266,7 @@
         "eq": false
       },
       "carry": [
-        "unmetCriteria"
+        "criteria"
       ]
     },
     {
@@ -293,6 +294,6 @@
       "Implement": 4
     },
     "nodeBudget": 40,
-    "lockedHash": "fnv1a:51d7641c"
+    "lockedHash": "fnv1a:df1334b7"
   }
 }
