@@ -1925,9 +1925,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1785588622.4807572,
-    "ast_hash": "3b338f6c4868ba735dd7fba5985ed187",
-    "semantic_hash": "3b338f6c4868ba735dd7fba5985ed187"
+    "mtime": 1786019594.9159243,
+    "ast_hash": "8fcbd0976d287b83136a0b0374b5aed3",
+    "semantic_hash": ""
   },
   "templates/agent-template.md": {
     "mtime": 1782047188.8715544,
@@ -1975,59 +1975,59 @@
     "semantic_hash": "d622aa8e86a4177c75179b2b7e7bc76b"
   },
   "plugins/lirbox/skills/loom/evals/checks-manifest.json": {
-    "mtime": 1786009236.468241,
-    "ast_hash": "40c494a1ab23d1ffe197cd551f488576",
+    "mtime": 1786031547.3639112,
+    "ast_hash": "8a0e9779a8d7af75c53f9de873336929",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/baseline-discrimination-structural.check.mjs": {
-    "mtime": 1785272338.9540012,
-    "ast_hash": "e1362d08e47504f3af2e3cf79311435b",
-    "semantic_hash": "e1362d08e47504f3af2e3cf79311435b"
+    "mtime": 1786030699.6071315,
+    "ast_hash": "db3e314fa13952a78f0615c3d158c2cf",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/cursor-rename-fails-closed.check.mjs": {
-    "mtime": 1785272338.9541986,
-    "ast_hash": "bb063ed70a1fce44bc96f9b05cf7f2da",
-    "semantic_hash": "bb063ed70a1fce44bc96f9b05cf7f2da"
+    "mtime": 1786030699.607511,
+    "ast_hash": "e84e6320b2ebec028d7c56812e3e8be1",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/dod-check-hash-lock.check.mjs": {
-    "mtime": 1785272338.954414,
-    "ast_hash": "433f4384b7babd88d5d2a66a0d2ccefa",
-    "semantic_hash": "433f4384b7babd88d5d2a66a0d2ccefa"
+    "mtime": 1786030699.6078303,
+    "ast_hash": "476cb88660a2065caae629b565ee37c1",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/editor-escapes-approval-gate.check.mjs": {
-    "mtime": 1785272338.9545987,
-    "ast_hash": "bed7f27f6e2e3f9138d5d768be723276",
-    "semantic_hash": "bed7f27f6e2e3f9138d5d768be723276"
+    "mtime": 1786030699.6081016,
+    "ast_hash": "934bb518bdf329cdd0e4f2e67f5dfaec",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/gate-dominance-not-bypassable.check.mjs": {
-    "mtime": 1785272338.9548426,
-    "ast_hash": "dbb3aa65396d31b7b1102b4d3e42cace",
-    "semantic_hash": "dbb3aa65396d31b7b1102b4d3e42cace"
+    "mtime": 1786030699.609188,
+    "ast_hash": "24e905109f773311e40e3ee6ef257358",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/gate-failure-edges-return.check.mjs": {
-    "mtime": 1785272338.955097,
-    "ast_hash": "e312ce934ae2934086b242c0c49c9582",
-    "semantic_hash": "e312ce934ae2934086b242c0c49c9582"
+    "mtime": 1786030699.6095107,
+    "ast_hash": "ce7c96f06deaf766d67a41f1818fd50f",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/interpreter-no-terminal-fallback.check.mjs": {
-    "mtime": 1785272338.9553034,
-    "ast_hash": "c9ab80c624f93fdca596d6c9ba1c53c2",
-    "semantic_hash": "c9ab80c624f93fdca596d6c9ba1c53c2"
+    "mtime": 1786030699.6098797,
+    "ast_hash": "aef441851cbbbfb0bcfad1752d29ce3f",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/lock-freeze-must-be-stamped.check.mjs": {
-    "mtime": 1785272338.9555066,
-    "ast_hash": "6c7ffa7dfe69e714464e703c870885b3",
-    "semantic_hash": "6c7ffa7dfe69e714464e703c870885b3"
+    "mtime": 1786030699.610296,
+    "ast_hash": "f86c3cedbf822568039c2f95d20e0e83",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/purity-scan-has-teeth.check.mjs": {
-    "mtime": 1785272338.955771,
-    "ast_hash": "bf35d2eb064794df3fa0dcaf6f1e0e6d",
-    "semantic_hash": "bf35d2eb064794df3fa0dcaf6f1e0e6d"
+    "mtime": 1786030699.610831,
+    "ast_hash": "8b7f989a263c0047373dbebce5e24036",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/server-no-lost-update.check.mjs": {
-    "mtime": 1785272338.955981,
-    "ast_hash": "e9ecd47763419698d7fc93676fd20cb3",
-    "semantic_hash": "e9ecd47763419698d7fc93676fd20cb3"
+    "mtime": 1786030699.6114006,
+    "ast_hash": "0adba94bdaf7805ba62feda58863ee59",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/floor/00-structure.test.mjs": {
     "mtime": 1785272338.956205,
@@ -2055,19 +2055,19 @@
     "semantic_hash": "6ec692c2723a7197669fe3c4c1c7b1fe"
   },
   "plugins/lirbox/skills/loom/scripts/editor/editor.js": {
-    "mtime": 1785272338.9577725,
-    "ast_hash": "bf2fec1b8ba9634729731d43d61ba1ce",
-    "semantic_hash": "bf2fec1b8ba9634729731d43d61ba1ce"
+    "mtime": 1786030699.6149173,
+    "ast_hash": "bcc12d4f348c45f916867921a04e7852",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/graph-core.mjs": {
-    "mtime": 1785272338.9581602,
-    "ast_hash": "2b158b390b6f229d0f969c748e6e01e2",
-    "semantic_hash": "2b158b390b6f229d0f969c748e6e01e2"
+    "mtime": 1786030699.6153822,
+    "ast_hash": "6e9df8c9d3525d3f27288de69cb1ec7b",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/graph-server.mjs": {
-    "mtime": 1785272338.958449,
-    "ast_hash": "68f8c9a6c73d24999df5fd8f661112fb",
-    "semantic_hash": "68f8c9a6c73d24999df5fd8f661112fb"
+    "mtime": 1786030699.6156583,
+    "ast_hash": "b647915af2d6fa051b138907c001dc2f",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/list-runs.cjs": {
     "mtime": 1785272338.9586213,
@@ -2075,14 +2075,14 @@
     "semantic_hash": "ad85e46bf6ed2b2bdca63feeaefc75d0"
   },
   "plugins/lirbox/skills/loom/scripts/loom-report.cjs": {
-    "mtime": 1785272338.9588857,
-    "ast_hash": "b708584f168fe1db01595d0d0fedddcc",
-    "semantic_hash": "b708584f168fe1db01595d0d0fedddcc"
+    "mtime": 1786030970.4944654,
+    "ast_hash": "b3780c7bb4c2636e6618c5b014df9b89",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/scaffold-loom.cjs": {
-    "mtime": 1785272338.959534,
-    "ast_hash": "de11f58c05b582292694e093cb9039ed",
-    "semantic_hash": "de11f58c05b582292694e093cb9039ed"
+    "mtime": 1786030922.5467453,
+    "ast_hash": "cd80814785be9f499fd2ec02fa072292",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/seeds/delivery.json": {
     "mtime": 1785992640.2407038,
@@ -2095,9 +2095,9 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/test-loom.cjs": {
-    "mtime": 1785272338.9604135,
-    "ast_hash": "65508950cf89e12b479a5efdd81b1d99",
-    "semantic_hash": "65508950cf89e12b479a5efdd81b1d99"
+    "mtime": 1786030699.6169424,
+    "ast_hash": "846342c17b53cb0ee07cc51032a4894e",
+    "semantic_hash": ""
   },
   "docs/plans/2026-07-27-loom-graph-runtime.md": {
     "mtime": 1785272338.9526155,
@@ -2140,13 +2140,13 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/SKILL.md": {
-    "mtime": 1786009425.9053016,
-    "ast_hash": "63180a3ca511ea6138423657603c8744",
+    "mtime": 1786030978.2195904,
+    "ast_hash": "762efd679c5bc18897e97c3009af041f",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/references/graph-spec.md": {
-    "mtime": 1786009410.9213026,
-    "ast_hash": "c04563df1325ad8d5b386d60abd9a503",
+    "mtime": 1786030699.6144454,
+    "ast_hash": "f24ab4da85848090520780526850b81f",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/references/invariants.md": {
@@ -2155,19 +2155,19 @@
     "semantic_hash": "6fd00c0426afe40a0d410ff90946ce44"
   },
   "plugins/lirbox/skills/loom/scripts/editor/index.html": {
-    "mtime": 1786009149.6270766,
-    "ast_hash": "d248827dce9b3e09020446f3527097e1",
+    "mtime": 1786019594.9429126,
+    "ast_hash": "f719dcc618ed67edd63292e78ea5c6db",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/prompts/checkpoint.txt": {
-    "mtime": 1785272338.9591203,
-    "ast_hash": "d31c7a8716923e1ccd09b256b481061d",
-    "semantic_hash": "d31c7a8716923e1ccd09b256b481061d"
+    "mtime": 1786030948.7852776,
+    "ast_hash": "c34fdcc2d6fb9e239e1c2c59d129255d",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/prompts/node-lead.txt": {
-    "mtime": 1785272338.9592984,
-    "ast_hash": "d3b9976d814b08b3eea4ea07a56b3223",
-    "semantic_hash": "d3b9976d814b08b3eea4ea07a56b3223"
+    "mtime": 1786030942.4408386,
+    "ast_hash": "ba90e25acefba0c101c99ab2377d963d",
+    "semantic_hash": ""
   },
   "plugins/lirbox/skills/arena/scripts/multi-grade.mjs": {
     "mtime": 1785656813.1318424,
@@ -2445,7 +2445,7 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/editor-handles-survive-react-mount.check.mjs": {
-    "mtime": 1786009184.338161,
+    "mtime": 1786019594.9393957,
     "ast_hash": "a07882290991c52cbc8a90308961e295",
     "semantic_hash": ""
   },
@@ -2482,6 +2482,71 @@
   "plugins/lirbox/skills/loom/harbor/tasks/scaffold-backedge/instruction.md": {
     "mtime": 1785992640.2385075,
     "ast_hash": "1560f743b9a4d42c582ef83034404fae",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/evals/checks/checkpoint-cost-is-bounded.check.mjs": {
+    "mtime": 1786030893.712021,
+    "ast_hash": "4112fc32ba4656a142e76ae1f7aa86f1",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/evals/checks/fork-branches-actually-run-concurrently.check.mjs": {
+    "mtime": 1786019594.9397144,
+    "ast_hash": "962ddb8a8d29cac25927a938608ff70f",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/evals/checks/fork-regions-are-provably-safe.check.mjs": {
+    "mtime": 1786030699.6085472,
+    "ast_hash": "f69e306d44c9ae25ffe7a22290a9a1de",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/evals/checks/patch-rejection-is-actionable.check.mjs": {
+    "mtime": 1786030699.610533,
+    "ast_hash": "3c9f35fd539dacf9b293afda290fb0ca",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/evals/checks/runtime-fanout-honours-its-bound.check.mjs": {
+    "mtime": 1786030699.611066,
+    "ast_hash": "9be664b803fcf105009d4cd71aced2d0",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/harbor/tasks/scaffold-fanout/solution/solve.sh": {
+    "mtime": 1786019594.9408607,
+    "ast_hash": "7be78aaf6df8bad114c31109eb8e3636",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/harbor/tasks/scaffold-fanout/tests/reward/checks.py": {
+    "mtime": 1786019594.9416556,
+    "ast_hash": "b4aba032413349618dd0f2196dc95985",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/harbor/tasks/scaffold-fanout/tests/test.sh": {
+    "mtime": 1786019594.9419086,
+    "ast_hash": "d622aa8e86a4177c75179b2b7e7bc76b",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/harbor/tasks/scaffold-runtime-fanout/solution/solve.sh": {
+    "mtime": 1786030699.6122239,
+    "ast_hash": "8de5e57b44a3c3309ce5dc2a0ddc9630",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/harbor/tasks/scaffold-runtime-fanout/tests/reward/checks.py": {
+    "mtime": 1786030699.613655,
+    "ast_hash": "66b8005994bce50163fb3c4dfa93d39d",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/harbor/tasks/scaffold-runtime-fanout/tests/test.sh": {
+    "mtime": 1786030699.6140137,
+    "ast_hash": "d622aa8e86a4177c75179b2b7e7bc76b",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/harbor/tasks/scaffold-fanout/instruction.md": {
+    "mtime": 1786019594.9406388,
+    "ast_hash": "7482d0469ea3446e3211a410c256fb11",
+    "semantic_hash": ""
+  },
+  "plugins/lirbox/skills/loom/harbor/tasks/scaffold-runtime-fanout/instruction.md": {
+    "mtime": 1786030699.611917,
+    "ast_hash": "61b441bd2d80dbe25d806ead68d31749",
     "semantic_hash": ""
   }
 }
