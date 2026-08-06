@@ -46,7 +46,7 @@ const coreSrc = inlineCore(fs.readFileSync(corePath, 'utf8'));
   const core = await import('file://' + corePath);
   const violations = core.validateGraph(graph, graph, null);
   if (violations.length) {
-    die('graph violates its own invariants:\n  - ' + violations.join('\n  - '));
+    die('graph violates its own invariants:\n  - ' + core.messages(violations).join('\n  - '));
   }
 
   if (fs.existsSync(outPath) && !force) {
@@ -140,9 +140,11 @@ async function checkpoint(cursor) {
 
 // Visit accounting. \`visits\` is whichever counter map the caller owns — a region is
 // handed its OWN, which is what makes accounting per-region rather than global.
-function bumpVisit(id, visits) {
+function bumpVisit(id, visits, base) {
   const visit = (visits[id] || 0) + 1
-  const cap = capFor(graph, id)
+  // The cap is a property of the AUTHORED node, so every fan-out instance gets its own full
+  // allowance rather than N instances sharing one budget and starving the last of them.
+  const cap = capFor(graph, base || id)
   if (visit > cap) {
     throw new Error('visit cap exceeded at ' + id + ' (' + visit + ' > ' + cap + ')')
   }
@@ -153,11 +155,15 @@ function bumpVisit(id, visits) {
 // Execute ONE node: visit accounting, the resume cache, the worker call, and any graph
 // patch it returns. Shared by the sequential walk and the region's dataflow runner, so
 // there is exactly one place where a node is run and one definition of what that costs.
+// \`id\` is the ACCOUNTING identity — for a fan-out instance that is \`Node@3\`, while the
+// prompt, schema and visit cap all come from the base node \`Node\`. Keeping the two apart is
+// what makes instance-level accounting exact instead of a shared counter.
 async function runNode(id, visits, inRegion) {
-  const n = graph.nodes.find((x) => x.id === id)
-  if (!n) throw new Error('unknown node: ' + id)
-  const visit = bumpVisit(id, visits)
-  const cap = capFor(graph, id)
+  const base = baseId(id)
+  const n = graph.nodes.find((x) => x.id === base)
+  if (!n) throw new Error('unknown node: ' + base)
+  const visit = bumpVisit(id, visits, base)
+  const cap = capFor(graph, base)
 
   // phase() mutates a single global progress cursor, so concurrent region nodes calling
   // it race each other's grouping. Inside a region the per-agent phase option passed to
@@ -199,7 +205,10 @@ async function runNode(id, visits, inRegion) {
       const next = applyPatchTo(graph, r.graphPatch)
       const viol = validateGraph(next, graph, { node: id, unsatisfiedGates: unsatisfiedGates() })
       if (viol.length) {
-        log('patch REJECTED at ' + id + ': ' + viol.join('; '))
+        // The log line stays prose for the human tailing the run; the TRACE keeps the
+        // structured violations, so the rejected worker (and loom-report) get the code,
+        // the offending node/edge and any suggested fix rather than a sentence to parse.
+        log('patch REJECTED at ' + id + ': ' + messages(viol).join('; '))
         trace.push({ node: id, visit, patch: 'rejected', violations: viol })
       } else {
         graph = next
@@ -253,50 +262,94 @@ async function walk(from, stopAt, visits, inRegion) {
       // results as if the work had been redone, while every visit cap silently reset.
       const regionVisits = {}
       for (const id of region) if (visits[id]) regionVisits[id] = visits[id]
+
+      // FAN-OUT. With no spec there is exactly one instance and \`suffix\` is empty, so the
+      // static path below IS the fan-out path with N = 1 — one scheduler, not two.
+      const spec = fanOutOf(n)
+      let items = [null]
+      if (spec) {
+        const carried = (carry[node] || {})[spec.field]
+        if (!Array.isArray(carried)) {
+          throw new Error('fork ' + node + ' fans out over "' + spec.field + '" but the carry '
+            + 'held ' + JSON.stringify(carried) + ' — refusing to run zero instances and '
+            + 'report the region done')
+        }
+        if (carried.length > spec.max) {
+          // NO SILENT TRUNCATION. The approved bound is the whole basis on which a human
+          // signed off a shape whose size was not knowable; quietly dropping the tail
+          // reports success for work that never ran.
+          throw new Error('fork ' + node + ' would fan out ' + carried.length + ' times but '
+            + 'the approved bound is ' + spec.max + ' — refusing to truncate. Re-approve with '
+            + 'a higher fanOut.max, or narrow the list upstream.')
+        }
+        if (carried.length === 0) {
+          throw new Error('fork ' + node + ' fanned out over an EMPTY "' + spec.field + '" — '
+            + 'a region that ran zero times cannot have done the work the join expects')
+        }
+        items = carried
+      }
+      const instances = items.map((item, i) => ({ item, i, suffix: spec ? '@' + i : '' }))
+      if (spec) {
+        log(node + ': fanning the region over ' + instances.length + ' item(s), bound '
+          + spec.max)
+      }
+
       const started = {}
-      const runRegionNode = (id) => {
-        if (!started[id]) {
-          started[id] = (async () => {
+      const runRegionNode = (id, inst) => {
+        const key = id + inst.suffix
+        if (!started[key]) {
+          started[key] = (async () => {
             const preds = regionPreds(graph, region, id)
             const done = await Promise.all(preds.map((e) =>
-              runRegionNode(e.from).then((res) => ({ e, res }))))
+              runRegionNode(e.from, inst).then((res) => ({ e, res }))))
             // Carry keyed BY PREDECESSOR, never flat-merged: two dependencies carrying
             // the same field name would silently overwrite each other and the node could
             // not tell which one it was reading. Entry nodes inherit the fork's own carry.
             if (done.length) {
               const from = {}
-              for (const d of done) from[d.e.from] = carryFor(d.e, d.res)
-              carry[id] = { from }
-            } else if (carry[node]) {
-              carry[id] = carry[node]
+              for (const d of done) from[d.e.from + inst.suffix] = carryFor(d.e, d.res)
+              carry[key] = { from }
+            } else {
+              // An entry node inherits the fork's own carry, plus — when fanning out — THE
+              // ITEM it exists to process. Without \`item\` every instance would receive an
+              // identical prompt and do identical work N times.
+              const inherited = carry[node] ? Object.assign({}, carry[node]) : {}
+              if (inst.item !== null) inherited.item = inst.item
+              carry[key] = inherited
             }
-            return await runNode(id, regionVisits, true)
+            return await runNode(key, regionVisits, true)
           })()
         }
-        return started[id]
+        return started[key]
       }
 
       // Running the sinks pulls in every other region node through its dependencies —
       // validateGraph has proven every region node reaches the join.
       const sinks = regionSinks(graph, region, n.join)
-      const outs = await parallel(sinks.map((id) => () =>
-        runRegionNode(id).then((res) => ({ id, res }))))
+      // Every sink of every instance, all in flight together — instances are no more
+      // serialised against each other than the DAG inside one of them is.
+      const work = []
+      for (const inst of instances) for (const id of sinks) work.push({ id, inst })
+      const outs = await parallel(work.map((w) => () =>
+        runRegionNode(w.id, w.inst).then((res) => ({ id: w.id + w.inst.suffix, res }))))
 
       const from = {}
       for (let i = 0; i < outs.length; i++) {
         // parallel() resolves a failed thunk to null. Crossing the join with a node
         // missing would hand the join a partial region and report it as done.
         if (!outs[i]) {
-          throw new Error('fork ' + node + ' region node ' + sinks[i] + ' did not complete '
-            + '— refusing to cross the join ' + n.join + ' with an incomplete region')
+          throw new Error('fork ' + node + ' region node ' + work[i].id + work[i].inst.suffix
+            + ' did not complete — refusing to cross the join ' + n.join
+            + ' with an incomplete region')
         }
-        const e = outEdges(graph, outs[i].id).find((x) => x.to === n.join)
+        const e = outEdges(graph, work[i].id).find((x) => x.to === n.join)
         from[outs[i].id] = carryFor(e, outs[i].res)
       }
       for (const k of Object.keys(regionVisits)) visits[k] = regionVisits[k]
 
       carry[n.join] = { from }
-      trace.push({ node, visit, joined: sinks, to: n.join })
+      trace.push({ node, visit, joined: Object.keys(from), to: n.join,
+        instances: spec ? instances.length : undefined })
       if (!inRegion) await checkpoint(n.join)
       node = n.join
       continue

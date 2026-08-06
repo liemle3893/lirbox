@@ -84,15 +84,74 @@ Three things are refused inside a region rather than silently raced:
 - **A dead node.** `parallel()` resolves a failed thunk to `null` rather than rejecting, so the
   run aborts instead of crossing the join with a partial region and calling it done.
 
-### Still out: fan-out over N runtime items
+### Fanning out over N runtime items
 
-A region's nodes are **declared statically**. Fanning out over a list of N discovered at
-runtime is not a scheduling problem — it conflicts with the skill's central promise. Visit
-caps, the trace and the frozen `lockedHash` all key on static node ids precisely so that *the
-shape a human approved is the shape that runs*; instantiating nodes at runtime means the shape
-is not knowable at approval time. Do it inside a work node (its worker spawns subagents and
-applies results serially), and accept that this concurrency is invisible to the graph and the
-report — so prefer it for read-only fan-out (surveying, searching) over concurrent mutation.
+When N is not knowable at authoring time, a fork may declare a **bound** and let its region be
+instantiated once per item:
+
+```json
+{ "id": "Fan", "kind": "fork", "join": "Integrate",
+  "fanOut": { "field": "targets", "max": 8 } }
+```
+
+`field` names an array in the carry arriving at the fork. The region becomes a **template**:
+for a list of three, every node `X` in it runs as `X@0`, `X@1`, `X@2`, all concurrently, each
+receiving its own element as `item` in its carry.
+
+**What the human approves changes shape here, and that is the whole reason `max` is
+mandatory.** Everywhere else in loom the approved graph *is* the executed graph — visit caps,
+the trace and `lockedHash` all key on static node ids. A fanning region cannot promise that,
+because N is discovered mid-run. So it promises the next strongest thing: *you approved this
+template and this ceiling.* `max` is what makes that checkable.
+
+Consequently the interpreter **refuses** rather than doing less than asked:
+
+| situation | what happens |
+|---|---|
+| more items than `max` | the run **aborts**. Truncating would report success for work that never ran, and would look identical in the report to a run that did everything |
+| the list is empty | aborts — a region that ran zero times cannot have produced what the join is about to be credited with |
+| the field is missing or not an array | aborts |
+
+`validateGraph` additionally requires the list to be **guaranteed**: every edge into a fanning
+fork must `carry` the field, and the node it comes from must list it in `schema.required`. A
+fan-out driven by a field a worker was free to omit instantiates nothing and reports success —
+the same defect as a back-edge carrying an optional field.
+
+Accounting is per **instance**: `X@0` and `X@1` each get the full visit cap authored on `X`,
+rather than sharing one budget and starving the last of them. The join's carry is keyed by
+instance (`{"from": {"Verify@0": …, "Verify@1": …}}`) and the trace records how many instances
+ran, so the report describes the shape that actually executed.
+
+A fanning fork needs only **one** entry node — its concurrency comes from N instances, not from
+two lanes.
+
+## Violations
+
+`validateGraph` returns **objects**, not sentences:
+
+```json
+{ "code": "fork-region-edge-conditional",
+  "message": "fork Fan region edge ApiWork -> Contract carries a predicate — …",
+  "fork": "Fan", "edge": { "from": "ApiWork", "to": "Contract" },
+  "fix": { "removeEdges": [{ "from": "ApiWork", "to": "Contract" }],
+           "addEdges":    [{ "from": "ApiWork", "to": "Contract", "when": "always" }] } }
+```
+
+| Field | Meaning |
+|---|---|
+| `code` | stable kebab-case slug, unique per rule. **Branch on this, never on `message`** — the prose is free to be reworded |
+| `message` | the human sentence, unchanged from before violations were structured |
+| `node` / `edge` / `gate` / `fork` / `join` / `nodes` | whichever the rule names, exposed as fields instead of only inside the sentence |
+| `fix` | present when a **mechanical** repair exists: an ordinary patch, in `applyPatchTo` shape |
+
+`fix` is a **suggestion and is never applied automatically.** It goes back through
+`applyPatchTo` + `validateGraph` like any other patch, so a wrong suggestion is rejected by the
+same gate as a wrong worker. A conductor that silently repaired its own workers' patches would
+be the gate-that-repairs failure in different clothes. Rules whose repair is a *design*
+decision (a dead-end node's successor) carry no `fix` rather than a guess.
+
+`messages(violations)` flattens to the array of strings every human surface prints. The
+server's 422 carries both: `violations` (strings, unchanged) and `diagnostics` (the objects).
 
 ## Top level
 
@@ -113,6 +172,7 @@ report — so prefer it for read-only fan-out (surveying, searching) over concur
 |---|---|---|
 | `id` | string | Unique per graph (`validateGraph` rejects duplicates). Referenced by every edge's `from`/`to`. |
 | `kind` | `"work" \| "gate" \| "plan" \| "terminal" \| "fork"` | **`"fork"` is behavioural; every other value is descriptive.** A `fork` changes control flow: the interpreter takes *every* out-edge concurrently instead of calling `pickEdge`, `validateGraph` enforces the whole region contract above, and `scaffold-loom.cjs` emits no `meta.phases` entry for it (it spawns no worker). For the rest, control flow never branches on `kind` — it is read only for the `meta.phases` detail string (`'${kind} node'`, defaulting to `work`) and by `editor.js` to pick a CSS class (`node-gate` / `node-fork` / `node-work`; `plan` and `terminal` both render as `node-work`). Whether a node must dominate the terminal, and whether it is locked, still comes entirely from `locked` and `invariants.mustCross`. **Calling something `"gate"` does not make it one** — but calling something `"fork"` does. |
+| `fanOut` | `{ field: string, max: integer }` | Optional, `fork` only. Turns the region into a template instantiated once per item in the carried array `field`, bounded by `max`. Both keys are required — `max` is the ceiling the human approves in place of a node count, and the run aborts rather than truncating past it. See the fan-out rules above. |
 | `join` | string | **Required on, and only meaningful for, a `fork`.** Names the node where the concurrent region closes. Must exist, must not be the fork itself, and must be crossed by every path leaving the fork (`dominates(join, terminal, fork)`). Inside the region it opens, edges are dependencies rather than transitions — see the region rules above. |
 | `prompt` | string | The node-specific instructions spliced into the worker prompt template (`node-lead.txt`) via `sub()`. Ignored for the terminal node, since the interpreter loop exits before reaching it. |
 | `schema` | JSON Schema object | Passed straight through as `{ schema: n.schema }` in the `agent()` call options — the structured-output contract the worker's result must satisfy. |

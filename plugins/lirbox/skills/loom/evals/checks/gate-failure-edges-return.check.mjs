@@ -3,19 +3,25 @@
 // still ended the run with it unsatisfied. In lite, pickEdge returned the SAME
 // destination for {passed:true} and {passed:false} — the verdict was inert.
 // Locked (evals/**): improvement loops may NEVER edit this file.
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
-const core = await import(join(SCRIPTS, 'graph-core.mjs'));
+// Mutation hatch for scripts/prove-checks.mjs: it copies the skill tree, mutates ONE
+// file in the copy, and points this variable at it. Without a hatch a check cannot be
+// mutation-proven, and an unproven check is not known to be measuring anything.
+const coreFile = process.env.LOOM_GRAPH_CORE_OVERRIDE
+  || join(SCRIPTS, 'graph-core.mjs');
+const core = await import(pathToFileURL(coreFile).href);
 
 let bad = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
 
 for (const profile of ['lite', 'delivery']) {
-  const seed = JSON.parse(readFileSync(join(SCRIPTS, 'seeds', `${profile}.json`), 'utf8'));
+  const seed = JSON.parse(readFileSync((process.env.LOOM_SEED_OVERRIDE && process.env.LOOM_SEED_OVERRIDE.endsWith(`${profile}.json`)
+      ? process.env.LOOM_SEED_OVERRIDE : join(SCRIPTS, 'seeds', `${profile}.json`)), 'utf8'));
   const gate = seed.invariants.mustCross[seed.invariants.mustCross.length - 1];
   const fail = seed.edges.find((e) => e.from === gate && e.when && e.when.eq === false);
 

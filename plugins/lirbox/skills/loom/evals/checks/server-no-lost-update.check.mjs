@@ -17,7 +17,7 @@ mkdirSync(join(root, '.loom', 'state'), { recursive: true });
 writeFileSync(join(root, '.loom', 'e.graph.json'),
   readFileSync(join(SCRIPTS, 'seeds', 'delivery.json'), 'utf8'));
 
-const srv = spawn('node', [join(SCRIPTS, 'graph-server.mjs'), '--name', 'e', '--root', root, '--port', '0']);
+const srv = spawn('node', [process.env.LOOM_SERVER_OVERRIDE || join(SCRIPTS, 'graph-server.mjs'), '--name', 'e', '--root', root, '--port', '0']);
 const port = await new Promise((res, rej) => {
   const t = setTimeout(() => rej(new Error('server did not start')), 8000);
   srv.stdout.on('data', (b) => {

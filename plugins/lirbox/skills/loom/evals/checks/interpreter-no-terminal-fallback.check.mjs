@@ -3,14 +3,19 @@
 // off-shape agent result: 6 of 8 plausible shapes reached the terminal, no patch needed.
 // Locked (evals/**): improvement loops may NEVER edit this file.
 import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
-const core = await import(join(SCRIPTS, 'graph-core.mjs'));
+// Mutation hatch for scripts/prove-checks.mjs: it copies the skill tree, mutates ONE
+// file in the copy, and points this variable at it. Without a hatch a check cannot be
+// mutation-proven, and an unproven check is not known to be measuring anything.
+const coreFile = process.env.LOOM_GRAPH_CORE_OVERRIDE
+  || join(SCRIPTS, 'graph-core.mjs');
+const core = await import(pathToFileURL(coreFile).href);
 
 let bad = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
@@ -29,7 +34,7 @@ g.invariants.lockedHash = core.lockedFingerprint(g);
 const tmp = mkdtempSync(join(tmpdir(), 'loom-check-'));
 const gf = join(tmp, 'g.json'), out = join(tmp, 'c.js');
 writeFileSync(gf, JSON.stringify(g));
-execFileSync('node', [join(SCRIPTS, 'scaffold-loom.cjs'), '--name', 'c',
+execFileSync('node', [process.env.LOOM_SCAFFOLD_OVERRIDE || join(SCRIPTS, 'scaffold-loom.cjs'), '--name', 'c',
   '--graph', gf, '--out', out, '--force'], { stdio: 'pipe' });
 const src = readFileSync(out, 'utf8');
 // POSITIVE STRUCTURAL assertions, not greps. A NEGATIVE grep forbids only the one
@@ -64,7 +69,7 @@ ok(core.pickEdge(P, 'GateA', { passed: false }).to === 'Setup', 'well-formed fai
 // 3. Dead ends are rejected at validation, before a run can start.
 const dead = core.applyPatchTo(g, { addNodes: [{ id: 'Dead' }],
   addEdges: [{ from: 'S', to: 'Dead', when: { field: 'q', eq: 1 } }] });
-ok(core.validateGraph(dead, g, null).some((m) => /dead-end/.test(m)), 'dead-end node rejected');
+ok(core.messages(core.validateGraph(dead, g, null)).some((m) => /dead-end/.test(m)), 'dead-end node rejected');
 
 if (bad) { console.error(`\ninterpreter-no-terminal-fallback: ${bad} failed`); process.exit(1); }
 console.log('interpreter-no-terminal-fallback: ok');

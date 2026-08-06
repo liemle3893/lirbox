@@ -32,7 +32,10 @@ closes at the `join` it names, and inside a region an edge means *depends on* �
 is a real DAG. A node with two arrows in waits for both; a node with one is not held up by
 unrelated work. The region must be acyclic, must have that one exit, and may not hide a
 `mustCross` gate (a gate has nowhere legal to fail to in there) — put it at or after the join.
-See `references/graph-spec.md` § *Sequential by default, concurrent where you say so*.
+When N is only knowable at run time, a fork may declare `fanOut: { field, max }` and its
+region becomes a template instantiated once per item — bounded, and the run **aborts** rather
+than truncating past the bound. See `references/graph-spec.md` § *Sequential by default,
+concurrent where you say so*.
 </when-to-use>
 
 <core-model>

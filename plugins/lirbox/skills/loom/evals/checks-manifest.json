@@ -11,31 +11,175 @@
   ],
   "checks": {
     "gate-dominance-not-bypassable": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "reading invariants from the SUBMITTED graph instead of the approved one is the total bypass: a patch declaring mustCross:[] runs zero dominance checks and validates clean",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "  const inv = (prev && prev.invariants) ? prev.invariants : (next.invariants || {});",
+          "replace": "  const inv = next.invariants || (prev && prev.invariants) || {};"
+        },
+        {
+          "why": "deleting the structural dominance test lets a bypass edge around a gate validate \u2014 this is the single claim loom is sold on",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (!dominates(next, gate, next.terminal, next.start)) {",
+          "replace": "    if (false) {"
+        },
+        {
+          "why": "exempting every gate out-edge (not only the locked passing one) readmits `Gate --fail--> Done`, which puts the gate on every path while never satisfying it",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "      if (e.locked && e.when && e.when.eq === true) continue;",
+          "replace": "      if (e.when) continue;"
+        },
+        {
+          "why": "dropping the node-budget ceiling lets a patch grow the graph without limit",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "  if (inv.nodeBudget && ids.length > inv.nodeBudget) {",
+          "replace": "  if (false) {"
+        }
+      ]
     },
     "cursor-rename-fails-closed": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "a permissive guard here skips positional dominance entirely when a patch renames the node the run is standing on \u2014 the rename is invisible to structural dominance",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (!idSet.has(cursor.node)) {",
+          "replace": "    if (false) {"
+        },
+        {
+          "why": "dropping positional dominance readmits start -> Gate -> Implement -> terminal: structurally dominated, yet the remaining path never re-crosses the failed gate",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "        if (!dominates(next, gate, next.terminal, cursor.node)) {",
+          "replace": "        if (false) {"
+        }
+      ]
     },
     "interpreter-no-terminal-fallback": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "routing an unmatched result to the terminal skips EVERY remaining gate \u2014 no adversary needed, just a worker returning {passed:'true'} instead of {passed:true}",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    const edge = pickEdge(graph, node, r)\n    if (!edge) {\n      throw new Error('no edge matched at ' + node",
+          "replace": "    const edge = pickEdge(graph, node, r) || { to: graph.terminal }\n    if (false) {\n      throw new Error('no edge matched at ' + node"
+        },
+        {
+          "why": "letting a dead-end node through means the interpreter arrives somewhere with nowhere legal to go and discovers it mid-run instead of before one",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "  const deadEnds = ids.filter((id) => id !== next.terminal && live.has(id)\n    && outEdges(next, id).length === 0);",
+          "replace": "  const deadEnds = [];"
+        }
+      ]
     },
     "purity-scan-has-teeth": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "a clock in the conductor layer breaks resume determinism, and the scan exists to catch exactly that",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "const NAME = ${JSON.stringify(name)}",
+          "replace": "const STAMP = Date.now()\nconst NAME = ${JSON.stringify(name)}"
+        },
+        {
+          "why": "fs in the conductor layer is the whole prohibition: every side effect belongs in a worker, which has full tools",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "let graph   = (args && args.graph)   ? args.graph   : GRAPH_V0",
+          "replace": "fs.writeFileSync('x', 'y')\nlet graph   = (args && args.graph)   ? args.graph   : GRAPH_V0"
+        }
+      ]
     },
     "dod-check-hash-lock": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "not recording checkSha at freeze time means a worker can weaken the very check it is measured by and the verification reports success",
+          "env": "LOOM_DOD_FREEZE_OVERRIDE",
+          "file": "scripts/dod-freeze.mjs",
+          "find": "    c.checkSha = sha256File(file);",
+          "replace": "    c.checkSha = undefined;"
+        },
+        {
+          "why": "comparing the recorded hash is the whole lock; without it a tampered check file passes verification",
+          "env": "LOOM_DOD_FREEZE_OVERRIDE",
+          "file": "scripts/dod-freeze.mjs",
+          "find": "    const actual = sha256File(p);",
+          "replace": "    const actual = c.checkSha;"
+        }
+      ]
     },
     "gate-failure-edges-return": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "a gate whose failing edge leads FORWARD cannot send the run back into real work \u2014 which is the only thing loom has over conductor",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "\"to\": \"Implement\",\n      \"when\": {\n        \"field\": \"passed\",\n        \"eq\": false\n      },\n      \"carry\": [\n        \"findings\"\n      ]",
+          "replace": "\"to\": \"DoDGate\",\n      \"when\": {\n        \"field\": \"passed\",\n        \"eq\": false\n      },\n      \"carry\": [\n        \"findings\"\n      ]"
+        }
+      ]
     },
     "baseline-discrimination-structural": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "a DoDBaseline whose out-edge is unconditional advances whether or not the criteria discriminated \u2014 the run proceeds on a DoD that could never have failed",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "\"field\": \"discriminates\",\n        \"eq\": true",
+          "replace": "\"field\": \"discriminates\",\n        \"eq\": false"
+        }
+      ]
     },
     "server-no-lost-update": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "without the optimistic-concurrency guard two concurrent saves both return 200 and one edit is silently discarded \u2014 the client is told it succeeded while its work is gone",
+          "env": "LOOM_SERVER_OVERRIDE",
+          "file": "scripts/graph-server.mjs",
+          "find": "      if (baseVersion !== prevVersion) {",
+          "replace": "      if (false) {"
+        },
+        {
+          "why": "accepting a bare graph body is a documented way to opt out of the guard, and a guard with a supported bypass is not a guard",
+          "env": "LOOM_SERVER_OVERRIDE",
+          "file": "scripts/graph-server.mjs",
+          "find": "      if (!body || typeof body !== 'object' || !body.graph\n          || typeof body.baseVersion !== 'number') {",
+          "replace": "      if (false) {"
+        }
+      ]
     },
     "editor-escapes-approval-gate": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "an unescaped node id reaches innerHTML on the page that IS the human approval gate, turning prompt-injected planner output into 'approve without a human'",
+          "env": "LOOM_EDITOR_JS_OVERRIDE",
+          "file": "scripts/editor/editor.js",
+          "find": "<h3>${esc(n.id)} <small>${esc(n.kind || 'work')}",
+          "replace": "<h3>${n.id} <small>${esc(n.kind || 'work')}"
+        },
+        {
+          "why": "dropping SRI lets a CDN serving different bytes tomorrow execute arbitrary code next to the repo it is about to edit",
+          "env": "LOOM_EDITOR_HTML_OVERRIDE",
+          "file": "scripts/editor/index.html",
+          "find": "integrity=\"sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z\" crossorigin=\"anonymous\"",
+          "replace": ""
+        }
+      ]
     },
     "editor-handles-survive-react-mount": {
       "expect": "green",
@@ -57,7 +201,23 @@
       ]
     },
     "lock-freeze-must-be-stamped": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "without the stamp check, mustCross can be set while lockedHash never was \u2014 the freeze did not happen, so a patch can MINT locked:true and the exemption rule has nothing behind it",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "  if (prev && (inv.mustCross || []).length && !inv.lockedHash) {",
+          "replace": "  if (false) {"
+        },
+        {
+          "why": "dropping the fingerprint comparison lets a replanner quietly rewrite a locked gate's prompt after approval",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "  if (lockedHash && lockedFingerprint(next) !== lockedHash) {",
+          "replace": "  if (false) {"
+        }
+      ]
     },
     "gate-adjudicates-never-commits": {
       "expect": "green",
@@ -141,11 +301,11 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "running the region's sinks one after another produces an identical trace, result and visit counts \u2014 the feature becomes decorative while every structural check stays green",
+          "why": "awaiting each region node in turn produces an identical trace, result and visit counts \u2014 the feature becomes decorative while every structural check stays green",
           "env": "LOOM_SCAFFOLD_OVERRIDE",
           "file": "scripts/scaffold-loom.cjs",
-          "find": "      const outs = await parallel(sinks.map((id) => () =>\n        runRegionNode(id).then((res) => ({ id, res }))))",
-          "replace": "      const outs = []\n      for (const id of sinks) { outs.push(await runRegionNode(id).then((res) => ({ id, res }))) }"
+          "find": "      const outs = await parallel(work.map((w) => () =>\n        runRegionNode(w.id, w.inst).then((res) => ({ id: w.id + w.inst.suffix, res }))))",
+          "replace": "      const outs = []\n      for (const w of work) { outs.push(await runRegionNode(w.id, w.inst).then((res) => ({ id: w.id + w.inst.suffix, res }))) }"
         },
         {
           "why": "waiting on every region node instead of a node's own dependencies is a WAVE scheduler: it still looks concurrent, but a node with one dependency is blocked by unrelated slow work",
@@ -158,15 +318,15 @@
           "why": "parallel() resolves a dead thunk to null rather than rejecting, so removing the guard silently crosses the join with a region node missing and reports the run complete",
           "env": "LOOM_SCAFFOLD_OVERRIDE",
           "file": "scripts/scaffold-loom.cjs",
-          "find": "        if (!outs[i]) {\n          throw new Error('fork ' + node + ' region node ' + sinks[i] + ' did not complete '\n            + '\u2014 refusing to cross the join ' + n.join + ' with an incomplete region')\n        }",
+          "find": "        if (!outs[i]) {\n          throw new Error('fork ' + node + ' region node ' + work[i].id + work[i].inst.suffix\n            + ' did not complete \u2014 refusing to cross the join ' + n.join\n            + ' with an incomplete region')\n        }",
           "replace": "        if (!outs[i]) { continue }"
         },
         {
           "why": "flat-merging a node's dependency carries lets one dependency silently overwrite another's field, and the node cannot tell which one it is reading",
           "env": "LOOM_SCAFFOLD_OVERRIDE",
           "file": "scripts/scaffold-loom.cjs",
-          "find": "              carry[id] = { from }",
-          "replace": "              carry[id] = Object.assign({}, ...Object.keys(from).map((k) => from[k]))"
+          "find": "              carry[key] = { from }",
+          "replace": "              carry[key] = Object.assign({}, ...Object.keys(from).map((k) => from[k]))"
         }
       ]
     },
@@ -186,6 +346,72 @@
           "file": "scripts/seeds/delivery.json",
           "find": "\"prUrl\",\n          \"delivered\"",
           "replace": "\"prUrl\""
+        }
+      ]
+    },
+    "patch-rejection-is-actionable": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "dropping a suggested fix returns the worker to 'you were wrong, work out what to send' \u2014 the prose-only rejection this exists to end",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "      { nodes: orphans, fix: { removeNodes: orphans } });",
+          "replace": "      { nodes: orphans });"
+        },
+        {
+          "why": "a violation that names an edge must expose it as a field; leaving it only inside the sentence forces the caller to parse English",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "        { node: e.to, edge: { from: e.from, to: e.to },\n          fix: { removeEdges: [{ from: e.from, to: e.to }] } });",
+          "replace": "        { node: e.to });"
+        },
+        {
+          "why": "a suggested fix that does not actually clear the violation costs the worker a whole visit to discover \u2014 worse than offering none",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "            fix: { removeEdges: [{ from: e.from, to: e.to }],\n              addEdges: [Object.assign({}, e, { when: 'always' })] } });",
+          "replace": "            fix: { removeEdges: [{ from: e.from, to: e.to }] } });"
+        },
+        {
+          "why": "messages() must keep returning the human sentence verbatim, or the editor and CLI render [object Object] at a person",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "  for (const x of violations || []) out.push(x && x.message !== undefined ? x.message : String(x));",
+          "replace": "  for (const x of violations || []) out.push(x);"
+        }
+      ]
+    },
+    "runtime-fanout-honours-its-bound": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "truncating to the bound instead of refusing reports success for work that never ran, and looks identical in the report to a run that did everything",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "          throw new Error('fork ' + node + ' would fan out ' + carried.length + ' times but '\n            + 'the approved bound is ' + spec.max + ' \u2014 refusing to truncate. Re-approve with '\n            + 'a higher fanOut.max, or narrow the list upstream.')",
+          "replace": "          carried.length = spec.max"
+        },
+        {
+          "why": "an instance that is not handed its own item gets the same prompt as every other and does identical work N times",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "              if (inst.item !== null) inherited.item = inst.item",
+          "replace": "              if (false) inherited.item = inst.item"
+        },
+        {
+          "why": "accounting instances under the template id makes N instances share one visit budget and starves the last of them",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  const visit = bumpVisit(id, visits, base)",
+          "replace": "  const visit = bumpVisit(base, visits, base)"
+        },
+        {
+          "why": "running instances one after another makes the whole feature decorative while every structural check stays green",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      const outs = await parallel(work.map((w) => () =>\n        runRegionNode(w.id, w.inst).then((res) => ({ id: w.id + w.inst.suffix, res }))))",
+          "replace": "      const outs = []\n      for (const w of work) { outs.push(await runRegionNode(w.id, w.inst).then((res) => ({ id: w.id + w.inst.suffix, res }))) }"
         }
       ]
     }

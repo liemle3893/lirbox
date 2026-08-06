@@ -3,14 +3,16 @@
 // met before the work cannot discriminate it).
 // Locked (evals/**): improvement loops may NEVER edit this file.
 import { mkdtempSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FREEZE = resolve(HERE, '..', '..', 'scripts', 'dod-freeze.mjs');
-const m = await import(FREEZE);
+// Mutation hatch for scripts/prove-checks.mjs — see the other loom checks.
+const FREEZE = process.env.LOOM_DOD_FREEZE_OVERRIDE
+  || resolve(HERE, '..', '..', 'scripts', 'dod-freeze.mjs');
+const m = await import(pathToFileURL(FREEZE).href);
 
 const tmp = mkdtempSync(join(tmpdir(), 'loom-dod-'));
 const dodPath = join(tmp, 'dod.json');

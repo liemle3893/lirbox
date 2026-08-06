@@ -3,14 +3,19 @@
 // licenses blanking template literals whole).
 // Locked (evals/**): improvement loops may NEVER edit this file.
 import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
-const core = await import(join(SCRIPTS, 'graph-core.mjs'));
+// Mutation hatch for scripts/prove-checks.mjs: it copies the skill tree, mutates ONE
+// file in the copy, and points this variable at it. Without a hatch a check cannot be
+// mutation-proven, and an unproven check is not known to be measuring anything.
+const coreFile = process.env.LOOM_GRAPH_CORE_OVERRIDE
+  || join(SCRIPTS, 'graph-core.mjs');
+const core = await import(pathToFileURL(coreFile).href);
 
 // ONE tokenizer — a VERBATIM COPY of `codeOnly` in scripts/test-loom.cjs.
 //
@@ -137,7 +142,7 @@ g.invariants.lockedHash = core.lockedFingerprint(g);
 const tmp = mkdtempSync(join(tmpdir(), 'loom-scan-'));
 const gf = join(tmp, 'g.json'), out = join(tmp, 's.js');
 writeFileSync(gf, JSON.stringify(g));
-execFileSync('node', [join(SCRIPTS, 'scaffold-loom.cjs'), '--name', 's',
+execFileSync('node', [process.env.LOOM_SCAFFOLD_OVERRIDE || join(SCRIPTS, 'scaffold-loom.cjs'), '--name', 's',
   '--graph', gf, '--out', out, '--force'], { stdio: 'pipe' });
 const src = readFileSync(out, 'utf8');
 

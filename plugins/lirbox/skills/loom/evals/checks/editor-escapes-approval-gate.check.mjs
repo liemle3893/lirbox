@@ -9,8 +9,13 @@ import { readFileSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EDITOR = resolve(HERE, '..', '..', 'scripts', 'editor');
-const js = readFileSync(join(EDITOR, 'editor.js'), 'utf8');
-const html = readFileSync(join(EDITOR, 'index.html'), 'utf8');
+// Mutation hatch for scripts/prove-checks.mjs: it copies the skill tree, mutates ONE
+// file in the copy, and points this variable at it. Without a hatch a check cannot be
+// mutation-proven, and an unproven check is not known to be measuring anything.
+const js = readFileSync(process.env.LOOM_EDITOR_JS_OVERRIDE
+  || join(EDITOR, 'editor.js'), 'utf8');
+const html = readFileSync(process.env.LOOM_EDITOR_HTML_OVERRIDE
+  || join(EDITOR, 'index.html'), 'utf8');
 
 let bad = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };

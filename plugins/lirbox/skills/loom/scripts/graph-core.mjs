@@ -157,6 +157,40 @@ function regionOrder(graph, region) {
   return order.length === region.size ? order : null;
 }
 
+// ---- runtime fan-out ----------------------------------------------------------------
+//
+// A fork may declare `fanOut: { field, max }`. Its region then stops being one concurrent
+// unit and becomes a TEMPLATE, instantiated once per item in the list that arrives in the
+// fork's carry under `field`, up to `max`.
+//
+// This is the one place loom lets the running shape differ from the approved shape, so the
+// terms are narrow and deliberate. The human does not approve N nodes — N is not knowable at
+// approval. They approve a template and a BOUND, and `max` is what makes that promise
+// checkable: a list longer than `max` is refused outright rather than silently truncated,
+// because a run that quietly drops items reports success for work it never did.
+//
+// Instance ids are `<nodeId>@<index>`. The separator is not `#`, which already separates a
+// node from its visit number (`Implement#2`) — reusing it would make `A#1#2` ambiguous
+// between "A instance 1, visit 2" and "A visit 1, instance 2".
+function instanceId(nodeId, index) {
+  return nodeId + '@' + index;
+}
+
+// The base node an instance id came from. Total, so a caller can pass either shape.
+function baseId(id) {
+  const i = String(id).indexOf('@');
+  return i === -1 ? id : String(id).slice(0, i);
+}
+
+// Normalised fan-out spec, or null for an ordinary static fork.
+function fanOutOf(node) {
+  const f = node && node.fanOut;
+  if (!f || typeof f !== 'object') return null;
+  if (typeof f.field !== 'string' || !f.field) return null;
+  if (!Number.isInteger(f.max) || f.max < 1) return null;
+  return { field: f.field, max: f.max };
+}
+
 // The region nodes that feed the join. Running these pulls every other region node in
 // through its dependencies, since every region node must reach the join.
 function regionSinks(graph, region, join) {
@@ -260,24 +294,70 @@ function applyPatchTo(graph, patch) {
   return g;
 }
 
-// Returns violation messages; [] means the graph is acceptable.
+// ---- diagnostics -------------------------------------------------------------------
+//
+// A violation is an OBJECT, not a sentence. Every fact needed to CONSTRUCT the corrected
+// patch is known at the point the violation is raised — the fork id, the offending node,
+// the edge, the join it should have targeted — and flattening all of that into prose makes
+// the worker whose patch was rejected re-derive it from English.
+//
+// This is the same defect loom already fixed one layer up: `DoDGate` carried `unmetCriteria`
+// (bare ids) and the re-entered node worked blind; carrying evidence-bearing `criteria`
+// converged in one visit. Patch rejection is that channel again — telling a worker THAT it
+// was wrong and never WHAT to send instead.
+//
+// `message` is preserved verbatim, so every human-facing surface reads exactly as before.
+// `fix`, where present, is a SUGGESTION: it is an ordinary patch and goes back through
+// applyPatchTo + validateGraph like any other, so a wrong suggestion is rejected by the same
+// gate as a wrong worker. Nothing in this file ever applies one — a conductor that repaired
+// its own workers' patches would be the gate-that-repairs failure wearing different clothes.
+function violation(code, message, extra) {
+  return Object.assign({ code, message }, extra || {});
+}
+
+// Flatten to the strings every caller used to print. Tolerates a bare string, so a consumer
+// meeting an older payload renders prose rather than "[object Object]" at a human.
+function messages(violations) {
+  const out = [];
+  for (const x of violations || []) out.push(x && x.message !== undefined ? x.message : String(x));
+  return out;
+}
+
+// Returns violations; [] means the graph is acceptable. See `violation` above for the shape.
 // `prev` supplies the frozen lockedHash (null pre-approval).
 // `cursor` = { node, unsatisfiedGates } during a run, null pre-flight.
 function validateGraph(next, prev, cursor) {
   const v = [];
+  const push = (code, message, extra) => v.push(violation(code, message, extra));
   const ids = next.nodes.map((n) => n.id);
   const idSet = new Set(ids);
 
   const dup = ids.filter((id, i) => ids.indexOf(id) !== i);
-  if (dup.length) v.push('duplicate node id: ' + [...new Set(dup)].join(', '));
-
-  for (const e of next.edges) {
-    if (!idSet.has(e.from)) v.push('edge from unknown node: ' + e.from);
-    if (!idSet.has(e.to)) v.push('edge to unknown node: ' + e.to);
+  if (dup.length) {
+    push('duplicate-node-id', 'duplicate node id: ' + [...new Set(dup)].join(', '),
+      { nodes: [...new Set(dup)] });
   }
 
-  if (!idSet.has(next.start)) v.push('start node missing: ' + next.start);
-  if (!idSet.has(next.terminal)) v.push('terminal node missing: ' + next.terminal);
+  for (const e of next.edges) {
+    if (!idSet.has(e.from)) {
+      push('edge-from-unknown-node', 'edge from unknown node: ' + e.from,
+        { node: e.from, edge: { from: e.from, to: e.to },
+          fix: { removeEdges: [{ from: e.from, to: e.to }] } });
+    }
+    if (!idSet.has(e.to)) {
+      push('edge-to-unknown-node', 'edge to unknown node: ' + e.to,
+        { node: e.to, edge: { from: e.from, to: e.to },
+          fix: { removeEdges: [{ from: e.from, to: e.to }] } });
+    }
+  }
+
+  if (!idSet.has(next.start)) {
+    push('start-node-missing', 'start node missing: ' + next.start, { node: next.start });
+  }
+  if (!idSet.has(next.terminal)) {
+    push('terminal-node-missing', 'terminal node missing: ' + next.terminal,
+      { node: next.terminal });
+  }
 
   // INVARIANTS ARE THE APPROVED CONTRACT — they are read from `prev`, never from the
   // graph being validated. Reading them from `next` is a full bypass: a caller submits
@@ -291,7 +371,8 @@ function validateGraph(next, prev, cursor) {
   // exempt-locked-edge rule has nothing behind it and a patch can MINT locked:true.
   // Only once `prev` exists — a graph pre-approval has not been frozen yet.
   if (prev && (inv.mustCross || []).length && !inv.lockedHash) {
-    v.push('invariants.mustCross is set but invariants.lockedHash was never stamped — '
+    push('locked-hash-not-stamped',
+      'invariants.mustCross is set but invariants.lockedHash was never stamped — '
       + 'the freeze did not happen, so locked flags are unenforceable');
   }
 
@@ -299,16 +380,18 @@ function validateGraph(next, prev, cursor) {
   // silently having its edits ignored.
   if (prev && prev.invariants
       && stableStringify(next.invariants || {}) !== stableStringify(prev.invariants)) {
-    v.push('invariants were modified — they are frozen at approval');
+    push('invariants-modified', 'invariants were modified — they are frozen at approval');
   }
 
   if (inv.nodeBudget && ids.length > inv.nodeBudget) {
-    v.push('node budget exceeded: ' + ids.length + ' > ' + inv.nodeBudget);
+    push('node-budget-exceeded', 'node budget exceeded: ' + ids.length + ' > ' + inv.nodeBudget,
+      { count: ids.length, budget: inv.nodeBudget });
   }
 
   const lockedHash = prev && prev.invariants && prev.invariants.lockedHash;
   if (lockedHash && lockedFingerprint(next) !== lockedHash) {
-    v.push('locked nodes/edges were modified or removed');
+    push('locked-elements-modified', 'locked nodes/edges were modified or removed',
+      { expected: lockedHash, actual: lockedFingerprint(next) });
   }
 
   // Everything below needs a well-formed skeleton; bail out rather than
@@ -317,10 +400,15 @@ function validateGraph(next, prev, cursor) {
 
   const live = reachable(next, next.start, []);
   if (!live.has(next.terminal)) {
-    v.push('terminal ' + next.terminal + ' unreachable from ' + next.start);
+    push('terminal-unreachable',
+      'terminal ' + next.terminal + ' unreachable from ' + next.start,
+      { node: next.terminal, from: next.start });
   }
   const orphans = ids.filter((id) => !live.has(id));
-  if (orphans.length) v.push('orphaned node(s): ' + orphans.join(', '));
+  if (orphans.length) {
+    push('orphaned-nodes', 'orphaned node(s): ' + orphans.join(', '),
+      { nodes: orphans, fix: { removeNodes: orphans } });
+  }
 
   // A reachable non-terminal node with no outgoing edge is a dead end — the interpreter
   // would arrive there with nowhere legal to go and (correctly) throw at runtime. Catch
@@ -328,7 +416,10 @@ function validateGraph(next, prev, cursor) {
   const deadEnds = ids.filter((id) => id !== next.terminal && live.has(id)
     && outEdges(next, id).length === 0);
   if (deadEnds.length) {
-    v.push('dead-end node(s) with no outgoing edge: ' + deadEnds.join(', '));
+    // No `fix`: which successor a dead end should have is a design decision, not a
+    // mechanical repair, and guessing one would be worse than saying nothing.
+    push('dead-end-nodes', 'dead-end node(s) with no outgoing edge: ' + deadEnds.join(', '),
+      { nodes: deadEnds });
   }
 
   // ---- fork / join regions ----------------------------------------------------------
@@ -340,31 +431,54 @@ function validateGraph(next, prev, cursor) {
   const regionOf = new Map(); // node id -> owning fork id, for the gate rule
   for (const f of next.nodes.filter((n) => n.kind === 'fork')) {
     if (typeof f.join !== 'string' || !idSet.has(f.join)) {
-      v.push('fork ' + f.id + ' must declare `join` naming an existing node (got '
-        + JSON.stringify(f.join) + ')');
+      push('fork-join-missing',
+        'fork ' + f.id + ' must declare `join` naming an existing node (got '
+        + JSON.stringify(f.join) + ')', { fork: f.id, node: f.id, join: f.join });
       continue;
     }
-    if (f.join === f.id) { v.push('fork ' + f.id + ' cannot join to itself'); continue; }
+    if (f.join === f.id) {
+      push('fork-join-self', 'fork ' + f.id + ' cannot join to itself',
+        { fork: f.id, node: f.id });
+      continue;
+    }
 
     // A fork spawns no worker: it opens a region. A prompt or schema on one is a modelling
     // error that would silently never run.
     if (f.prompt !== undefined || f.schema !== undefined) {
-      v.push('fork ' + f.id + ' must not declare a prompt or schema — a fork spawns no '
-        + 'worker, it only opens a concurrent region; put the work in a region node');
+      push('fork-declares-work',
+        'fork ' + f.id + ' must not declare a prompt or schema — a fork spawns no '
+        + 'worker, it only opens a concurrent region; put the work in a region node',
+        { fork: f.id, node: f.id });
     }
 
     const entries = outEdges(next, f.id);
-    if (entries.length < 2) {
-      v.push('fork ' + f.id + ' has ' + entries.length + ' out-edge(s) — a fork needs at '
-        + 'least 2 independent entry nodes; one is a plain edge, not a fork');
+    // A FANNING fork gets its concurrency from N instances of one template, so a single
+    // entry is the normal shape there. Only a static fork needs two, because that is the
+    // only place its concurrency could come from.
+    const minEntries = fanOutOf(f) ? 1 : 2;
+    if (entries.length < minEntries) {
+      push('fork-too-few-entries',
+        'fork ' + f.id + ' has ' + entries.length + ' out-edge(s) — a fork needs at '
+        + 'least ' + minEntries + ' entry node(s)'
+        + (minEntries === 2 ? '; one is a plain edge, not a fork' : ''),
+        { fork: f.id, node: f.id, count: entries.length, min: minEntries });
     }
 
-    // ONE EXIT. Without this a region node could route back into the main line and the run
-    // would walk the rest of the graph concurrently with itself.
+    // ONE EXIT, and it is the ONLY containment rule there is.
+    //
+    // There was briefly a second one — "a region node's out-edge must stay in the region or
+    // hit the join" — and it was dead code that could never fire. `regionNodes` is the
+    // transitive closure from the entries with the join deleted, so a region node's successor
+    // is in the region BY CONSTRUCTION; the only way out is the join. An escaping edge does
+    // not leave the region, it DRAGS the rest of the graph in, terminal included, and that is
+    // exactly what this dominance test detects. Do not re-add a containment check here
+    // thinking it guards something: it would report zero violations forever and read like a
+    // second line of defence that is not there.
     if (!dominates(next, f.join, next.terminal, f.id)) {
-      v.push('fork ' + f.id + ' can reach ' + next.terminal + ' without crossing its join '
+      push('fork-region-escapes-join',
+        'fork ' + f.id + ' can reach ' + next.terminal + ' without crossing its join '
         + f.join + ' — a node that escapes the region would run the rest of the graph '
-        + 'concurrently with itself');
+        + 'concurrently with itself', { fork: f.id, node: f.id, join: f.join });
     }
 
     const region = regionNodes(next, f);
@@ -375,38 +489,82 @@ function validateGraph(next, prev, cursor) {
     for (const id of region) for (const oe of outEdges(next, id)) regionEdges.push(oe);
     for (const e of regionEdges) {
       if (!(e.when === undefined || e.when === null || e.when === 'always')) {
-        v.push('fork ' + f.id + ' region edge ' + e.from + ' -> ' + e.to + ' carries a '
+        push('fork-region-edge-conditional',
+          'fork ' + f.id + ' region edge ' + e.from + ' -> ' + e.to + ' carries a '
           + 'predicate — inside a region an edge means "depends on", not "go to next", and '
-          + 'every region node runs');
+          + 'every region node runs',
+          { fork: f.id, edge: { from: e.from, to: e.to },
+            fix: { removeEdges: [{ from: e.from, to: e.to }],
+              addEdges: [Object.assign({}, e, { when: 'always' })] } });
       }
     }
 
     // A dependency cycle is a DEADLOCK, not a retry loop: each node waits on the other and
     // there is no verdict to break it with. Catch it here rather than as a hang.
     if (region.size && regionOrder(next, region) === null) {
-      v.push('fork ' + f.id + ' region contains a dependency cycle — inside a region an '
+      push('fork-region-cycle',
+        'fork ' + f.id + ' region contains a dependency cycle — inside a region an '
         + 'edge means "depends on", so a cycle is a deadlock, not a retry. A back-edge '
-        + 'belongs outside a region, on a gate.');
+        + 'belongs outside a region, on a gate.',
+        { fork: f.id, node: f.id, join: f.join, nodes: [...region] });
     }
 
     for (const id of region) {
       if (!reachable(next, id, []).has(f.join)) {
-        v.push('fork ' + f.id + ' region node ' + id + ' never reaches its join ' + f.join);
-      }
-      // Containment: a region node feeds other region nodes, or the join. Nothing else.
-      for (const oe of outEdges(next, id)) {
-        if (oe.to === f.join || region.has(oe.to)) continue;
-        v.push('fork ' + f.id + ' region node ' + id + ' -> ' + oe.to + ' leaves the region '
-          + 'without passing through the join ' + f.join);
+        push('fork-region-node-strands',
+          'fork ' + f.id + ' region node ' + id + ' never reaches its join ' + f.join,
+          { fork: f.id, node: id, join: f.join,
+            fix: { addEdges: [{ from: id, to: f.join, when: 'always' }] } });
       }
       // A region is already a DAG and can express anything a nested fork could; the
       // dataflow runner schedules one region at a time.
       const rn = next.nodes.find((n) => n.id === id);
       if (rn && rn.kind === 'fork') {
-        v.push('fork ' + f.id + ' region contains a nested fork ' + id + ' — a region is '
-          + 'already a DAG; express the extra concurrency as dependencies inside it');
+        push('fork-region-nested-fork',
+          'fork ' + f.id + ' region contains a nested fork ' + id + ' — a region is '
+          + 'already a DAG; express the extra concurrency as dependencies inside it',
+          { fork: f.id, node: id });
       }
       if (!regionOf.has(id)) regionOf.set(id, f.id);
+    }
+
+    // ---- runtime fan-out ----------------------------------------------------------
+    if (f.fanOut !== undefined) {
+      const spec = fanOutOf(f);
+      if (!spec) {
+        push('fanout-spec-invalid',
+          'fork ' + f.id + ' declares fanOut but it must be '
+          + '{ field: <non-empty string>, max: <integer >= 1> } (got '
+          + JSON.stringify(f.fanOut) + ') — `max` is the bound the human approves in place '
+          + 'of a node count, so it is not optional',
+          { fork: f.id, node: f.id });
+      } else {
+        // The list must be GUARANTEED to arrive, for the same reason a back-edge's carry
+        // must be: an instantiation driven by a field the previous node was free to omit
+        // fans out over nothing and reports success.
+        const feeds = next.edges.filter((e) => e.to === f.id);
+        for (const e of feeds) {
+          const carries = Array.isArray(e.carry) && e.carry.indexOf(spec.field) !== -1;
+          if (!carries) {
+            push('fanout-list-not-carried',
+              'fork ' + f.id + ' fans out over "' + spec.field + '" but the edge '
+              + e.from + ' -> ' + f.id + ' does not carry it — the list would arrive '
+              + 'undefined and the region would instantiate zero times',
+              { fork: f.id, node: f.id, edge: { from: e.from, to: e.to }, field: spec.field,
+                fix: { removeEdges: [{ from: e.from, to: e.to }],
+                  addEdges: [Object.assign({}, e, {
+                    carry: (e.carry || []).concat([spec.field]) })] } });
+          }
+          const src = next.nodes.find((n) => n.id === e.from);
+          const req = (src && src.schema && src.schema.required) || [];
+          if (src && src.schema && req.indexOf(spec.field) === -1) {
+            push('fanout-list-not-required',
+              'fork ' + f.id + ' fans out over "' + spec.field + '", but ' + e.from
+              + ' does not list it in schema.required — a worker may legally omit it',
+              { fork: f.id, node: e.from, field: spec.field });
+          }
+        }
+      }
     }
   }
 
@@ -418,17 +576,23 @@ function validateGraph(next, prev, cursor) {
   // join or after it, it can see every region node's output anyway.
   for (const gate of inv.mustCross || []) {
     if (!regionOf.has(gate)) continue;
-    v.push('mustCross gate ' + gate + ' sits inside fork region ' + regionOf.get(gate)
+    push('gate-inside-fork-region',
+      'mustCross gate ' + gate + ' sits inside fork region ' + regionOf.get(gate)
       + ' — a gate must be able to route its failure backwards, and inside a region that is '
-      + 'either a dependency cycle or an escape from the join. Move it to the join or after.');
+      + 'either a dependency cycle or an escape from the join. Move it to the join or after.',
+      { gate, node: gate, fork: regionOf.get(gate) });
   }
 
   // Structural dominance — from `start`, over EVERY declared gate. Position-independent,
   // so it holds for the whole run and cannot be invalidated by later progress.
   for (const gate of inv.mustCross || []) {
-    if (!idSet.has(gate)) { v.push('mustCross node missing: ' + gate); continue; }
+    if (!idSet.has(gate)) {
+      push('mustcross-node-missing', 'mustCross node missing: ' + gate, { gate, node: gate });
+      continue;
+    }
     if (!dominates(next, gate, next.terminal, next.start)) {
-      v.push(gate + ' no longer dominates ' + next.terminal);
+      push('gate-no-longer-dominates', gate + ' no longer dominates ' + next.terminal,
+        { gate, node: gate, terminal: next.terminal });
     }
   }
 
@@ -468,8 +632,10 @@ function validateGraph(next, prev, cursor) {
       if (e.locked && e.when && e.when.eq === true) continue;
       if (!idSet.has(e.to)) continue;
       if (!dominates(next, gate, next.terminal, e.to)) {
-        v.push(gate + ' non-passing edge -> ' + e.to + ' can reach ' + next.terminal
-          + ' without re-crossing ' + gate);
+        push('gate-non-passing-edge-escapes',
+          gate + ' non-passing edge -> ' + e.to + ' can reach ' + next.terminal
+          + ' without re-crossing ' + gate,
+          { gate, node: gate, edge: { from: e.from, to: e.to }, terminal: next.terminal });
       }
     }
   }
@@ -482,14 +648,17 @@ function validateGraph(next, prev, cursor) {
     // terminal without recrossing the gate that just failed. Structural dominance does NOT
     // catch it, because renaming a mid-graph node leaves every path from `start` intact.
     if (!idSet.has(cursor.node)) {
-      v.push('cursor node ' + cursor.node + ' was removed by this patch — a run may not '
-        + 'delete or rename the node it is currently executing');
+      push('cursor-node-removed',
+        'cursor node ' + cursor.node + ' was removed by this patch — a run may not '
+        + 'delete or rename the node it is currently executing', { node: cursor.node });
     } else {
       for (const gate of cursor.unsatisfiedGates || []) {
         if (!idSet.has(gate)) continue;
         if (!dominates(next, gate, next.terminal, cursor.node)) {
-          v.push(gate + ' is unsatisfied but no longer dominates ' + next.terminal
-            + ' from ' + cursor.node);
+          push('gate-unsatisfied-from-cursor',
+            gate + ' is unsatisfied but no longer dominates ' + next.terminal
+            + ' from ' + cursor.node,
+            { gate, node: gate, cursor: cursor.node, terminal: next.terminal });
         }
       }
     }
@@ -497,4 +666,4 @@ function validateGraph(next, prev, cursor) {
   return v;
 }
 
-export { outEdges, reachable, dominates, matches, pickEdge, regionNodes, regionPreds, regionOrder, regionSinks, capFor, carryFor, stableStringify, fnv1a, lockedFingerprint, applyPatchTo, validateGraph };
+export { outEdges, reachable, dominates, matches, pickEdge, violation, messages, instanceId, baseId, fanOutOf, regionNodes, regionPreds, regionOrder, regionSinks, capFor, carryFor, stableStringify, fnv1a, lockedFingerprint, applyPatchTo, validateGraph };

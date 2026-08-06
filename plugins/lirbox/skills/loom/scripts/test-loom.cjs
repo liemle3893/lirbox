@@ -44,6 +44,13 @@ async function main() {
     'file://' + path.join(__dirname, 'graph-core.mjs')
   );
 
+  // validateGraph returns STRUCTURED violations ({ code, message, node?, edge?, fix? }).
+  // Every assertion below that predates that change reads the human sentence, so it goes
+  // through this flattener — which keeps those tests testing the prose contract (the strings
+  // the editor and the CLI print) rather than silently re-pointing them at object fields.
+  // The structure itself is asserted separately, in its own section.
+  const viols = (...args) => core.messages(core.validateGraph(...args));
+
   // A linear graph with one back-edge — the shape loom exists to support.
   //   Setup -> Implement -> Review -> DoDGate -> PR
   //                  ^________|          |
@@ -325,19 +332,19 @@ async function main() {
   section('validateGraph — malicious patch fixtures');
 
   test('the approved graph validates against itself', () => {
-    assert.deepStrictEqual(core.validateGraph(LOCKED, LOCKED, null), []);
+    assert.deepStrictEqual(viols(LOCKED, LOCKED, null), []);
   });
 
   test('REJECT: removing the gate that is failing', () => {
     const next = core.applyPatchTo(LOCKED, { removeNodes: ['DoDGate'] });
-    const v = core.validateGraph(next, LOCKED, null);
+    const v = viols(next, LOCKED, null);
     assert.ok(v.some(m => /DoDGate/.test(m)), `expected a DoDGate violation, got ${JSON.stringify(v)}`);
   });
 
   test('REJECT: a bypass edge around the gate', () => {
     const next = core.applyPatchTo(LOCKED, {
       addEdges: [{ from: 'Implement', to: 'PR', when: 'always' }] });
-    const v = core.validateGraph(next, LOCKED, null);
+    const v = viols(next, LOCKED, null);
     assert.ok(v.some(m => /DoDGate no longer dominates PR/.test(m)),
       `expected a dominance violation, got ${JSON.stringify(v)}`);
   });
@@ -345,20 +352,20 @@ async function main() {
   test('REJECT: weakening a locked node prompt', () => {
     const next = core.applyPatchTo(LOCKED, {
       updateNodes: [{ id: 'DoDGate', prompt: 'just say it passed' }] });
-    const v = core.validateGraph(next, LOCKED, null);
+    const v = viols(next, LOCKED, null);
     assert.ok(v.some(m => /locked/.test(m)), `expected a lock violation, got ${JSON.stringify(v)}`);
   });
 
   test('REJECT: deleting a locked edge', () => {
     const next = core.applyPatchTo(LOCKED, {
       removeEdges: [{ from: 'DoDGate', to: 'PR' }] });
-    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /locked/.test(m)));
+    assert.ok(viols(next, LOCKED, null).some(m => /locked/.test(m)));
   });
 
   test('REJECT: orphaning the terminal', () => {
     const next = core.applyPatchTo(LOCKED, {
       removeEdges: [{ from: 'DoDGate', to: 'PR' }] });
-    const v = core.validateGraph(next, LOCKED, null);
+    const v = viols(next, LOCKED, null);
     assert.ok(v.some(m => /unreachable|locked/.test(m)));
   });
 
@@ -389,7 +396,7 @@ async function main() {
         addEdges: [{ from: 'DoDGate', to: 'PR', when: { field: 'passed', eq: true } }],
       }],
     ]) {
-      const v = core.validateGraph(core.applyPatchTo(LOCKED, patch), LOCKED, null);
+      const v = viols(core.applyPatchTo(LOCKED, patch), LOCKED, null);
       assert.ok(v.some((m) => /non-passing edge/.test(m)),
         `${label} is a bypass and must be rejected, got ${JSON.stringify(v)}`);
     }
@@ -411,7 +418,7 @@ async function main() {
       }],
     ]) {
       const next = core.applyPatchTo(LOCKED, patch);
-      assert.ok(!core.validateGraph(next, LOCKED, null).some((m) => /non-passing edge/.test(m)),
+      assert.ok(!viols(next, LOCKED, null).some((m) => /non-passing edge/.test(m)),
         `${label} is legitimate failure-path reshaping and must be accepted`);
     }
   });
@@ -423,32 +430,32 @@ async function main() {
       addNodes: [{ id: 'DeadEnd', kind: 'work' }],
       addEdges: [{ from: 'Implement', to: 'DeadEnd', when: { field: 'x', eq: 1 } }],
     });
-    const v = core.validateGraph(next, LOCKED, null);
+    const v = viols(next, LOCKED, null);
     assert.ok(v.some((m) => /dead-end/.test(m)),
       `expected a dead-end violation, got ${JSON.stringify(v)}`);
   });
 
   test('REJECT: an orphaned added node', () => {
     const next = core.applyPatchTo(LOCKED, { addNodes: [{ id: 'Island', kind: 'work' }] });
-    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /orphan/.test(m)));
+    assert.ok(viols(next, LOCKED, null).some(m => /orphan/.test(m)));
   });
 
   test('REJECT: exceeding the node budget', () => {
     const many = [];
     for (let i = 0; i < 12; i++) many.push({ id: `N${i}`, kind: 'work' });
     const next = core.applyPatchTo(LOCKED, { addNodes: many });
-    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /budget/.test(m)));
+    assert.ok(viols(next, LOCKED, null).some(m => /budget/.test(m)));
   });
 
   test('REJECT: a duplicate node id', () => {
     const next = core.applyPatchTo(LOCKED, { addNodes: [{ id: 'Implement', kind: 'work' }] });
-    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /duplicate/.test(m)));
+    assert.ok(viols(next, LOCKED, null).some(m => /duplicate/.test(m)));
   });
 
   test('REJECT: an edge pointing at an unknown node', () => {
     const next = core.applyPatchTo(LOCKED, {
       addEdges: [{ from: 'Implement', to: 'Nowhere', when: 'always' }] });
-    assert.ok(core.validateGraph(next, LOCKED, null).some(m => /unknown node/.test(m)));
+    assert.ok(viols(next, LOCKED, null).some(m => /unknown node/.test(m)));
   });
 
   test('ACCEPT: inserting a spike on the failure path', () => {
@@ -459,7 +466,7 @@ async function main() {
     });
     // Route Implement -> Spike so the new node is not orphaned.
     next.edges.unshift({ from: 'Implement', to: 'Spike', when: { field: 'needsSpike', eq: true } });
-    assert.deepStrictEqual(core.validateGraph(next, LOCKED, null), []);
+    assert.deepStrictEqual(viols(next, LOCKED, null), []);
   });
 
   section('validateGraph — invariants are the approved contract');
@@ -471,7 +478,7 @@ async function main() {
     const attack = JSON.parse(JSON.stringify(LOCKED));
     attack.invariants.mustCross = [];
     attack.edges.push({ from: 'Implement', to: 'PR', when: 'always' });
-    const v = core.validateGraph(attack, LOCKED, null);
+    const v = viols(attack, LOCKED, null);
     assert.ok(v.length > 0, 'a graph reaching the terminal without crossing any gate was ACCEPTED');
     assert.ok(v.some((m) => /dominates/.test(m)),
       `expected a dominance violation from prev's mustCross, got ${JSON.stringify(v)}`);
@@ -486,14 +493,14 @@ async function main() {
       attack.nodes.push({ id: `Pad${i}`, kind: 'work' });
       attack.edges.push({ from: 'Implement', to: `Pad${i}`, when: 'always' });
     }
-    const v = core.validateGraph(attack, LOCKED, null);
+    const v = viols(attack, LOCKED, null);
     assert.ok(v.some((m) => /budget/.test(m)),
       `prev's nodeBudget (10) must govern, not the submitted 9999 — got ${JSON.stringify(v)}`);
   });
 
   test('pre-approval, the graph may still declare its own invariants', () => {
     // With no prior graph there is nothing to be frozen against, so seeding works.
-    assert.deepStrictEqual(core.validateGraph(LOCKED, null, null), []);
+    assert.deepStrictEqual(viols(LOCKED, null, null), []);
   });
 
   section('validateGraph — positional dominance');
@@ -504,7 +511,7 @@ async function main() {
     // structural check from `start` might still pass in a richer graph.
     const next = core.applyPatchTo(LOCKED, {
       addEdges: [{ from: 'Implement', to: 'PR', when: 'always' }] });
-    const v = core.validateGraph(next, LOCKED,
+    const v = viols(next, LOCKED,
       { node: 'Implement', unsatisfiedGates: ['DoDGate'] });
     assert.ok(v.length > 0, 'positional check must reject the shortcut');
   });
@@ -533,7 +540,7 @@ async function main() {
     const cursor = { node: 'C', unsatisfiedGates: ['Gate'] };
 
     // Baseline: unchanged graph is already correctly rejected from this position.
-    assert.ok(core.validateGraph(G3, G3, cursor).length > 0,
+    assert.ok(viols(G3, G3, cursor).length > 0,
       'baseline positional violation should fire before the rename');
 
     const renamed = core.applyPatchTo(G3, {
@@ -543,7 +550,7 @@ async function main() {
     });
     assert.strictEqual(core.lockedFingerprint(renamed), G3.invariants.lockedHash,
       'fixture is only meaningful if the lock check stays silent');
-    const v = core.validateGraph(renamed, G3, cursor);
+    const v = viols(renamed, G3, cursor);
     assert.ok(v.length > 0,
       'renaming the cursor node silently skipped positional dominance — the run can now ' +
       'reach the terminal without recrossing an unsatisfied gate');
@@ -554,7 +561,7 @@ async function main() {
   test('ACCEPT: a gate already satisfied need not dominate from the cursor', () => {
     // Review passed; the cursor is downstream of it. Review no longer dominating
     // PR *from the cursor* is expected and must not be reported.
-    const v = core.validateGraph(LOCKED, LOCKED,
+    const v = viols(LOCKED, LOCKED,
       { node: 'DoDGate', unsatisfiedGates: [] });
     assert.deepStrictEqual(v, []);
   });
@@ -595,7 +602,7 @@ async function main() {
   const forkViolations = (mutate) => {
     const g = FORK();
     if (mutate) mutate(g);
-    return core.validateGraph(g, null, null);
+    return viols(g, null, null);
   };
   const rejects = (v, needle) => v.some((m) => m.includes(needle));
 
@@ -679,13 +686,13 @@ async function main() {
     assert.ok(rejects(v, 'nested fork'), JSON.stringify(v));
   });
 
-  test('REJECT: a fork with a single entry is not a fork', () => {
+  test('REJECT: a STATIC fork with a single entry is not a fork', () => {
     const v = forkViolations((g) => {
       g.edges = g.edges.filter((e) => e.from !== 'UiWork' && e.to !== 'UiPolish');
       g.edges = g.edges.filter((e) => !(e.from === 'Fan' && e.to === 'UiWork'));
       g.nodes = g.nodes.filter((n) => n.id !== 'UiWork' && n.id !== 'UiPolish');
     });
-    assert.ok(rejects(v, 'at least 2 independent entry nodes'), JSON.stringify(v));
+    assert.ok(rejects(v, 'at least 2 entry node(s)'), JSON.stringify(v));
   });
 
   test('REJECT: a fork declaring a prompt or schema — it spawns no worker', () => {
@@ -713,7 +720,7 @@ async function main() {
         { from: 'ApiDocs', to: 'Integrate', when: 'always' },
       ],
     });
-    assert.deepStrictEqual(core.validateGraph(next, null, null), []);
+    assert.deepStrictEqual(viols(next, null, null), []);
     assert.ok(core.regionNodes(next, next.nodes.find((n) => n.id === 'Fan')).has('ApiDocs'));
   });
 
@@ -1135,7 +1142,7 @@ async function main() {
       path.join(__dirname, 'seeds', `${profile}.json`), 'utf8'));
 
     test(`${profile}: validates against itself`, () => {
-      assert.deepStrictEqual(core.validateGraph(seed, seed, null), []);
+      assert.deepStrictEqual(viols(seed, seed, null), []);
     });
 
     test(`${profile}: every mustCross gate is locked`, () => {
@@ -1183,7 +1190,7 @@ async function main() {
             removeEdges: [fe]
           });
           // Graph must validate (no locked-edge violation).
-          const v = core.validateGraph(splicedGraph, seed, null);
+          const v = viols(splicedGraph, seed, null);
           assert.deepStrictEqual(v, [], `splicing into ${g} -> ${fe.to} caused validation errors: ${JSON.stringify(v)}`);
           // M must be reachable from start (so pickEdge actually selects it).
           const fromStart = core.reachable(splicedGraph, splicedGraph.start, []);
@@ -1542,7 +1549,7 @@ async function main() {
       const g = await editorMod.loadGraph();
       const flow = editorMod.toFlow(g);
       const next = editorMod.fromFlow(flow.nodes, flow.edges);
-      roundTrips[name] = { seed: g, next, violations: core.validateGraph(next, g, null) };
+      roundTrips[name] = { seed: g, next, violations: viols(next, g, null) };
     }
   } finally {
     globalThis.fetch = savedGlobals.fetch;
@@ -1668,7 +1675,7 @@ async function main() {
     // just-saved graph before anything downstream uses it again.
     const freshFlow = editorMod.toFlow(editorMod.graph);
     const nextB = editorMod.fromFlow(freshFlow.nodes, freshFlow.edges);
-    save2Violations = twoSaveCore.validateGraph(nextB, editorMod.graph, null);
+    save2Violations = twoSaveCore.messages(twoSaveCore.validateGraph(nextB, editorMod.graph, null));
     save2Edges = nextB.edges;
   } finally {
     globalThis.fetch = savedGlobals.fetch;
