@@ -176,10 +176,37 @@ server's 422 carries both: `violations` (strings, unchanged) and `diagnostics` (
 | `join` | string | **Required on, and only meaningful for, a `fork`.** Names the node where the concurrent region closes. Must exist, must not be the fork itself, and must be crossed by every path leaving the fork (`dominates(join, terminal, fork)`). Inside the region it opens, edges are dependencies rather than transitions — see the region rules above. |
 | `prompt` | string | The node-specific instructions spliced into the worker prompt template (`node-lead.txt`) via `sub()`. Ignored for the terminal node, since the interpreter loop exits before reaching it. |
 | `schema` | JSON Schema object | Passed straight through as `{ schema: n.schema }` in the `agent()` call options — the structured-output contract the worker's result must satisfy. |
-| `model` | string | Passed straight through as `{ model: n.model }` when present (e.g. `"haiku"` for cheap deterministic nodes like `Setup`). Omitted entirely from the `agent()` call if absent, not defaulted to anything by loom itself. |
+| `model` | string | An explicit override that **outranks the model policy below** (e.g. `"haiku"` for cheap deterministic nodes like `Setup`). When absent the policy supplies one; under `--model-mode inherit` nothing is supplied and the worker inherits the session model. |
+| `effort` | string | Reasoning budget for this node, same precedence as `model`. The policy sets `"high"` on strong-tier nodes; a node may override. Omitted entirely when neither applies. |
 | `agentType` | string | Passed straight through as `{ agentType: n.agentType }` when present — which subagent type `Workflow`'s `agent()` should spawn for this node. Omitted if absent. |
 | `locked` | boolean | Frozen at approval (step 3) for every `invariants.mustCross` node. Feeds `lockedFingerprint()`: a locked node's `id`/`prompt`/`schema`/etc. changing under a later patch changes the fingerprint, and `validateGraph` rejects any submission whose fingerprint no longer matches `invariants.lockedHash`. This is what makes a gate's own instructions non-negotiable once approved — see [`invariants.md`](invariants.md). |
 | `pos` | `{ x: number, y: number }` | Editor-only canvas coordinates (`editor.js`: `n.pos \|\| { x: 60, y: 40 + i * 90 }` on load, written back to `n.pos` on drag). Never read by `graph-core.mjs` or the generated conductor. Purely a layout hint for the human reviewing the graph in the browser. |
+
+## Which model each worker runs on
+
+`scaffold-loom.cjs --model-mode auto` (**the default**) tags every worker with a `model:`. Two
+tiers:
+
+| tier | who gets it | default | also gets |
+|---|---|---|---|
+| strong | every node in `invariants.mustCross`, plus `kind: "plan"` | `opus` (`--model-think`) | `effort: 'high'` |
+| work | everything else | `sonnet` (`--model-work`) | — |
+
+A node's own `model`/`effort` always wins — that is a decision a human approved in the graph,
+and the policy only fills the gaps. `--model-mode inherit` emits no policy at all (passing
+`--model-think`/`--model-work` alongside it is an error, not a no-op), while still honouring
+authored fields. The checkpoint agent is always cheap: its job is one file write.
+
+**The strong tier is keyed on `mustCross`, deliberately not on `kind === "gate"`.** As the node
+table says, `kind` is descriptive — calling a node `"gate"` does not make it one. Keying on the
+label would be wrong in both directions simultaneously: a decorative node named `"gate"` would
+draw the expensive model, while a genuinely enforced node labelled `"work"` would adjudicate
+whether the run may terminate on the cheap tier. `kind: "plan"` *is* keyed on the label, because
+being wrong there only wastes money — it cannot weaken a gate.
+
+The policy is evaluated **at runtime against the live graph**, so nodes spliced in by a runtime
+`graphPatch` are tagged too. A table computed when the script was generated could not contain
+them.
 
 ## Edge fields
 

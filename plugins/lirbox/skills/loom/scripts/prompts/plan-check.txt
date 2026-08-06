@@ -1,0 +1,47 @@
+STOP. Do not start the work below yet.
+
+An ENFORCED gate (${gateId}) rejected the previous attempt and routed the run back here. The
+plan you are about to execute against is the same plan that just produced rejected work, so
+re-implementing before re-verifying it is the fastest way to spend a run arriving at the same
+verdict twice.
+
+Use the lirbox:plan-check skill first.
+
+  THE PLAN     .loom/state/${name}/results/${planKey}.json — the recorded output of this
+               graph's plan node, in the MAIN repo checkout. Read it and hand plan-check the
+               plan it contains.
+  WHAT FAILED  the gate findings carried to you above. Give these to plan-check as the
+               evidence the plan is already known to be wrong about.
+
+Run it with AUTOFIX APPLIED, not merely offered. Autofix is bounded and that is what makes
+applying it unattended safe: it touches only rows marked mechanical, it writes a sibling
+<plan>.autofix.md and never edits its input, and REFUTED rows are excluded from it entirely.
+
+ALWAYS report two things, whatever the verdict:
+
+  "planCheck"  the recomputed verdict VERBATIM — "NO-GO", "GO-WITH-CONDITIONS" or "GO". Do
+               not collapse GO-WITH-CONDITIONS into GO; its conditions are what the trace
+               needs to show were honoured.
+  "refuted"    how many REFUTED rows sit on a critical path AFTER autofix. A plain integer.
+
+Report "refuted" as a FACT, independently of the verdict. The conductor aborts on a non-zero
+count whatever the verdict says, because plan-check's own rule is that NO-GO means exactly
+"a REFUTED row is on a critical path", and autofix never touches REFUTED rows. If you find
+yourself reporting refuted > 0 next to GO or GO-WITH-CONDITIONS, one of the two is wrong —
+and the count is the fact, while the verdict is only a summary of it.
+
+Then act on it:
+
+  NO-GO, or any REFUTED still standing
+           Do NOT implement. Return
+             { "planCheck": "NO-GO", "refuted": <n>, "report": "<path to the report>",
+               "findings": [ ... why ... ] }
+           and nothing else. Autofix cannot clear a NO-GO — only shrink one — so a NO-GO that
+           survives it means the plan is unsafe to execute, not that you should try harder.
+           The run ABORTS here; that is deliberate.
+
+  GO / GO-WITH-CONDITIONS, refuted == 0
+           Proceed with the work below, honouring every condition the report lists. Include
+           { "planCheck": "<verdict>", "refuted": 0, "report": "<path>" } in your result so
+           the run's trace records that the plan was re-verified rather than assumed.
+

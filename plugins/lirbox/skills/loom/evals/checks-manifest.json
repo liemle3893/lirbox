@@ -414,6 +414,126 @@
           "replace": "      const outs = []\n      for (const w of work) { outs.push(await runRegionNode(w.id, w.inst).then((res) => ({ id: w.id + w.inst.suffix, res }))) }"
         }
       ]
+    },
+    "checkpoint-cost-is-bounded": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "putting `results` back into the checkpoint payload restores the O(n^2): every node re-sends every earlier node's full return value, which was 38% of an observed run",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    graph, cursor, visits, carry, trace,\n  })",
+          "replace": "    graph, cursor, visits, results, carry, trace,\n  })"
+        },
+        {
+          "why": "dropping the model opt sends a one-file write to whatever the session runs on \u2014 the inherit-not-auto gap this change exists to close",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    { label: 'checkpoint:' + cursor, phase: 'Checkpoint', model: 'haiku', effort: 'low' },",
+          "replace": "    { label: 'checkpoint:' + cursor, phase: 'Checkpoint' },"
+        },
+        {
+          "why": "removing the worker's persist instruction turns the whole change into a DELETION of persistence: cheap checkpoints, and every resume replays the run from its start node",
+          "env": "LOOM_NODE_LEAD_OVERRIDE",
+          "file": "scripts/prompts/node-lead.txt",
+          "find": "  .loom/state/${name}/results/${resultKey}.json",
+          "replace": "  (do not persist anything)"
+        }
+      ]
+    },
+    "model-policy-follows-enforcement": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "keying the strong tier on the LABEL instead of on invariants.mustCross is wrong in both directions at once: a decorative node called \"gate\" draws the expensive model while a genuinely enforced node labelled \"work\" adjudicates the terminal on the cheap tier",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    const think = must.indexOf(n.id) !== -1 || n.kind === 'plan'",
+          "replace": "    const think = n.kind === 'gate' || n.kind === 'plan'"
+        },
+        {
+          "why": "collapsing the tiers tags every worker with the same model, which looks like a policy in the emitted script and is none",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    out.model = think ? MODEL_THINK : MODEL_WORK",
+          "replace": "    out.model = MODEL_WORK"
+        },
+        {
+          "why": "dropping the authored-model override silently upgrades the seeds' deliberately cheap Setup/DoDBaseline nodes and discards a decision a human approved in the graph",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  if (n.model) out.model = n.model\n",
+          "replace": "  "
+        },
+        {
+          "why": "applying the policy under `inherit` makes the escape hatch decorative \u2014 the one mode that exists to emit nothing would emit everything",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  if (MODEL_MODE === 'auto') {",
+          "replace": "  if (true) {"
+        },
+        {
+          "why": "computing the policy and never passing it to agent() leaves every worker inheriting while the generator looks correct on inspection",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      ...modelOpts(n),\n",
+          "replace": "      "
+        },
+        {
+          "why": "accepting --model-think under inherit lets a caller believe they set a tier that is never read; a flag that cannot take effect must fail loudly",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      die(`${flag} requires the auto model mode (it is ignored under --model-mode inherit) \u2014 `\n        + 'drop the flag or drop --model-mode inherit');",
+          "replace": "      void flag;"
+        }
+      ]
+    },
+    "rejected-reentry-rechecks-the-plan": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "triggering on the \"gate\" LABEL instead of on invariants.mustCross bills a full plan-check pass for every ordinary non-passing branch in the graph",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      return must.indexOf(t.node) !== -1 && t.verdict !== true ? t.node : null",
+          "replace": "      return t.verdict !== true ? t.node : null"
+        },
+        {
+          "why": "routing a NO-GO onward like any other result sends the run straight back into the work plan-check just condemned; instructing the worker to stop is not a guarantee that it did",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  const refuted = r && typeof r.refuted === 'number' ? r.refuted : 0\n  if (r && (r.planCheck === 'NO-GO' || refuted > 0)) {\n    throw new Error('plan-check refused the plan at ' + id + ' (verdict '\n      + (r.planCheck || '(none)') + ', ' + refuted + ' REFUTED on a critical path) \u2014 refusing '\n      + 'to re-implement against a plan just found unsafe. Autofix cannot clear a NO-GO, only '\n      + 'shrink one, so this needs a human. Report: ' + (r.report || '(none written)'))\n  }\n",
+          "replace": ""
+        },
+        {
+          "why": "attaching the block to every node makes each first visit pay for a plan-check that nothing has rejected yet",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    const gateId = PLAN_CHECK === 'on' && !inRegion ? rejectedInto(id) : null",
+          "replace": "    const gateId = PLAN_CHECK === 'on' && !inRegion ? (rejectedInto(id) || 'any') : null"
+        },
+        {
+          "why": "hard-coding the mode ignores --plan-check off, so the one way to opt out of a per-back-edge cost silently does nothing",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "const PLAN_CHECK = ${JSON.stringify(planCheckMode)}",
+          "replace": "const PLAN_CHECK = 'on'"
+        },
+        {
+          "why": "offering autofix instead of applying it restores the interactive behaviour, which inside an unattended back-edge means no fix is ever applied at all",
+          "env": "LOOM_PLAN_CHECK_TXT_OVERRIDE",
+          "file": "scripts/prompts/plan-check.txt",
+          "find": "Run it with AUTOFIX APPLIED, not merely offered.",
+          "replace": "Autofix is available if you want it."
+        },
+        {
+          "why": "trusting only the verdict LABEL leaves the gate resting on a worker correctly recomputing it after autofix; a plan with live REFUTED rows mislabelled GO-WITH-CONDITIONS then sails through the one check meant to stop it",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  if (r && (r.planCheck === 'NO-GO' || refuted > 0)) {",
+          "replace": "  if (r && r.planCheck === 'NO-GO') {"
+        }
+      ]
     }
   }
 }

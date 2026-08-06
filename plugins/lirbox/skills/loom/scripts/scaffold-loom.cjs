@@ -3,6 +3,9 @@
  * Generator for loom conductors.
  *
  *   node scaffold-loom.cjs --name <name> --graph <graph.json> [--out <path>] [--force]
+ *     [--model-mode auto|inherit]   auto (default) tags every worker by what the node does
+ *     [--model-think <m>]           strong tier: mustCross nodes + plan nodes (default opus)
+ *     [--model-work <m>]            everything else (default sonnet)
  *
  * Emits a Workflow script that is a GRAPH INTERPRETER: the graph travels as DATA and
  * graph-core.mjs is INLINED as source, because the generated conductor is a restricted
@@ -26,6 +29,47 @@ const force = arg('force', false) === true;
 if (!name || name === true) die('--name is required');
 if (!graphPath || graphPath === true) die('--graph <graph.json> is required');
 const outPath = arg('out', path.join('.loom', name + '.js'));
+
+// --- model selection (--model-mode) ---
+// auto (DEFAULT) : every worker gets a `model:` opt chosen by what the node DOES — the strong
+//                  tier for nodes that adjudicate or plan, the work tier for the rest. Without
+//                  this every worker inherited the session model, so a whole run of mechanical
+//                  nodes billed at whatever the human happened to be running.
+// inherit        : emit no policy at all — byte-equivalent to the pre-policy generator. A node's
+//                  own `model` field is still honoured, because that is graph DATA a human
+//                  approved, not a generator default.
+const MODEL_VALUES = ['sonnet', 'opus', 'haiku', 'fable'];
+const modelMode = arg('model-mode', 'auto');
+if (modelMode !== 'auto' && modelMode !== 'inherit') {
+  die(`--model-mode must be 'auto' (the default) or 'inherit' (got '${modelMode}')`);
+}
+// Under `inherit` no policy is emitted, so these would be silently ignored. Say so instead.
+if (modelMode === 'inherit') {
+  for (const flag of ['--model-think', '--model-work']) {
+    if (process.argv.includes(flag)) {
+      die(`${flag} requires the auto model mode (it is ignored under --model-mode inherit) — `
+        + 'drop the flag or drop --model-mode inherit');
+    }
+  }
+}
+// --- plan-check on rejected re-entry (--plan-check) ---
+// on (DEFAULT): when an ENFORCED gate rejects the work and routes the run backwards, the node
+// it lands on re-verifies the plan (via the lirbox:plan-check skill, autofix applied) BEFORE
+// doing any work. Re-implementing against a plan that was just proven wrong is how a run
+// spends its whole visit budget arriving at the same verdict repeatedly.
+// off: emit no such block. Each triggered check costs a full plan-check pass, so a run over a
+// plan that is known-good but noisy may legitimately want it out of the way.
+const planCheckMode = arg('plan-check', 'on');
+if (planCheckMode !== 'on' && planCheckMode !== 'off') {
+  die(`--plan-check must be 'on' (the default) or 'off' (got '${planCheckMode}')`);
+}
+const modelThink = arg('model-think', 'opus');
+const modelWork = arg('model-work', 'sonnet');
+for (const [flag, val] of [['--model-think', modelThink], ['--model-work', modelWork]]) {
+  if (val === true || !MODEL_VALUES.includes(val)) {
+    die(`${flag} must be one of: ${MODEL_VALUES.join(', ')}`);
+  }
+}
 
 let graph;
 try { graph = JSON.parse(fs.readFileSync(graphPath, 'utf8')); }
@@ -127,15 +171,94 @@ function unsatisfiedGates() {
   return out
 }
 
+// PERSIST BY OWNER. The conductor checkpoints only what the CONDUCTOR owns — topology,
+// position, visit counters, carry, trace. All of that is bounded by the SHAPE of the graph
+// and does not grow with how much work the nodes did.
+//
+// \`results\` is deliberately NOT here. It is every worker's full return value, and putting it
+// in this payload made checkpointing O(n^2) in tokens: each node re-sent everything every
+// earlier node had returned, into a fresh subagent prompt, on the session model, to write one
+// file. On an observed 17-node run that was ~2.15M of 5.7M tokens — 38% of the run.
+//
+// Each worker now writes its own results entry instead (see node-lead.txt): it already holds
+// the value and already has a Write tool, so that costs no new input tokens. The resume path
+// folds those files back into \`args.results\`.
+//
+// The cheap model is not a micro-optimisation. This agent's entire job is one file write, and
+// with no \`model\` opt it inherits whatever the session runs on.
 async function checkpoint(cursor) {
   const payload = JSON.stringify({
     workflow: NAME, status: 'running', graphVersion: graph.version || 0,
-    graph, cursor, visits, results, carry, trace,
-  }, null, 2)
+    graph, cursor, visits, carry, trace,
+  })
   await agent(
     sub(\`${esc(tpl('checkpoint.txt'))}\`, { name: NAME, payload }),
-    { label: 'checkpoint:' + cursor, phase: 'Checkpoint' },
+    { label: 'checkpoint:' + cursor, phase: 'Checkpoint', model: 'haiku', effort: 'low' },
   )
+}
+
+// MODEL POLICY. Resolved at RUNTIME from the LIVE graph, never baked into a table at
+// generation time: a runtime graphPatch can add nodes that did not exist when this script was
+// written, and a frozen table would leave every one of them silently inheriting.
+//
+// The strong tier is keyed on invariants.mustCross — NOT on kind === 'gate'. Per the graph
+// spec, \`kind\` is DESCRIPTIVE for every value except 'fork': calling a node "gate" does not
+// make it one, and an enforced gate is free to be labelled anything at all. Keying on the
+// label would hand the strong model to a node that adjudicates nothing, while the node whose
+// verdict actually decides whether the run may terminate ran on the cheap tier. mustCross is
+// the enforced truth, so that is what this reads.
+//
+// kind === 'plan' gets the strong tier too, but purely as a COST heuristic. Being wrong about
+// a descriptive label there wastes money; it cannot weaken a gate, which is why it is
+// acceptable to key on the label for that one and not for the other.
+const MODEL_MODE = ${JSON.stringify(modelMode)}
+const MODEL_THINK = ${JSON.stringify(modelThink)}
+const MODEL_WORK = ${JSON.stringify(modelWork)}
+
+function modelOpts(n) {
+  const out = {}
+  if (MODEL_MODE === 'auto') {
+    const must = (graph.invariants && graph.invariants.mustCross) || []
+    const think = must.indexOf(n.id) !== -1 || n.kind === 'plan'
+    out.model = think ? MODEL_THINK : MODEL_WORK
+    if (think) out.effort = 'high'
+  }
+  // An explicitly authored model always wins. It is a decision a human made and approved in
+  // the graph itself; the policy is only a default for the nodes that did not make one.
+  if (n.model) out.model = n.model
+  if (n.effort) out.effort = n.effort
+  return out
+}
+
+const PLAN_CHECK = ${JSON.stringify(planCheckMode)}
+
+// Did an ENFORCED gate reject the work and send the run back to this node? Derived from the
+// trace rather than stored in its own field, so a resume reconstructs it for free instead of
+// carrying yet another thing that can go stale.
+//
+// Keyed on invariants.mustCross for the same reason the model policy is: a node merely
+// labelled "gate" adjudicates nothing, and an enforced gate is free to be labelled anything.
+// A non-passing verdict from a node that is not enforced is an ordinary branch, not a
+// rejection, and must not trigger a plan-check the human never asked to pay for.
+function rejectedInto(id) {
+  const must = (graph.invariants && graph.invariants.mustCross) || []
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const t = trace[i]
+    if (t.to === id) {
+      return must.indexOf(t.node) !== -1 && t.verdict !== true ? t.node : null
+    }
+  }
+  return null
+}
+
+// The plan node's most recent recorded result — the artifact plan-check re-verifies. Each
+// worker persists its own result, so this path exists on disk by the time any re-entry
+// happens; there is nothing for the conductor to read or pass through.
+function planResultKey() {
+  const p = graph.nodes.find((x) => x.kind === 'plan')
+  if (!p) return ''
+  const v = visits[p.id] || 0
+  return v ? p.id + '#' + v : ''
 }
 
 // Visit accounting. \`visits\` is whichever counter map the caller owns — a region is
@@ -180,16 +303,57 @@ async function runNode(id, visits, inRegion) {
     const carryText = Object.keys(carryIn).length
       ? 'CARRIED FORWARD from the edge that sent you here:\\n' + JSON.stringify(carryIn, null, 2)
       : ''
+    // \`resultKey\` is the SAME key this conductor caches under, handed to the worker so the
+    // file it writes is the file a resume looks up. Any other naming makes the persistence
+    // real but unreachable.
+    // Re-verify the plan before redoing work an enforced gate just rejected. Needs a plan
+    // node that has actually run: with no recorded plan there is no artifact to check, and
+    // inventing one to check would be worse than skipping.
+    const gateId = PLAN_CHECK === 'on' && !inRegion ? rejectedInto(id) : null
+    const planKey = gateId ? planResultKey() : ''
+    if (gateId && !planKey) {
+      log(id + ': ' + gateId + ' rejected the previous attempt, but no plan node result is '
+        + 'recorded — skipping plan-check rather than checking an imagined plan')
+    }
+    const planCheckText = (gateId && planKey)
+      ? sub(\`${esc(tpl('plan-check.txt'))}\`, { name: NAME, planKey, gateId })
+      : ''
     const prompt = sub(\`${esc(tpl('node-lead.txt'))}\`, {
-      WORKTREE, BRANCH, nodeId: id, visit: String(visit), cap: String(cap),
+      WORKTREE, BRANCH, name: NAME, nodeId: id, resultKey: key, planCheckText,
+      visit: String(visit), cap: String(cap),
       carryText, nodePrompt: n.prompt || '', terminal: graph.terminal })
     r = await agent(prompt, {
       label: key, phase: id,
       ...(n.agentType ? { agentType: n.agentType } : {}),
-      ...(n.model ? { model: n.model } : {}),
+      ...modelOpts(n),
       ...(n.schema ? { schema: n.schema } : {}),
     })
     results[key] = r
+  }
+
+  // A NO-GO is a REFUSAL, not a verdict to route on. Every other loom refusal — fan-out over
+  // its bound, an unmatched edge, an incomplete region, a blown visit cap — aborts rather
+  // than continuing quietly, and this is the same shape: the plan the run is about to execute
+  // has been found unsafe, so routing onward would send it straight back into the work the
+  // check just condemned. Enforced here rather than left to the worker's own instructions,
+  // because "the agent was told to stop" is not a guarantee that it did.
+  //
+  // This fires on a CACHED result too, so a resume replays the refusal instead of sailing
+  // past it. To get past a NO-GO, fix the plan and delete that result file — deliberately a
+  // human action.
+  // Abort on the FACT, not only on the label. plan-check's rule is that NO-GO means exactly
+  // "a REFUTED row sits on a critical path", and autofix never touches REFUTED rows — so a
+  // surviving count is the ground truth and the verdict string is a summary of it. Trusting
+  // the summary alone would leave the whole gate resting on a worker correctly recomputing a
+  // verdict after autofix: get that one step wrong and a plan with live REFUTED rows arrives
+  // labelled GO-WITH-CONDITIONS and sails straight through. Checking both means the two have
+  // to agree, and disagreement fails closed.
+  const refuted = r && typeof r.refuted === 'number' ? r.refuted : 0
+  if (r && (r.planCheck === 'NO-GO' || refuted > 0)) {
+    throw new Error('plan-check refused the plan at ' + id + ' (verdict '
+      + (r.planCheck || '(none)') + ', ' + refuted + ' REFUTED on a critical path) — refusing '
+      + 'to re-implement against a plan just found unsafe. Autofix cannot clear a NO-GO, only '
+      + 'shrink one, so this needs a human. Report: ' + (r.report || '(none written)'))
   }
 
   if (r && r.graphPatch) {
