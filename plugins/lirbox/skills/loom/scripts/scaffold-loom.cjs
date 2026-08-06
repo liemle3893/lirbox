@@ -127,14 +127,29 @@ function unsatisfiedGates() {
   return out
 }
 
+// PERSIST BY OWNER. The conductor checkpoints only what the CONDUCTOR owns — topology,
+// position, visit counters, carry, trace. All of that is bounded by the SHAPE of the graph
+// and does not grow with how much work the nodes did.
+//
+// \`results\` is deliberately NOT here. It is every worker's full return value, and putting it
+// in this payload made checkpointing O(n^2) in tokens: each node re-sent everything every
+// earlier node had returned, into a fresh subagent prompt, on the session model, to write one
+// file. On an observed 17-node run that was ~2.15M of 5.7M tokens — 38% of the run.
+//
+// Each worker now writes its own results entry instead (see node-lead.txt): it already holds
+// the value and already has a Write tool, so that costs no new input tokens. The resume path
+// folds those files back into \`args.results\`.
+//
+// The cheap model is not a micro-optimisation. This agent's entire job is one file write, and
+// with no \`model\` opt it inherits whatever the session runs on.
 async function checkpoint(cursor) {
   const payload = JSON.stringify({
     workflow: NAME, status: 'running', graphVersion: graph.version || 0,
-    graph, cursor, visits, results, carry, trace,
-  }, null, 2)
+    graph, cursor, visits, carry, trace,
+  })
   await agent(
     sub(\`${esc(tpl('checkpoint.txt'))}\`, { name: NAME, payload }),
-    { label: 'checkpoint:' + cursor, phase: 'Checkpoint' },
+    { label: 'checkpoint:' + cursor, phase: 'Checkpoint', model: 'haiku', effort: 'low' },
   )
 }
 
@@ -180,8 +195,12 @@ async function runNode(id, visits, inRegion) {
     const carryText = Object.keys(carryIn).length
       ? 'CARRIED FORWARD from the edge that sent you here:\\n' + JSON.stringify(carryIn, null, 2)
       : ''
+    // \`resultKey\` is the SAME key this conductor caches under, handed to the worker so the
+    // file it writes is the file a resume looks up. Any other naming makes the persistence
+    // real but unreachable.
     const prompt = sub(\`${esc(tpl('node-lead.txt'))}\`, {
-      WORKTREE, BRANCH, nodeId: id, visit: String(visit), cap: String(cap),
+      WORKTREE, BRANCH, name: NAME, nodeId: id, resultKey: key,
+      visit: String(visit), cap: String(cap),
       carryText, nodePrompt: n.prompt || '', terminal: graph.terminal })
     r = await agent(prompt, {
       label: key, phase: id,

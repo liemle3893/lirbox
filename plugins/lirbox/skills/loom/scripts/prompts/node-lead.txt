@@ -12,3 +12,16 @@ return a "graphPatch" alongside your result:
 Locked nodes and edges cannot be changed, and no patch may let any path reach
 ${terminal} without crossing every gate. An invalid patch is rejected and logged;
 it does not fail the run. Do not propose one merely to skip work you find hard.
+
+BEFORE you return, persist your result. Write the exact JSON object you are about to
+return — the whole thing, including any graphPatch — to
+
+  .loom/state/${name}/results/${resultKey}.json
+
+relative to the MAIN repo checkout. That is the ONE exception to "never touch the main
+checkout" above; never write it inside ${WORKTREE}, which a resumed session may no longer
+have. Create directories as needed.
+
+Write it LAST, once the work is genuinely done, because this file is the claim that it
+was: a resume reads it instead of running this node again. If it disagrees with what you
+return, the resume believes the file.

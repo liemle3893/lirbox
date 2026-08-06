@@ -5,4 +5,9 @@ worktree), creating directories as needed. MERGE with any existing file, preserv
 "startedAt". Write the whole object — the "graph" field is the PATCHED graph, and a
 resume that replays the original topology is the worst failure this system has.
 
+This envelope is CONDUCTOR-owned state only. It has no "results" field and must not
+gain one: each node worker writes its own entry under .loom/state/${name}/results/,
+and the resume folds those in. Carrying them here instead made every checkpoint re-send
+every earlier node's output. Do not invent, summarise or reconstruct results here.
+
 ${payload}

@@ -98,8 +98,14 @@ if (cursorMissing) {
   out.push('      restarts from the original graph and the work already done is lost.');
   out.push('');
   out.push(`  Workflow({ scriptPath: ".loom/${name}.js",`);
-  out.push('             args: <the graph/visits/results/carry/trace/cursor fields');
-  out.push(`                    of .loom/state/${name}.json> })`);
+  out.push('             args: <the graph/visits/carry/trace/cursor fields');
+  out.push(`                    of .loom/state/${name}.json,`);
+  out.push('                    plus results: the union of every');
+  out.push(`                    .loom/state/${name}/results/<key>.json,`);
+  out.push('                    keyed by that file\'s <key>> })');
+  out.push('');
+  out.push('  The state file has no "results" field by design — each worker persists its');
+  out.push('  own. Omit the fold and the resume re-runs every completed node.');
 }
 
 process.stdout.write(out.join('\n') + '\n');

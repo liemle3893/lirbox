@@ -414,6 +414,32 @@
           "replace": "      const outs = []\n      for (const w of work) { outs.push(await runRegionNode(w.id, w.inst).then((res) => ({ id: w.id + w.inst.suffix, res }))) }"
         }
       ]
+    },
+    "checkpoint-cost-is-bounded": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "putting `results` back into the checkpoint payload restores the O(n^2): every node re-sends every earlier node's full return value, which was 38% of an observed run",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    graph, cursor, visits, carry, trace,\n  })",
+          "replace": "    graph, cursor, visits, results, carry, trace,\n  })"
+        },
+        {
+          "why": "dropping the model opt sends a one-file write to whatever the session runs on \u2014 the inherit-not-auto gap this change exists to close",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    { label: 'checkpoint:' + cursor, phase: 'Checkpoint', model: 'haiku', effort: 'low' },",
+          "replace": "    { label: 'checkpoint:' + cursor, phase: 'Checkpoint' },"
+        },
+        {
+          "why": "removing the worker's persist instruction turns the whole change into a DELETION of persistence: cheap checkpoints, and every resume replays the run from its start node",
+          "env": "LOOM_NODE_LEAD_OVERRIDE",
+          "file": "scripts/prompts/node-lead.txt",
+          "find": "  .loom/state/${name}/results/${resultKey}.json",
+          "replace": "  (do not persist anything)"
+        }
+      ]
     }
   }
 }

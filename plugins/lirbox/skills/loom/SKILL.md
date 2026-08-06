@@ -151,11 +151,19 @@ end your turn while it runs.** The blocking call IS the wait. Afterwards re-read
 
 ```
 Workflow({ scriptPath: ".loom/<name>.js", args: {
-  graph, visits, results, carry, trace, cursor } })
+  graph, visits, carry, trace, cursor, results } })
 ```
 
-taken from `.loom/state/<name>.json` — that exact path, never `.loom/<name>.graph.json`,
-which is the *approved* graph and is stale the moment the first patch lands.
+`graph`/`visits`/`carry`/`trace`/`cursor` come from `.loom/state/<name>.json` — that exact
+path, never `.loom/<name>.graph.json`, which is the *approved* graph and is stale the moment
+the first patch lands.
+
+**`results` is not in that file — you assemble it.** Read every
+`.loom/state/<name>/results/<key>.json` and build `{ "<key>": <that file's contents> }`. Each
+node worker writes its own entry, because a conductor that re-sent every earlier result into
+every checkpoint was spending ~38% of a run's tokens restating work it had already paid for.
+**Skip this fold and the resume silently re-runs every completed node** — it will look like a
+working resume right up to the bill.
 
 **`args.graph` MUST be the persisted patched graph, not the seed.** Resume restores
 *structure*, not just progress — replaying the approved topology silently discards every
