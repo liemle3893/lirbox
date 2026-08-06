@@ -559,6 +559,126 @@ async function main() {
     assert.deepStrictEqual(v, []);
   });
 
+  section('validateGraph — fork / join regions');
+
+  // Plan -> Fan =(concurrent)=> {ApiWork -> ApiTest, UiWork} -> Integrate -> Review -> Done
+  // Two independent branches, one join, and the only gate sits AFTER the join.
+  const FORK = () => ({
+    start: 'Plan',
+    terminal: 'Done',
+    nodes: [
+      { id: 'Plan', kind: 'work' },
+      { id: 'Fan', kind: 'fork', join: 'Integrate' },
+      { id: 'ApiWork', kind: 'work' }, { id: 'ApiTest', kind: 'work' },
+      { id: 'UiWork', kind: 'work' },
+      { id: 'Integrate', kind: 'work' },
+      { id: 'Review', kind: 'gate' },
+      { id: 'Done', kind: 'terminal' },
+    ],
+    edges: [
+      { from: 'Plan', to: 'Fan', when: 'always' },
+      { from: 'Fan', to: 'ApiWork', when: 'always' },
+      { from: 'Fan', to: 'UiWork', when: 'always' },
+      { from: 'ApiWork', to: 'ApiTest', when: 'always' },
+      { from: 'ApiTest', to: 'Integrate', when: 'always' },
+      { from: 'UiWork', to: 'Integrate', when: 'always' },
+      { from: 'Integrate', to: 'Review', when: 'always' },
+      { from: 'Review', to: 'Done', when: { field: 'passed', eq: true }, locked: true },
+      { from: 'Review', to: 'Integrate', when: { field: 'passed', eq: false } },
+    ],
+    invariants: { mustCross: ['Review'] },
+  });
+  // Every rejection case below is expressed as a mutation of that ONE valid graph, so a
+  // test can never pass because the fixture was broken in some other way.
+  const forkViolations = (mutate) => {
+    const g = FORK();
+    if (mutate) mutate(g);
+    return core.validateGraph(g, null, null);
+  };
+  const rejects = (v, needle) => v.some((m) => m.includes(needle));
+
+  test('ACCEPT: two independent branches joining, with the gate after the join', () => {
+    assert.deepStrictEqual(forkViolations(null), []);
+  });
+
+  test('branchRegion excludes the join and stops at it', () => {
+    const g = FORK();
+    assert.deepStrictEqual([...core.branchRegion(g, 'ApiWork', 'Integrate')].sort(),
+      ['ApiTest', 'ApiWork']);
+    assert.deepStrictEqual([...core.branchRegion(g, 'UiWork', 'Integrate')], ['UiWork']);
+  });
+
+  test('REJECT: a branch that escapes the region instead of reaching the join', () => {
+    // ApiTest -> Review jumps the join, so that branch would walk the rest of the graph
+    // concurrently with its own sibling.
+    const v = forkViolations((g) => { g.edges.find((e) => e.from === 'ApiTest').to = 'Review'; });
+    assert.ok(rejects(v, 'without crossing its join Integrate'), JSON.stringify(v));
+  });
+
+  test('REJECT: branches sharing a node — visit accounting could not be per-branch', () => {
+    const v = forkViolations((g) => { g.edges.find((e) => e.from === 'UiWork').to = 'ApiTest'; });
+    assert.ok(rejects(v, 'share node(s): ApiTest'), JSON.stringify(v));
+    assert.ok(rejects(v, 'node-disjoint'), JSON.stringify(v));
+  });
+
+  test('REJECT: a predicate on a fork edge — every branch always runs', () => {
+    const v = forkViolations((g) => {
+      g.edges.find((e) => e.from === 'Fan' && e.to === 'UiWork').when = { field: 'ui', eq: true };
+    });
+    assert.ok(rejects(v, 'carries a predicate'), JSON.stringify(v));
+  });
+
+  test('REJECT: a mustCross gate hidden inside one branch', () => {
+    // THE dominance question for concurrency. A gate guarding ApiWork is not a gate on the
+    // run: UiWork reaches the join, and so the terminal, without ever crossing it.
+    const v = forkViolations((g) => {
+      g.nodes.find((n) => n.id === 'ApiTest').kind = 'gate';
+      g.invariants.mustCross = ['ApiTest', 'Review'];
+      g.edges.push({ from: 'ApiTest', to: 'ApiWork', when: { field: 'passed', eq: false } });
+    });
+    assert.ok(rejects(v, 'sits inside fork branch Fan/ApiWork'), JSON.stringify(v));
+    // ...and the underlying structural proof still fires on its own, independently of the
+    // friendlier message. The explanation is additive; it never replaces the proof.
+    assert.ok(rejects(v, 'ApiTest no longer dominates Done'), JSON.stringify(v));
+  });
+
+  test('REJECT: a fork with a single branch is not a fork', () => {
+    const v = forkViolations((g) => {
+      g.edges = g.edges.filter((e) => !(e.from === 'Fan' && e.to === 'UiWork'));
+      g.nodes = g.nodes.filter((n) => n.id !== 'UiWork');
+    });
+    assert.ok(rejects(v, 'at least 2 concurrent branches'), JSON.stringify(v));
+  });
+
+  test('REJECT: a fork declaring a prompt or schema — it spawns no worker', () => {
+    assert.ok(rejects(forkViolations((g) => {
+      g.nodes.find((n) => n.id === 'Fan').prompt = 'decide the split';
+    }), 'must not declare a prompt or schema'));
+    assert.ok(rejects(forkViolations((g) => {
+      g.nodes.find((n) => n.id === 'Fan').schema = { type: 'object' };
+    }), 'must not declare a prompt or schema'));
+  });
+
+  test('REJECT: a fork whose join names a node that does not exist', () => {
+    const v = forkViolations((g) => { g.nodes.find((n) => n.id === 'Fan').join = 'Nope'; });
+    assert.ok(rejects(v, 'must declare `join` naming an existing node'), JSON.stringify(v));
+  });
+
+  test('a fork region survives the round trip through applyPatchTo', () => {
+    // Splicing a node into a branch is legal reshaping and must stay legal.
+    const g = FORK();
+    const next = core.applyPatchTo(g, {
+      addNodes: [{ id: 'ApiDocs', kind: 'work' }],
+      removeEdges: [{ from: 'ApiTest', to: 'Integrate' }],
+      addEdges: [
+        { from: 'ApiTest', to: 'ApiDocs', when: 'always' },
+        { from: 'ApiDocs', to: 'Integrate', when: 'always' },
+      ],
+    });
+    assert.deepStrictEqual(core.validateGraph(next, null, null), []);
+    assert.ok(core.branchRegion(next, 'ApiWork', 'Integrate').has('ApiDocs'));
+  });
+
   section('generator');
 
   const GEN = path.join(__dirname, 'scaffold-loom.cjs');
@@ -910,6 +1030,56 @@ async function main() {
     try { execFileSync('node', [GEN, '--name', 'bad', '--graph', badFile,
       '--out', path.join(tmp, 'bad.js')], { stdio: 'pipe' }); } catch (e) { threw = true; }
     assert.ok(threw, 'the generator must refuse a graph that violates its own invariants');
+  });
+
+  section('generator — fork regions');
+
+  const forkGraphFile = path.join(tmp, 'fork.json');
+  const forkApproved = FORK();
+  // The generator validates with prev=graph, so an unstamped freeze is (correctly) fatal.
+  forkApproved.invariants.lockedHash = core.lockedFingerprint(forkApproved);
+  fs.writeFileSync(forkGraphFile, JSON.stringify({ ...forkApproved, name: 'fan', goal: 'fan goal' }));
+  const forkOut = path.join(tmp, 'fan.js');
+  execFileSync('node', [GEN, '--name', 'fan', '--graph', forkGraphFile, '--out', forkOut]);
+  const forkEmitted = fs.readFileSync(forkOut, 'utf8');
+  const forkBody = conductorBody(forkEmitted);
+
+  test('a fork graph generates and parses', () => {
+    execFileSync('node', ['--check', forkOut]);
+  });
+
+  test('the emitted conductor runs branches through parallel()', () => {
+    // parallel() is the ONLY concurrency primitive available to this layer, so its
+    // presence in EXECUTING code (not a comment, not a prompt string) is the invariant:
+    // without it the branches are awaited one after another and the fork is decorative.
+    assert.ok(/\bawait\s+parallel\s*\(/.test(forkBody),
+      'no `await parallel(` in the executing body — the branches would run sequentially');
+  });
+
+  test('each branch gets its OWN visit counter', () => {
+    assert.ok(/branchVisits/.test(forkBody),
+      'branches must not share the caller visits map, or accounting is global not per-branch');
+  });
+
+  test('the fork conductor is still a restricted layer', () => {
+    for (const [name, re] of FORBIDDEN) {
+      assert.ok(!re.test(forkBody), `forbidden ${name} reached the fork conductor body`);
+    }
+  });
+
+  test('a fork node opens no phase group and spawns no worker', () => {
+    // meta.phases lists the APPROVED agent phases. A fork calls no agent, so a group for
+    // it would sit permanently empty in the progress tree.
+    const meta = forkEmitted.slice(0, forkEmitted.indexOf('\n}\n'));
+    assert.ok(!/title: 'Fan'/.test(meta), `fork node listed as a phase:\n${meta}`);
+    assert.ok(/title: 'ApiWork'/.test(meta), 'branch nodes must still be phases');
+  });
+
+  test('the interpreter refuses to cross a join with an incomplete region', () => {
+    // parallel() resolves a failed thunk to null rather than rejecting. Advancing anyway
+    // would hand the join a partial region and report the run as having done the work.
+    assert.ok(/refusing to cross the join/.test(forkEmitted),
+      'a null branch result must abort the run, not be skipped');
   });
 
   section('seed graphs');

@@ -1,16 +1,16 @@
-# Graph Report - lirbox  (2026-08-06)
+# Graph Report - lirbox  (2026-08-05)
 
 ## Corpus Check
-- 398 files · ~413,989 words
+- 389 files · ~407,147 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3266 nodes · 3442 edges · 355 communities (294 shown, 61 thin omitted)
+- 3200 nodes · 3363 edges · 352 communities (294 shown, 58 thin omitted)
 - Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 268 edges (avg confidence: 0.81)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `abcc4c8a`
+- Built from commit: `9be99e7e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -75,7 +75,7 @@
 - scaffold-loom.cjs
 - richer-propose-failure-feedback.check.mjs
 - scaffold-improve.cjs
-- whetstone skill
+- Flowchart Model-Ladder Lift plan (NOT PURSUED)
 - 10-store-load-seq.test.cjs
 - 20-app-restart.test.cjs
 - 30-cli-doctor.test.cjs
@@ -89,7 +89,7 @@
 - pr-writeup skill
 - Optimization ledger / state-file schema
 - list-optimizations.cjs
-- arena/evals/floor/00-structure.test.mjs
+- checks job — floors + frozen checks (fast gate)
 - Only a gate's LOCKED passing edge may lead onward
 - notes-wide-features task (8 independent plugins)
 - frontend-gate-phase (conductor whetstone item)
@@ -137,8 +137,8 @@
 - validate.mjs headless gate (PASS / exit 0)
 - initPanZoom
 - sequence-diagram/evals/checks/pan-zoom-fullscreen.check.mjs
+- Forfeit rule (non-engagement, timeout, unresolved)
 - SWE-bench-style grading (rung 1, hidden F2P/P2P)
-- Per-concern acceptance check (RED on baseline)
 - 30-cli-archive.test.cjs
 - 20-service-find.test.cjs
 - 20-partial-export.test.cjs
@@ -152,9 +152,9 @@
 - 20-conductor-purity.test.mjs
 - Metric (cmd / parse / direction)
 - STEPLIST — numbered list as the interactive surface
-- book-under-flag.check.mjs
+- The floor (evals/run.mjs + floor/*.test.mjs, green on baseline)
 - Microsoft SkillOpt (skill file as trainable parameter)
-- scaffold-backedge/tests/reward/checks.py
+- agent-template.md
 - 01-elo-characterization.test.mjs
 - arena-report.cjs
 - 30-cli-search.test.cjs
@@ -182,7 +182,7 @@
 - Keep-or-revert trust boundary (verdictOf)
 - Grading with Reward Kit (multi-dimension)
 - uglify-corner-cases task (xxhard real-repo tier)
-- Grader fairness law (assert only what task.md states)
+- content-verification (conductor whetstone item)
 - Routine safety model (own issues only, eval-gated push)
 - arena evals/run.mjs (floor runner)
 - list-arena.cjs
@@ -194,7 +194,7 @@
 - Four-layer end-to-end acceptance rule (store to CLI plus tests)
 - 10-orset-concurrent.test.cjs
 - 30-partial-ack-gc.test.cjs
-- loom: runtime proof of the gate-failure back-edge
+- book-under-flag.check.mjs
 - headless-driver-still-ends-turn.check.mjs
 - 04-dod-acquisition-docs.test.mjs
 - execution-shape.check.mjs
@@ -222,7 +222,7 @@
 - The floor (quick_validate.py + evals/run.mjs characterization)
 - whetstone/evals/floor/00-structure.test.mjs
 - autofix-bounded.check.mjs
-- editor-handles-survive-react-mount.check.mjs
+- Worked example — flowchart run (train 60→100, val 50→100)
 - external-system-guidance.check.mjs
 - 20-store-validation.test.cjs
 - 10-store-search.test.cjs
@@ -298,7 +298,7 @@
 - Skill title
 - classDef palette (term/dec/ok/fail/crit)
 - engagement-measured-not-assumed
-- test-analyze.cjs
+- Tests must fail for the RIGHT reason (RED step)
 - #dod machine-readable JSON block
 - Line-ref rule (prefer file · symbol over file:line)
 - fetch_pr.sh
@@ -355,37 +355,35 @@
 - validate-legacy.mjs
 - planFanoutBody
 - Checkout Latency — Implementation Plan
-- carry-fields-must-be-guaranteed.check.mjs
+- Absolute scoring (swe-run scorecard)
 - goal-coverage/solution/solve.sh
 - goal-coverage/tests/test.sh
-- gate-adjudicates-never-commits.check.mjs
-- terminal-requires-delivery-verdict.check.mjs
-- scaffold-backedge/tests/test.sh
-- scaffold-backedge/solution/solve.sh
+- Restricted conductor layer (no fs/git/require/import/Date.now/Math.random/crypto)
+- Web engine chain: playwright → browser-mcp → os-script
 
 ## God Nodes (most connected - your core abstractions)
 1. `conductor skill` - 13 edges
 2. `loom skill (shape-changing multi-subagent delivery workflow)` - 13 edges
 3. `graph.json — the execution spec loom's generated conductor interprets` - 13 edges
 4. `inWorktree (shared-worktree instruction + judgment-gated notes)` - 12 edges
-5. `loom: runtime proof of the gate-failure back-edge` - 11 edges
-6. `runBody()` - 10 edges
-7. `_workflow()` - 10 edges
-8. `lintFile()` - 10 edges
-9. `analyzeSkill()` - 10 edges
-10. `App()` - 9 edges
+5. `runBody()` - 10 edges
+6. `_workflow()` - 10 edges
+7. `lintFile()` - 10 edges
+8. `analyzeSkill()` - 10 edges
+9. `App()` - 9 edges
+10. `whetstone skill` - 9 edges
 
 ## Surprising Connections (you probably didn't know these)
+- `Output contract` --semantically_similar_to--> `Evidence manifest (frontend-evidence/manifest.json)`  [INFERRED] [semantically similar]
+  templates/agent-template.md → plugins/lirbox/agents/lirbox-web-verifier.md
+- `Tests must fail for the RIGHT reason (RED step)` --semantically_similar_to--> `Per-concern acceptance check (RED on baseline)`  [INFERRED] [semantically similar]
+  plugins/lirbox/agents/lirbox-test-writer.md → docs/whetstone-ready.md
 - `checks job — floors + frozen checks (fast gate)` --references--> `skill`  [INFERRED]
   .github/workflows/evals.yml → plugins/lirbox/skills/arena/evals/floor/00-structure.test.mjs
 - `checks job — floors + frozen checks (fast gate)` --references--> `SKILL_DIR`  [INFERRED]
   .github/workflows/evals.yml → plugins/lirbox/skills/conductor/evals/floor/00-structure.test.mjs
 - `checks job — floors + frozen checks (fast gate)` --references--> `SKILL_DIR`  [INFERRED]
   .github/workflows/evals.yml → plugins/lirbox/skills/whetstone/evals/floor/00-structure.test.mjs
-- `Output contract` --semantically_similar_to--> `Evidence manifest (frontend-evidence/manifest.json)`  [INFERRED] [semantically similar]
-  templates/agent-template.md → plugins/lirbox/agents/lirbox-web-verifier.md
-- `Tests must fail for the RIGHT reason (RED step)` --semantically_similar_to--> `Per-concern acceptance check (RED on baseline)`  [INFERRED] [semantically similar]
-  plugins/lirbox/agents/lirbox-test-writer.md → docs/whetstone-ready.md
 
 ## Import Cycles
 - None detected.
@@ -424,7 +422,7 @@
 - **Whetstone keep-or-revert trust boundary (floor + frozen check + surface lock)** — plugins_lirbox_skills_whetstone_references_loop_runtime_keep_or_revert, plugins_lirbox_skills_whetstone_references_checks_floor, plugins_lirbox_skills_whetstone_references_checks_acceptance_check, plugins_lirbox_skills_whetstone_references_checks_discrimination_gate, plugins_lirbox_skills_whetstone_references_checks_locked_set, plugins_lirbox_skills_whetstone_references_loop_runtime_surfaceallows, plugins_lirbox_skills_whetstone_references_loop_runtime_unresolved_verdict [EXTRACTED 1.00]
 - **Generator regression net (rule + nets job + per-skill test-*.cjs)** — _github_workflows_evals_nets_job, plugins_lirbox_skills_conductor_scripts_test_scaffold, plugins_lirbox_skills_prospector_scripts_test_optimize, plugins_lirbox_skills_whetstone_scripts_test_improve, plugins_lirbox_skills_arena_scripts_test_arena [EXTRACTED 1.00]
 
-## Communities (355 total, 61 thin omitted)
+## Communities (352 total, 58 thin omitted)
 
 ### Community 0 - "inWorktree (shared-worktree instruction + judgment-gated notes)"
 Cohesion: 0.05
@@ -471,8 +469,8 @@ Cohesion: 0.13
 Nodes (11): FORBIDDEN, g, gf, HERE, netSrc, netTok, out, ownTok (+3 more)
 
 ### Community 11 - "analyze.cjs"
-Cohesion: 0.20
-Nodes (18): analyzeSkill(), discover(), fs, longProseRatio(), main(), path, readRefs(), repoRoot() (+10 more)
+Cohesion: 0.14
+Nodes (21): analyzeSkill(), discover(), fs, longProseRatio(), main(), path, readRefs(), repoRoot() (+13 more)
 
 ### Community 12 - "scaffold-prompts-as-data.check.mjs"
 Cohesion: 0.08
@@ -495,8 +493,8 @@ Cohesion: 0.09
 Nodes (19): argv, dodFile, dodJudgedFile, { execFileSync }, FORBIDDEN, fs, GEN, genFails() (+11 more)
 
 ### Community 17 - "conductor skill"
-Cohesion: 0.16
-Nodes (15): Delivery-artifact promotion exception, Runtime artifacts are gitignored, At-least-once execution requires idempotent nodes, Problem: conductor executes a fixed linear phase list, Four generators, 2,895 lines, zero shared code, loom — a graph runtime for lirbox orchestration skills, Resume must restore structure, not just progress, conductor skill (+7 more)
+Cohesion: 0.12
+Nodes (23): Delivery-artifact promotion exception, Orchestration / loop skill family, Runtime artifacts are gitignored, Quality beyond correctness stays pairwise, Orphan tasks idle outside the suite, Train/val split over the task suite, At-least-once execution requires idempotent nodes, Problem: conductor executes a fixed linear phase list (+15 more)
 
 ### Community 18 - "dynamic-fanout-within-phase.check.mjs"
 Cohesion: 0.09
@@ -507,8 +505,8 @@ Cohesion: 0.10
 Nodes (17): assertBuildEvidence(), codegateSub, delivery, generated, HERE, leadSub, merged, ok() (+9 more)
 
 ### Community 20 - "Conductor scoreboard (absolute SWE-style scores)"
-Cohesion: 0.11
-Nodes (22): Pin [judge].model, Engagement discipline as the discriminating dimension, Conductor scoreboard (absolute SWE-style scores), † engagement assumed, not measured, Read the Engaged column before the headline, Minimum detectable effect ~20pp, No usable cross-model engagement comparison exists, Null control: benchmark the same config twice (+14 more)
+Cohesion: 0.13
+Nodes (19): Pin [judge].model, Conductor scoreboard (absolute SWE-style scores), † engagement assumed, not measured, Read the Engaged column before the headline, Minimum detectable effect ~20pp, No usable cross-model engagement comparison exists, Null control: benchmark the same config twice, Suite-hash comparability contract (+11 more)
 
 ### Community 21 - "scaffold-skilltrain-config.cjs"
 Cohesion: 0.10
@@ -539,8 +537,8 @@ Cohesion: 0.12
 Nodes (14): assert(), eq(), { execFileSync }, fail(), FORBIDDEN, fs, GEN, { isBetter, shouldStop, deriveEvalCap, withinEditBudget } (+6 more)
 
 ### Community 28 - "Conductor layer is restricted pure JS"
-Cohesion: 0.24
-Nodes (10): Conductor layer is restricted pure JS, Generator regression net (test-*.cjs), Never hand-edit a generated loop script, loom — Graph Runtime Implementation Plan, applyPatchTo is pure and deep-clones patch values, scaffold-loom.cjs — generator emitting the interpreter, test-loom.cjs — agent-free regression net, Dominance proves a patch is safe, never that it is sensible (+2 more)
+Cohesion: 0.28
+Nodes (9): Conductor layer is restricted pure JS, Generator regression net (test-*.cjs), Never hand-edit a generated loop script, applyPatchTo is pure and deep-clones patch values, test-loom.cjs — agent-free regression net, Declarative edge predicates, never code strings, Dominance proves a patch is safe, never that it is sensible, The graph is the execution spec (+1 more)
 
 ### Community 29 - "improve-report.cjs"
 Cohesion: 0.12
@@ -611,8 +609,8 @@ Cohesion: 0.17
 Nodes (5): configHash(), fs, HELPERS_SRC, path, planCells()
 
 ### Community 46 - "test-arena.cjs"
-Cohesion: 0.18
-Nodes (11): assert(), body, { configHash, planCells, pickPairSamples, resolveForfeit, tallyVerdicts, winRateMatrix, bradleyTerry, generate }, eq(), fail(), FORBIDDEN, GEN, path (+3 more)
+Cohesion: 0.15
+Nodes (13): nets job — generator regression nets, Two-job split (fast gate vs slow nets), assert(), body, { configHash, planCells, pickPairSamples, resolveForfeit, tallyVerdicts, winRateMatrix, bradleyTerry, generate }, eq(), fail(), FORBIDDEN (+5 more)
 
 ### Community 47 - "30-service-cli-roundtrip.test.cjs"
 Cohesion: 0.15
@@ -623,8 +621,8 @@ Cohesion: 0.18
 Nodes (13): graph.approved — bookkeeping read by no script, the signal scaffold-loom.cjs may run, locked (node/edge) — frozen at approval, feeds lockedFingerprint, invariants.lockedHash — FNV-1a drift detector, explicitly not a cryptographic guarantee, applyPatchTo appends + pickEdge first-match = a locked fail edge makes patches a silent no-op, The single exemption: locked AND when.eq === true (eq alone is forgeable), Positional dominance re-checked from every non-passing out-edge of a gate, Structural dominance from start is insufficient — visited is not satisfied, applyPatchTo() (+5 more)
 
 ### Community 49 - "graph.json — the execution spec loom's generated conductor interprets"
-Cohesion: 0.24
-Nodes (10): edge.carry — declared field lifting so a back-edge converges on the gate's findings, delivery.json seed graph (Setup→DoDBaseline→Plan→Implement→Review→DoDGate→PR→Done), graph.json — the execution spec loom's generated conductor interprets, lite.json seed graph (Setup, Plan, Implement, Review, Done — Review alone is mustCross), invariants.mustCross — the gates every start→terminal path must dominate, No silent fallback: an unmatched result hard-fails the interpreter ('no edge matched at ...'), invariants.nodeBudget — ceiling checked against prev so a patch cannot raise its own limit, Accept/reject patch table (fixtures from test-loom.cjs) (+2 more)
+Cohesion: 0.21
+Nodes (13): delivery.json seed graph (Setup→DoDBaseline→Plan→Implement→Review→DoDGate→PR→Done), graph.json — the execution spec loom's generated conductor interprets, lite.json seed graph (Setup, Plan, Implement, Review, Done — Review alone is mustCross), invariants.mustCross — the gates every start→terminal path must dominate, No silent fallback: an unmatched result hard-fails the interpreter ('no edge matched at ...'), invariants.nodeBudget — ceiling checked against prev so a patch cannot raise its own limit, Accept/reject patch table (fixtures from test-loom.cjs), Cursor check fails closed — a patch may not delete or rename the node it is executing (+5 more)
 
 ### Community 50 - "editor.js"
 Cohesion: 0.33
@@ -635,8 +633,8 @@ Cohesion: 0.17
 Nodes (11): { execFileSync }, existing, failures, feedbackPath, fs, out, path, skillPath (+3 more)
 
 ### Community 52 - "graph-core.mjs — single source of graph math"
-Cohesion: 0.14
-Nodes (16): HTML-artifact skill family, An artifact skill's floor should run its own headless validator, Dead-end and orphan nodes rejected before the run starts, dominates() is proof by deletion, with no heuristics on top, graph-core.mjs — single source of graph math, Backlog item: wire-output-validator-into-verify, graph-server.mjs (zero-dep loopback HTTP), One validator module imported by both browser and conductor (+8 more)
+Cohesion: 0.13
+Nodes (18): HTML-artifact skill family, Grader validator copies go stale silently, An artifact skill's floor should run its own headless validator, Dead-end and orphan nodes rejected before the run starts, graph-core.mjs — single source of graph math, loom — Graph Runtime Implementation Plan, scaffold-loom.cjs — generator emitting the interpreter, Backlog item: wire-output-validator-into-verify (+10 more)
 
 ### Community 53 - "50-cli-service.test.cjs"
 Cohesion: 0.17
@@ -666,9 +664,9 @@ Nodes (10): digestMatch, fail(), GEN, { generate }, HERE, ok(), pass(), pushMatc
 Cohesion: 0.18
 Nodes (5): fs, globToRe(), HELPERS_SRC, path, surfaceAllows()
 
-### Community 60 - "whetstone skill"
-Cohesion: 0.14
-Nodes (20): Non-destructive default: PR, never auto-merge, Orchestration / loop skill family, Per-run timestamped branches keyed by run slug, Three-tier skill shipping gate, Enforced personal commit identity (.githooks/pre-commit), Discrimination gate: run -a nop alongside -a oracle, main is pull-request-only ruleset, Tier 1 — validate + smoke-test + skill-lint (+12 more)
+### Community 60 - "Flowchart Model-Ladder Lift plan (NOT PURSUED)"
+Cohesion: 0.22
+Nodes (11): Non-destructive default: PR, never auto-merge, Per-run timestamped branches keyed by run slug, Three-tier skill shipping gate, Enforced personal commit identity (.githooks/pre-commit), main is pull-request-only ruleset, Tier 1 — validate + smoke-test + skill-lint, Tier 2 — evals (the real release gate), Tier 3 — Harbor containerised behavioural test (+3 more)
 
 ### Community 61 - "10-store-load-seq.test.cjs"
 Cohesion: 0.18
@@ -699,8 +697,8 @@ Cohesion: 0.18
 Nodes (9): dead, g, gf, HERE, out, P, SCRIPTS, src (+1 more)
 
 ### Community 68 - "graph-core.mjs"
-Cohesion: 0.32
-Nodes (12): Edge declaration order IS priority order (pickEdge returns the first match), Declarative `when` predicates — data not code strings, unknown shapes fail closed, Dominance computed by deletion-reachability (O(V+E) proof by contradiction), dominates(), fnv1a(), lockedFingerprint(), matches(), outEdges() (+4 more)
+Cohesion: 0.40
+Nodes (10): Dominance computed by deletion-reachability (O(V+E) proof by contradiction), dominates(), fnv1a(), lockedFingerprint(), matches(), outEdges(), pickEdge(), reachable() (+2 more)
 
 ### Community 69 - "loom-report.cjs"
 Cohesion: 0.20
@@ -722,21 +720,21 @@ Nodes (11): Loop-runtime common mistakes, deriveEvalCap (~3× baseline evalSec, 
 Cohesion: 0.18
 Nodes (6): dir, files, fs, path, rows, showAll
 
-### Community 74 - "arena/evals/floor/00-structure.test.mjs"
-Cohesion: 0.33
-Nodes (5): desc, fm, here, name, skill
+### Community 74 - "checks job — floors + frozen checks (fast gate)"
+Cohesion: 0.20
+Nodes (9): checks job — floors + frozen checks (fast gate), desc, fm, here, name, skill, SKILL_DIR, SKILL_DIR (+1 more)
 
 ### Community 75 - "Only a gate's LOCKED passing edge may lead onward"
-Cohesion: 0.29
-Nodes (10): Grader validator copies go stale silently, A missing cursor node fails closed, lockedHash FNV-1a is a drift detector, not a security boundary, Only a gate's LOCKED passing edge may lead onward, Unknown predicate operators fail closed, Declarative edge predicates, never code strings, DoD checks as locked artifacts, Invariants frozen at approval, read from the previous graph (+2 more)
+Cohesion: 0.23
+Nodes (12): Discrimination gate: run -a nop alongside -a oracle, A missing cursor node fails closed, dominates() is proof by deletion, with no heuristics on top, A test fixture must have the same shape as what ships, lockedHash FNV-1a is a drift detector, not a security boundary, Only a gate's LOCKED passing edge may lead onward, Unknown predicate operators fail closed, Prove every acceptanceCheck is RED before the whetstone run (+4 more)
 
 ### Community 76 - "notes-wide-features task (8 independent plugins)"
 Cohesion: 0.40
 Nodes (5): Conductor's cost is its bookends (planning + gates), notes-wide-features task (8 independent plugins), First clean parallel conductor cell (notes-wide-features), lirbox-code-reviewer agent, Review-and-fix in one pass (Critical/High must be resolved)
 
 ### Community 77 - "frontend-gate-phase (conductor whetstone item)"
-Cohesion: 0.12
-Nodes (20): frontend-gate-phase (conductor whetstone item), Deliberate omission of tools: on the web verifier, Web verifier dogfood (behavioral proof), content-verification (conductor whetstone item), Approach B — two sibling verifier agents, Engine freezing protocol (probe once, freeze into dod.json), FrontendGate phase (generator integration via whetstone), Shared output contract + evidence manifest (+12 more)
+Cohesion: 0.21
+Nodes (12): frontend-gate-phase (conductor whetstone item), Web verifier dogfood (behavioral proof), Approach B — two sibling verifier agents, FrontendGate phase (generator integration via whetstone), Shared output contract + evidence manifest, Writeup promotion gap (HTML-only, evidence never rides the PR), Deterministic lint only (no LLM judge, no new phase), implementation-notes/ fragments as the richest source (+4 more)
 
 ### Community 78 - "multi-grade.mjs"
 Cohesion: 0.08
@@ -783,8 +781,8 @@ Cohesion: 0.22
 Nodes (10): feedback evals README, feedback acceptance-checks (RED on baseline), feedback SKILL, Whetstone backlog record (JSON), scrub.cjs deterministic redactor, Semantic redaction pass, subjective feedback type (human-only), flowchart evals README (+2 more)
 
 ### Community 89 - "loom skill (shape-changing multi-subagent delivery workflow)"
-Cohesion: 0.17
-Nodes (16): invariants.visitCaps — the only place a visit cap may live (per-node > '*' > default 3), Cursor check fails closed — a patch may not delete or rename the node it is executing, Why gates cannot be bypassed (the argument behind validateGraph), capFor(), Checkpoint prompt — persist the PATCHED graph to .loom/state/<name>.json in the main checkout, Worker graphPatch contract (addNodes/removeNodes/updateNodes/addEdges/removeEdges; invalid = logged, not fatal), Node-lead worker prompt template (worktree, branch, nodeId, visit/cap, carry, nodePrompt), $ARGUMENTS resolution table (list / resume / awaiting-approval / complete / fresh goal) (+8 more)
+Cohesion: 0.24
+Nodes (10): edge.carry — declared field lifting so a back-edge converges on the gate's findings, invariants.visitCaps — the only place a visit cap may live (per-node > '*' > default 3), capFor(), carryFor(), Node-lead worker prompt template (worktree, branch, nodeId, visit/cap, carry, nodePrompt), $ARGUMENTS resolution table (list / resume / awaiting-approval / complete / fresh goal), Nodes are at-least-once and must be idempotent (a re-run may take a different edge), loom skill (shape-changing multi-subagent delivery workflow) (+2 more)
 
 ### Community 90 - "code-copy-button.test.mjs"
 Cohesion: 0.20
@@ -914,13 +912,13 @@ Nodes (9): applyPan, applyZoom, clamp, Crisp zoom by SVG width, translate-only p
 Cohesion: 0.22
 Nodes (8): forbidden, html, missing, present, IMPORTANT: comments are STRIPPED before the anti-pattern (forbidden) tests run,…, required, ROOT, TEMPLATE
 
-### Community 122 - "SWE-bench-style grading (rung 1, hidden F2P/P2P)"
-Cohesion: 0.14
-Nodes (15): Raw vs conductor comparison matrix, Absolute scoring (swe-run scorecard), lirbox:arena skill (pairwise durable loop), Frozen fixture suite (suite.json + tasks/), Forfeit rule (non-engagement, timeout, unresolved), Suite fingerprint = comparability contract, SWE-bench-style grading (rung 1, hidden F2P/P2P), Size the task so conductor engages (+7 more)
+### Community 122 - "Forfeit rule (non-engagement, timeout, unresolved)"
+Cohesion: 0.22
+Nodes (9): lirbox:arena skill (pairwise durable loop), Frozen fixture suite (suite.json + tasks/), Forfeit rule (non-engagement, timeout, unresolved), Size the task so conductor engages, Conductor delivers on a wf/ branch, Engagement discipline as the discriminating dimension, Leaderboard page — real-conductor-opus-vs-baseline, Forfeited cells (sonnet bypassed conductor) (+1 more)
 
-### Community 123 - "Per-concern acceptance check (RED on baseline)"
-Cohesion: 0.25
-Nodes (8): Discrimination gate (check must be RED on baseline), Validation gating (accept iff held-out val improves), Per-concern acceptance check (RED on baseline), Litmus test — can you write a command that exits non-zero?, Tests must fail for the RIGHT reason (RED step), lirbox-test-writer agent, Engineering-perspective gaps derived from the diff, lirbox-tryve-enhancer agent
+### Community 123 - "SWE-bench-style grading (rung 1, hidden F2P/P2P)"
+Cohesion: 0.29
+Nodes (8): Grader fairness law (assert only what task.md states), SWE-bench-style grading (rung 1, hidden F2P/P2P), Invariant: graders stay hidden from the agent, Measurement posture (what the benchmark honestly measures), Discrimination gate (check must be RED on baseline), Validation gating (accept iff held-out val improves), Per-concern acceptance check (RED on baseline), Litmus test — can you write a command that exits non-zero?
 
 ### Community 124 - "30-cli-archive.test.cjs"
 Cohesion: 0.25
@@ -974,17 +972,13 @@ Nodes (8): Baseline measurement (measure once before the loop), Prospector DECLI
 Cohesion: 0.25
 Nodes (8): Fullscreen detail popup mirror, renderSteps, selectStep, Fixture: STEPLIST kind disagrees with the arrow, Fixture: message/STEPLIST count parity broken, Fixture: STEPLIST entry missing from/to, Fixture: STEPLIST entry missing kind, STEPLIST — numbered list as the interactive surface
 
-### Community 137 - "book-under-flag.check.mjs"
-Cohesion: 0.17
-Nodes (12): Repo-wide regression gate (evals workflow), agent-file-surface (whetstone backlog item), Surface lock (editable ⊆ surface, evals/backlog locked), Custom floor when quick_validate rejects valid frontmatter, The floor (evals/run.mjs + floor/*.test.mjs, green on baseline), Lock the floor's own regression net (else the fixer weakens it), ANALYZE, bookFlag (+4 more)
+### Community 137 - "The floor (evals/run.mjs + floor/*.test.mjs, green on baseline)"
+Cohesion: 0.33
+Nodes (7): Repo-wide regression gate (evals workflow), agent-file-surface (whetstone backlog item), Surface lock (editable ⊆ surface, evals/backlog locked), Custom floor when quick_validate rejects valid frontmatter, The floor (evals/run.mjs + floor/*.test.mjs, green on baseline), Lock the floor's own regression net (else the fixer weakens it), SKILL_DIR
 
 ### Community 138 - "Microsoft SkillOpt (skill file as trainable parameter)"
 Cohesion: 0.29
 Nodes (7): consolidate: true (compaction pass), budgets.maxDiffLines (edit-size budget), Monotone accretion (fix-only loops only ever add text), Rejected-edit buffer (negative signal to the proposer), Microsoft SkillOpt (skill file as trainable parameter), Slow/meta consolidation pass (ablation-proven), Textual learning rate (bounded edit magnitude)
-
-### Community 139 - "scaffold-backedge/tests/reward/checks.py"
-Cohesion: 0.23
-Nodes (18): back_edges_carry_findings(), distinct_back_targets(), _fail_edges(), failure_edges_route_back(), _graph(), graph_exists(), _must(), criterion (+10 more)
 
 ### Community 140 - "01-elo-characterization.test.mjs"
 Cohesion: 0.29
@@ -1094,13 +1088,13 @@ Nodes (6): A failed judge must omit its key, not write 0, Watch the grader's inc
 Cohesion: 0.33
 Nodes (6): uglify-corner-cases task (xxhard real-repo tier), Width × expensive: the only 'raw fails, conductor wins' shape, Difficulty ladder (easy → xxhard), Real-repo tier (SWE-bench Pro recipe), headless-background-workflow-orphan (filed defect), independent-work-needs-per-worker-worktrees (filed defect)
 
-### Community 167 - "Grader fairness law (assert only what task.md states)"
+### Community 167 - "content-verification (conductor whetstone item)"
 Cohesion: 0.33
-Nodes (6): Grader fairness law (assert only what task.md states), Measurement posture (what the benchmark honestly measures), Worktree-local prose-lint copy (resume-proof path resolution), Anchor resolution moved to opt-in (renderer-dependent slugging), Filtering principle — a failure must be a real defect regardless of content, prose-lint.mjs (zero-dep deterministic markdown check)
+Nodes (6): content-verification (conductor whetstone item), Worktree-local prose-lint copy (resume-proof path resolution), Anchor resolution moved to opt-in (renderer-dependent slugging), Append to criteria[], not a dod.json block (inert without a phase), Filtering principle — a failure must be a real defect regardless of content, prose-lint.mjs (zero-dep deterministic markdown check)
 
 ### Community 168 - "Routine safety model (own issues only, eval-gated push)"
-Cohesion: 0.18
-Nodes (11): in-progress / needs-human labels as the lock, Nightly issue-implementer routine, Routine safety model (own issues only, eval-gated push), Worked example — flowchart run (train 60→100, val 50→100), harvest-feedback.cjs (failing train tasks → backlog), Scored task set (evals/run-scored.mjs, train/val), Held-out val delta as the generalization signal, Held-out validation split (proposer never sees val) (+3 more)
+Cohesion: 0.33
+Nodes (6): in-progress / needs-human labels as the lock, Nightly issue-implementer routine, Routine safety model (own issues only, eval-gated push), harvest-feedback.cjs (failing train tasks → backlog), Trajectory harvesting (rollout-fed backlogs), Backlog feedback/<skill>.jsonl (narrow, already-decided concerns)
 
 ### Community 169 - "arena evals/run.mjs (floor runner)"
 Cohesion: 0.33
@@ -1142,9 +1136,9 @@ Nodes (5): a, assert, b, path, { Replica }
 Cohesion: 0.33
 Nodes (5): a, assert, b, path, { Replica }
 
-### Community 179 - "loom: runtime proof of the gate-failure back-edge"
-Cohesion: 0.15
-Nodes (12): Backlog outcome, loom: runtime proof of the gate-failure back-edge, Reproduce, Result: PROVEN, Still unproven, Two honest caveats, What `DoDGate` verified, What `Implement#1` produced (+4 more)
+### Community 179 - "book-under-flag.check.mjs"
+Cohesion: 0.33
+Nodes (5): ANALYZE, bookFlag, conductor, HERE, REPO
 
 ### Community 180 - "headless-driver-still-ends-turn.check.mjs"
 Cohesion: 0.33
@@ -1247,16 +1241,16 @@ Cohesion: 0.40
 Nodes (6): skill-lint evals contract (floor + acceptance-checks), Thin-floor warning (frontmatter-only floor is not enough), skill-lint skill, Report-only scanner (never rewrites skills), whetstone evals contract (floor + acceptance-checks), The floor (quick_validate.py + evals/run.mjs characterization)
 
 ### Community 205 - "whetstone/evals/floor/00-structure.test.mjs"
-Cohesion: 0.20
-Nodes (8): checks job — floors + frozen checks (fast gate), SKILL_DIR, dir, HERE, nameMatch, NOTE: this is a THIN floor. Add >=1 behavior characterization test alongside it…, SKILL_DIR, scripts/evals-all.mjs — repo-wide floors + checks runner
+Cohesion: 0.33
+Nodes (4): dir, HERE, nameMatch, NOTE: this is a THIN floor. Add >=1 behavior characterization test alongside it…
 
 ### Community 206 - "autofix-bounded.check.mjs"
 Cohesion: 0.25
 Nodes (7): assertions, autofix, blocks(), failed, ROOT, skill, someBlock()
 
-### Community 207 - "editor-handles-survive-react-mount.check.mjs"
-Cohesion: 0.17
-Nodes (10): addressed, ancestors, EDITOR, HERE, html, js, markup, mountMatch (+2 more)
+### Community 207 - "Worked example — flowchart run (train 60→100, val 50→100)"
+Cohesion: 0.40
+Nodes (5): Worked example — flowchart run (train 60→100, val 50→100), Scored task set (evals/run-scored.mjs, train/val), Held-out val delta as the generalization signal, Held-out validation split (proposer never sees val), skill-train recipe (prospector pointed at a skill)
 
 ### Community 208 - "external-system-guidance.check.mjs"
 Cohesion: 0.40
@@ -1438,9 +1432,9 @@ Nodes (8): 1. <first step>, 2. <next step>, 3. Verify before claiming done, Inpu
 Cohesion: 0.29
 Nodes (8): checks-manifest.json, engagement-measured-not-assumed, scripts/evals-all.mjs (repo-wide gate), frozen acceptance-checks (checks/), .grade record (engagement data structure), swe-run.mjs (writes a .grade record per cell), scaffold-multiphase harbor task, unhandled-promise-rejection audit job (audit → fix → regression tests)
 
-### Community 284 - "test-analyze.cjs"
-Cohesion: 0.22
-Nodes (5): nets job — generator regression nets, Two-job split (fast gate vs slow nets), { analyzeSkill, tagBalance, longProseRatio }, { execFileSync }, path
+### Community 284 - "Tests must fail for the RIGHT reason (RED step)"
+Cohesion: 0.50
+Nodes (4): Tests must fail for the RIGHT reason (RED step), lirbox-test-writer agent, Engineering-perspective gaps derived from the diff, lirbox-tryve-enhancer agent
 
 ### Community 302 - "scaffold-delivery-gates/tests/reward/checks.py"
 Cohesion: 0.23
@@ -1566,9 +1560,17 @@ Nodes (6): agentCall(), emitPhase(), mdl(), optLine(), planFanoutBody(), workPha
 Cohesion: 0.40
 Nodes (4): Checkout Latency — Implementation Plan, Definition of done, Task 1: Cache the tax-rate lookup, Task 2: Batch the inventory reservation calls
 
-### Community 352 - "scaffold-backedge/tests/test.sh"
+### Community 346 - "Absolute scoring (swe-run scorecard)"
+Cohesion: 0.40
+Nodes (5): Raw vs conductor comparison matrix, Absolute scoring (swe-run scorecard), Suite fingerprint = comparability contract, Invariant: model IDs pinned, never aliases, Two scoring layers (absolute vs pairwise)
+
+### Community 350 - "Restricted conductor layer (no fs/git/require/import/Date.now/Math.random/crypto)"
+Cohesion: 0.40
+Nodes (5): Edge declaration order IS priority order (pickEdge returns the first match), Declarative `when` predicates — data not code strings, unknown shapes fail closed, Finalize: skill stamps status/finishedAt, kills the server, never auto-merges or removes the worktree, Restricted conductor layer (no fs/git/require/import/Date.now/Math.random/crypto), Three-layer model: graph is DATA, conductor interprets, workers do side effects
+
+### Community 351 - "Web engine chain: playwright → browser-mcp → os-script"
 Cohesion: 0.67
-Nodes (3): HOME, rewardkit_run(), test.sh script
+Nodes (4): Deliberate omission of tools: on the web verifier, Engine freezing protocol (probe once, freeze into dod.json), Mobile engine chain: maestro → appium → raw, Web engine chain: playwright → browser-mcp → os-script
 
 ## Ambiguous Edges - Review These
 - `First clean parallel conductor cell (notes-wide-features)` → `Review-and-fix in one pass (Critical/High must be resolved)`  [AMBIGUOUS]
@@ -1581,9 +1583,9 @@ Nodes (3): HOME, rewardkit_run(), test.sh script
   docs/plans/2026-07-28-flowchart-model-ladder-lift.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1776 isolated node(s):** `HERE`, `SCRIPTS`, `SCORE`, `REPO`, `REAL_SCORES` (+1771 more)
+- **1748 isolated node(s):** `HERE`, `SCRIPTS`, `SCORE`, `REPO`, `REAL_SCORES` (+1743 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **61 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **58 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -1596,9 +1598,9 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `.harbor/ staging layout is gitignored on purpose` and `.harbor/tasks drift gate`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `Per-concern acceptance check (RED on baseline)` connect `Per-concern acceptance check (RED on baseline)` to `SWE-bench-style grading (rung 1, hidden F2P/P2P)`, `frontend-gate-phase (conductor whetstone item)`?**
-  _High betweenness centrality (0.002) - this node is a cross-community bridge._
-- **Why does `SWE-bench-style grading (rung 1, hidden F2P/P2P)` connect `SWE-bench-style grading (rung 1, hidden F2P/P2P)` to `Per-concern acceptance check (RED on baseline)`, `Grader fairness law (assert only what task.md states)`?**
-  _High betweenness centrality (0.002) - this node is a cross-community bridge._
-- **Are the 2 inferred relationships involving `inWorktree (shared-worktree instruction + judgment-gated notes)` (e.g. with `Per-worker implementation notes (judgment-gated, slot-unique)` and `Shared-worktree isolation model`) actually correct?**
-  _`inWorktree (shared-worktree instruction + judgment-gated notes)` has 2 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `Forfeit rule (non-engagement, timeout, unresolved)` connect `Forfeit rule (non-engagement, timeout, unresolved)` to `SWE-bench-style grading (rung 1, hidden F2P/P2P)`?**
+  _High betweenness centrality (0.003) - this node is a cross-community bridge._
+- **Why does `Read the Engaged column before the headline` connect `Conductor scoreboard (absolute SWE-style scores)` to `Forfeit rule (non-engagement, timeout, unresolved)`, `e2b capability-floor finding (Task 0)`?**
+  _High betweenness centrality (0.003) - this node is a cross-community bridge._
+- **Why does `Engagement discipline as the discriminating dimension` connect `Forfeit rule (non-engagement, timeout, unresolved)` to `Conductor scoreboard (absolute SWE-style scores)`?**
+  _High betweenness centrality (0.003) - this node is a cross-community bridge._

@@ -28,6 +28,9 @@
   textarea { width: 100%; min-height: 120px; font: 12px ui-monospace, monospace; }
   .node-gate { border-color: #c93 !important; }
   .node-work { border-color: #39c !important; }
+  /* A fork spawns no worker and its out-edges all fire at once — it must not look like
+     an ordinary node whose edges are a choice. */
+  .node-fork { border-color: #6a3 !important; border-style: dashed !important; }
   .locked::after { content: " 🔒"; }
 </style>
 </head>

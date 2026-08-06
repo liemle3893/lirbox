@@ -65,9 +65,35 @@ function matches(pred, result) {
 }
 
 // First matching out-edge wins; declaration order IS the priority order.
+// NOT for a `fork` node — a fork takes EVERY out-edge, so asking which one wins is the
+// wrong question. The interpreter branches on `kind` before it ever gets here.
 function pickEdge(graph, from, result) {
   for (const e of outEdges(graph, from)) if (matches(e.when, result)) return e;
   return null;
+}
+
+// ---- fork / join --------------------------------------------------------------------
+//
+// A `fork` node's out-edges are ALL taken, CONCURRENTLY. That is the one place in this
+// model where two workers run at the same time, and it is the only construct that can
+// express "these are independent" instead of "pick one".
+//
+// Everything about a fork is built so that concurrency costs nothing in provability:
+//
+//   * A fork's out-edges must be UNCONDITIONAL. Every branch always runs, so "which
+//     branch" is never a runtime question — and that is exactly what keeps the reasoning
+//     below sound rather than probabilistic.
+//   * The region has ONE exit: the `join`. `dominates(join, terminal, fork)` says every
+//     path leaving the fork crosses it, so a branch can never escape into the rest of the
+//     graph and start running it concurrently.
+//   * Branches are NODE-DISJOINT. This is what makes visit accounting per-branch and
+//     EXACT: each branch counts in its own map and the merge cannot collide, so no
+//     max/sum approximation is needed and no two workers ever race the same node.
+//
+// The nodes strictly inside one branch: everything reachable from the branch entry once
+// the join is deleted. The join is the boundary, so it is never a member.
+function branchRegion(graph, entry, join) {
+  return reachable(graph, entry, [join]);
 }
 
 // Visit caps live ONLY in invariants.visitCaps so the validator has one source
@@ -234,6 +260,90 @@ function validateGraph(next, prev, cursor) {
     v.push('dead-end node(s) with no outgoing edge: ' + deadEnds.join(', '));
   }
 
+  // ---- fork / join regions ----------------------------------------------------------
+  // See the block comment above branchRegion for WHY each of these rules exists. In short:
+  // a fork is the only construct that runs two workers at once, and these rules are what
+  // buy that concurrency without weakening a single dominance proof below.
+  const regionOf = new Map(); // node id -> "<fork>/<branch entry>", for the gate rule
+  for (const f of next.nodes.filter((n) => n.kind === 'fork')) {
+    if (typeof f.join !== 'string' || !idSet.has(f.join)) {
+      v.push('fork ' + f.id + ' must declare `join` naming an existing node (got '
+        + JSON.stringify(f.join) + ')');
+      continue;
+    }
+    if (f.join === f.id) { v.push('fork ' + f.id + ' cannot join to itself'); continue; }
+
+    // A fork spawns no worker: it routes. A prompt or schema on one is a modelling error
+    // that would silently never run.
+    if (f.prompt !== undefined || f.schema !== undefined) {
+      v.push('fork ' + f.id + ' must not declare a prompt or schema — a fork spawns no '
+        + 'worker, it only routes concurrently; put the work in a branch node');
+    }
+
+    const branches = outEdges(next, f.id);
+    if (branches.length < 2) {
+      v.push('fork ' + f.id + ' has ' + branches.length + ' out-edge(s) — a fork needs at '
+        + 'least 2 concurrent branches; one branch is a plain edge, not a fork');
+    }
+    for (const e of branches) {
+      if (!(e.when === undefined || e.when === null || e.when === 'always')) {
+        v.push('fork ' + f.id + ' -> ' + e.to + ' carries a predicate — every branch of a '
+          + 'fork always runs, so a predicate here reads as a choice that is never made');
+      }
+    }
+
+    // ONE EXIT. Without this a branch could route back into the main line and the run
+    // would walk the rest of the graph concurrently with its own sibling.
+    if (!dominates(next, f.join, next.terminal, f.id)) {
+      v.push('fork ' + f.id + ' can reach ' + next.terminal + ' without crossing its join '
+        + f.join + ' — a branch that escapes the region would run the rest of the graph '
+        + 'concurrently with itself');
+    }
+
+    const regions = [];
+    for (const e of branches) {
+      if (!idSet.has(e.to)) continue;
+      if (!reachable(next, e.to, []).has(f.join)) {
+        v.push('fork ' + f.id + ' branch ' + e.to + ' never reaches its join ' + f.join);
+      }
+      const region = branchRegion(next, e.to, f.join);
+      for (const id of region) {
+        for (const oe of outEdges(next, id)) {
+          if (oe.to === f.join || region.has(oe.to)) continue;
+          v.push('fork ' + f.id + ' branch node ' + id + ' -> ' + oe.to + ' leaves the '
+            + 'branch without passing through the join ' + f.join);
+        }
+      }
+      regions.push({ entry: e.to, region });
+    }
+
+    for (let i = 0; i < regions.length; i++) {
+      for (let j = i + 1; j < regions.length; j++) {
+        const shared = [...regions[i].region].filter((id) => regions[j].region.has(id));
+        if (shared.length) {
+          v.push('fork ' + f.id + ' branches ' + regions[i].entry + ' and ' + regions[j].entry
+            + ' share node(s): ' + shared.join(', ') + ' — concurrent branches must be '
+            + 'node-disjoint, so that visit accounting is per-branch and exact and no two '
+            + 'workers ever race the same node');
+        }
+      }
+    }
+    for (const { entry, region } of regions) {
+      for (const id of region) if (!regionOf.has(id)) regionOf.set(id, f.id + '/' + entry);
+    }
+  }
+
+  // A mustCross gate inside a branch is NOT a gate on the run: its sibling branch reaches
+  // the join — and so the terminal — without ever crossing it, which `dominates` below
+  // reports as a bare "no longer dominates". Say what it actually is, and what to do,
+  // rather than leaving the author to work out why their gate is rejected inside a fork.
+  for (const gate of inv.mustCross || []) {
+    if (!regionOf.has(gate)) continue;
+    v.push('mustCross gate ' + gate + ' sits inside fork branch ' + regionOf.get(gate)
+      + ' — a gate that guards one branch does not gate the run, because the sibling '
+      + 'branches reach the join without it. Move it to the join or after it.');
+  }
+
   // Structural dominance — from `start`, over EVERY declared gate. Position-independent,
   // so it holds for the whole run and cannot be invalidated by later progress.
   for (const gate of inv.mustCross || []) {
@@ -308,4 +418,4 @@ function validateGraph(next, prev, cursor) {
   return v;
 }
 
-export { outEdges, reachable, dominates, matches, pickEdge, capFor, carryFor, stableStringify, fnv1a, lockedFingerprint, applyPatchTo, validateGraph };
+export { outEdges, reachable, dominates, matches, pickEdge, branchRegion, capFor, carryFor, stableStringify, fnv1a, lockedFingerprint, applyPatchTo, validateGraph };

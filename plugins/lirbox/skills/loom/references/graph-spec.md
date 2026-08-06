@@ -7,34 +7,76 @@ grounded in what the code actually reads — `scripts/graph-core.mjs` (validatio
 (what the browser reads). Where a field is purely descriptive — read by nothing, enforced by
 nothing — that is called out explicitly rather than implied.
 
-## What this graph is, and what it is not
+## Sequential by default, concurrent where you say so
 
-**It is a single-cursor state machine, not a schedulable DAG.** Read this before choosing loom
-over `conductor` on the strength of the word "graph".
+A `work` or `gate` node has **one** successor: `pickEdge()` returns the first out-edge whose
+predicate matches, so two out-edges mean *branch — take one*, never *fork — do both*. That is
+deliberate. Delivery work is git-serialized (one branch, a gate before each commit) and
+serial application is what you want.
 
-One cursor walks the graph. `pickEdge()` returns **exactly one** edge, and out-edges are
-conditional transitions evaluated against the previous node's result — so two out-edges mean
-*branch: take one*, never *fork: do both*. The emitted interpreter's walk is
-`while (node && node !== graph.terminal)` over awaited single `agent()` calls; there is no
-`parallel()`, no `pipeline()`, no `Promise.all`. **An N-node run is N sequential agent
-invocations, and there is no way to declare that two nodes are independent.**
+Concurrency is **declared, never inferred**. A `fork` node takes every out-edge at once; the
+region it opens ends at the `join` it names.
 
-What loom buys over `conductor` is therefore the **reshapeable failure path** — a gate that
-fails routes control backwards, carrying its findings, and the shape itself is human-approved
-and frozen — not concurrency. If your work is a DAG because it has independent branches you
-want overlapped, this model does not schedule them and `conductor` is cheaper.
+```json
+{ "id": "Fan", "kind": "fork", "join": "Integrate" }
+```
 
-The workaround that exists today: fan out *inside* a work node, so its worker spawns parallel
-subagents and applies their results serially. For git-serialized delivery (one branch, a gate
-before each commit) serial application is correct anyway. But that concurrency is invisible to
-the graph, to `visitCaps` and to the report — the approved shape stops describing what ran, so
-prefer it for read-only fan-out (surveying, searching) over concurrent mutation.
+```
+Plan ──▶ Fan ═╦═▶ ApiWork ──▶ ApiTest ═╗
+              ║                        ╠═▶ Integrate ──▶ Review ──▶ Done
+              ╚═▶ UiWork ══════════════╝
+```
 
-Making this a real fork/join is an open design question, tracked in
-[#67](https://github.com/liemle3893/lirbox/issues/67). The constraint any scheduler has to
-meet: `dominates()` must stay provable across concurrent branches — no path may reach the
-terminal without crossing every `mustCross` gate — and visit accounting has to become
-per-branch rather than global.
+`ApiWork` and `UiWork` run at the same time. `Integrate` runs **once**, after both branches
+reach it, and receives every branch's carry keyed by branch entry:
+
+```json
+{ "branches": { "ApiWork": { "note": "..." }, "UiWork": { "note": "..." } } }
+```
+
+Keyed, never flat-merged — two branches carrying the same field name would otherwise
+overwrite each other silently and the join could not tell which branch reported what.
+
+### The rules, and what each one buys
+
+`validateGraph` rejects a graph that breaks any of these, before a run can start.
+
+| Rule | Why it exists |
+|---|---|
+| A fork declares `join`, naming a real node that is not itself | The region needs a boundary to be a region |
+| At least **2** out-edges | One branch is a plain edge; calling it a fork misleads the reader |
+| Every fork out-edge is **unconditional** | Every branch always runs. That is the premise the dominance reasoning below rests on — a predicate here is a choice that is never made |
+| **One exit**: `dominates(join, terminal, fork)` | A branch that escapes the region would walk the rest of the graph concurrently with its own sibling |
+| Branches are **node-disjoint** | Two workers would otherwise race the same node, and visit accounting could not be per-branch |
+| No `mustCross` gate **inside** a branch | A gate guarding one branch is not a gate on the run: the sibling branch reaches the join, and so the terminal, without ever crossing it. Put the gate at the join or after it |
+| A fork declares no `prompt` or `schema` | It spawns no worker. It routes |
+
+Back-edges *within* a branch stay legal — a gate inside a branch that is not in `mustCross`
+can still route back to an earlier node in the same branch, bounded by its own visit cap.
+
+### What the interpreter does
+
+Each branch walks under `parallel()` with **its own visits map**. Because branches are
+proven node-disjoint, merging those maps back is exact — not a max or a sum over a shared
+counter. Three things are refused inside a region rather than silently raced:
+
+- **Graph patches.** A branch reshaping the graph while its siblings are walking it is a data
+  race on the one structure every concurrent worker reads. Patch from the join or after it.
+- **Checkpoints.** The run has one state file, so a region checkpoints at its boundaries only.
+  A kill inside a region replays that region; `results` makes every completed node free.
+- **A dead branch.** `parallel()` resolves a failed thunk to `null` rather than rejecting, so
+  the run aborts instead of crossing the join with a partial region and calling it done.
+
+### Still sequential: fan-out over N runtime items
+
+A fork's branches are **declared statically**. Fanning out over a list of N discovered at
+runtime is a different feature, and it is not a scheduling problem — it conflicts with the
+skill's central promise. Visit caps, the trace and the frozen `lockedHash` all key on static
+node ids precisely so that *the shape a human approved is the shape that runs*. Instantiating
+nodes at runtime means the shape is not knowable at approval time. Do it inside a work node
+(its worker spawns subagents and applies results serially), and accept that this concurrency
+is invisible to the graph and the report — so prefer it for read-only fan-out (surveying,
+searching) over concurrent mutation.
 
 ## Top level
 
@@ -54,7 +96,8 @@ per-branch rather than global.
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | string | Unique per graph (`validateGraph` rejects duplicates). Referenced by every edge's `from`/`to`. |
-| `kind` | `"work" \| "gate" \| "plan" \| "terminal"` | **Descriptive only.** The interpreter's control flow never branches on `kind` — it is read solely by `scaffold-loom.cjs` for the `meta.phases` detail string (`'${kind} node'`, defaulting to `work`) and by `editor.js` to pick a CSS class (`node-gate` vs `node-work`; `plan` and `terminal` both render as `node-work`). A node's actual behavior — whether it must dominate the terminal, whether it is locked — comes entirely from `locked` and `invariants.mustCross`, not from `kind`. Calling something `"gate"` does not make it one. |
+| `kind` | `"work" \| "gate" \| "plan" \| "terminal" \| "fork"` | **`"fork"` is behavioural; every other value is descriptive.** A `fork` changes control flow: the interpreter takes *every* out-edge concurrently instead of calling `pickEdge`, `validateGraph` enforces the whole region contract above, and `scaffold-loom.cjs` emits no `meta.phases` entry for it (it spawns no worker). For the rest, control flow never branches on `kind` — it is read only for the `meta.phases` detail string (`'${kind} node'`, defaulting to `work`) and by `editor.js` to pick a CSS class (`node-gate` / `node-fork` / `node-work`; `plan` and `terminal` both render as `node-work`). Whether a node must dominate the terminal, and whether it is locked, still comes entirely from `locked` and `invariants.mustCross`. **Calling something `"gate"` does not make it one** — but calling something `"fork"` does. |
+| `join` | string | **Required on, and only meaningful for, a `fork`.** Names the node where the concurrent region closes. Must exist, must not be the fork itself, and must be crossed by every path leaving the fork (`dominates(join, terminal, fork)`) — see the region rules above. |
 | `prompt` | string | The node-specific instructions spliced into the worker prompt template (`node-lead.txt`) via `sub()`. Ignored for the terminal node, since the interpreter loop exits before reaching it. |
 | `schema` | JSON Schema object | Passed straight through as `{ schema: n.schema }` in the `agent()` call options — the structured-output contract the worker's result must satisfy. |
 | `model` | string | Passed straight through as `{ model: n.model }` when present (e.g. `"haiku"` for cheap deterministic nodes like `Setup`). Omitted entirely from the `agent()` call if absent, not defaulted to anything by loom itself. |

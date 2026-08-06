@@ -97,6 +97,65 @@
         }
       ]
     },
+    "fork-regions-are-provably-safe": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "dropping the disjointness rule lets two branches share a node — two workers racing it, and visit accounting that cannot be per-branch",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "        const shared = [...regions[i].region].filter((id) => regions[j].region.has(id));",
+          "replace": "        const shared = [];"
+        },
+        {
+          "why": "dropping the one-exit rule lets a branch escape the region and walk the rest of the graph concurrently with its own sibling",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (!dominates(next, f.join, next.terminal, f.id)) {",
+          "replace": "    if (false) {"
+        },
+        {
+          "why": "dropping the gate-in-branch rule readmits a mustCross gate that guards one branch while its sibling reaches the terminal without it",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (!regionOf.has(gate)) continue;",
+          "replace": "    if (true) continue;"
+        },
+        {
+          "why": "letting a fork edge carry a predicate breaks the every-branch-always-runs premise the whole dominance argument rests on",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "      if (!(e.when === undefined || e.when === null || e.when === 'always')) {",
+          "replace": "      if (false) {"
+        }
+      ]
+    },
+    "fork-branches-actually-run-concurrently": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "awaiting each branch in turn produces an identical trace, result and visit counts — the feature becomes decorative while every structural check stays green",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      const outs = await parallel(branches.map((e, i) => () =>\n        walk(e.to, n.join, branchVisits[i], true).then((res) => ({ entry: e.to, res }))))",
+          "replace": "      const outs = []\n      for (let i = 0; i < branches.length; i++) {\n        outs.push(await walk(branches[i].to, n.join, branchVisits[i], true)\n          .then((res) => ({ entry: branches[i].to, res })))\n      }"
+        },
+        {
+          "why": "parallel() resolves a dead thunk to null rather than rejecting, so removing the guard silently crosses the join with a branch missing and reports the run complete",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "        if (!outs[i]) {\n          throw new Error('fork ' + node + ' branch ' + branches[i].to + ' did not complete '\n            + '— refusing to cross the join ' + n.join + ' with an incomplete region')\n        }",
+          "replace": "        if (!outs[i]) { continue }"
+        },
+        {
+          "why": "flat-merging the branch carries lets one branch silently overwrite another's field, and the join can no longer tell which branch reported what",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      carry[n.join] = { branches: merged }",
+          "replace": "      carry[n.join] = Object.assign({}, ...Object.keys(merged).map((k) => merged[k]))"
+        }
+      ]
+    },
     "terminal-requires-delivery-verdict": {
       "expect": "green",
       "mutations": [
