@@ -10,15 +10,73 @@
     "LOCKED (evals/**): improvement loops may never edit this file."
   ],
   "checks": {
-    "gate-dominance-not-bypassable": { "expect": "green" },
-    "cursor-rename-fails-closed": { "expect": "green" },
-    "interpreter-no-terminal-fallback": { "expect": "green" },
-    "purity-scan-has-teeth": { "expect": "green" },
-    "dod-check-hash-lock": { "expect": "green" },
-    "gate-failure-edges-return": { "expect": "green" },
-    "baseline-discrimination-structural": { "expect": "green" },
-    "server-no-lost-update": { "expect": "green" },
-    "editor-escapes-approval-gate": { "expect": "green" },
-    "lock-freeze-must-be-stamped": { "expect": "green" }
+    "gate-dominance-not-bypassable": {
+      "expect": "green"
+    },
+    "cursor-rename-fails-closed": {
+      "expect": "green"
+    },
+    "interpreter-no-terminal-fallback": {
+      "expect": "green"
+    },
+    "purity-scan-has-teeth": {
+      "expect": "green"
+    },
+    "dod-check-hash-lock": {
+      "expect": "green"
+    },
+    "gate-failure-edges-return": {
+      "expect": "green"
+    },
+    "baseline-discrimination-structural": {
+      "expect": "green"
+    },
+    "server-no-lost-update": {
+      "expect": "green"
+    },
+    "editor-escapes-approval-gate": {
+      "expect": "green"
+    },
+    "lock-freeze-must-be-stamped": {
+      "expect": "green"
+    },
+    "gate-adjudicates-never-commits": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "a gate told to \"Fix every ... and commit\" must be caught — that prompt is what suppressed the back-edge 0/3",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "ADJUDICATE ONLY. Do not fix anything, do not edit files, do not commit.",
+          "replace": "Fix every Critical and High finding, keep the build green, and commit."
+        },
+        {
+          "why": "same regression in the lite seed must not slip through",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/lite.json",
+          "find": "ADJUDICATE ONLY. Do not fix anything, do not edit files, do not commit.",
+          "replace": "Fix every Critical and High finding, keep the build green, and commit."
+        }
+      ]
+    },
+    "carry-fields-must-be-guaranteed": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "dropping `findings` back out of required makes the carry optional again — an empty back-edge payload",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "\"buildExit\",\n          \"findings\"\n        ],",
+          "replace": "\"buildExit\"\n        ],"
+        },
+        {
+          "why": "same regression in the lite seed must not slip through",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/lite.json",
+          "find": "\"buildExit\",\n          \"findings\"\n        ],",
+          "replace": "\"buildExit\"\n        ],"
+        }
+      ]
+    }
   }
 }
