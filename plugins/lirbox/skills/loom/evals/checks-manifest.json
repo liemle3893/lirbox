@@ -37,6 +37,25 @@
     "editor-escapes-approval-gate": {
       "expect": "green"
     },
+    "editor-handles-survive-react-mount": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "nesting #bar back inside #canvas is the original defect \u2014 React clears its mount target, $('save') is null, and the whole approval editor dies on first render",
+          "env": "LOOM_EDITOR_HTML_OVERRIDE",
+          "file": "scripts/editor/index.html",
+          "find": "<div id=\"bar\">\n    <button id=\"save\">Save</button>\n    <button id=\"replan\">Replan from comments</button>\n    <button id=\"approve\">Approve &amp; run</button>\n    <span id=\"status\"></span>\n  </div>\n  <div id=\"canvas\"></div>",
+          "replace": "<div id=\"canvas\"><div id=\"bar\">\n    <button id=\"save\">Save</button>\n    <button id=\"replan\">Replan from comments</button>\n    <button id=\"approve\">Approve &amp; run</button>\n    <span id=\"status\"></span>\n  </div></div>"
+        },
+        {
+          "why": "the same failure reached from the other side \u2014 moving the mount up to #app swallows every wired element without touching the markup",
+          "env": "LOOM_EDITOR_JS_OVERRIDE",
+          "file": "scripts/editor/editor.js",
+          "find": "ReactDOM.createRoot($('canvas'))",
+          "replace": "ReactDOM.createRoot($('app'))"
+        }
+      ]
+    },
     "lock-freeze-must-be-stamped": {
       "expect": "green"
     },
@@ -44,7 +63,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "a gate told to \"Fix every ... and commit\" must be caught — that prompt is what suppressed the back-edge 0/3",
+          "why": "a gate told to \"Fix every ... and commit\" must be caught \u2014 that prompt is what suppressed the back-edge 0/3",
           "env": "LOOM_SEED_OVERRIDE",
           "file": "scripts/seeds/delivery.json",
           "find": "ADJUDICATE ONLY. Do not fix anything, do not edit files, do not commit.",
@@ -63,7 +82,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "dropping `findings` back out of required makes the carry optional again — an empty back-edge payload",
+          "why": "dropping `findings` back out of required makes the carry optional again \u2014 an empty back-edge payload",
           "env": "LOOM_SEED_OVERRIDE",
           "file": "scripts/seeds/delivery.json",
           "find": "\"buildExit\",\n          \"findings\"\n        ],",
@@ -78,11 +97,84 @@
         }
       ]
     },
+    "fork-regions-are-provably-safe": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "dropping the one-exit rule lets a region node escape and walk the rest of the graph concurrently with itself",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (!dominates(next, f.join, next.terminal, f.id)) {",
+          "replace": "    if (false) {"
+        },
+        {
+          "why": "dropping the acyclicity rule admits a dependency cycle, which is a deadlock discovered as a hang mid-run rather than a violation before it",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (region.size && regionOrder(next, region) === null) {",
+          "replace": "    if (false) {"
+        },
+        {
+          "why": "dropping the gate-in-region rule readmits a gate that has nowhere legal to route its own failure",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (!regionOf.has(gate)) continue;",
+          "replace": "    if (true) continue;"
+        },
+        {
+          "why": "letting a region edge carry a predicate breaks the every-region-node-runs premise the dominance argument rests on",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "      if (!(e.when === undefined || e.when === null || e.when === 'always')) {",
+          "replace": "      if (false) {"
+        },
+        {
+          "why": "dropping the nested-fork rule admits a region the dataflow runner does not schedule",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "      if (rn && rn.kind === 'fork') {",
+          "replace": "      if (false) {"
+        }
+      ]
+    },
+    "fork-branches-actually-run-concurrently": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "running the region's sinks one after another produces an identical trace, result and visit counts \u2014 the feature becomes decorative while every structural check stays green",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      const outs = await parallel(sinks.map((id) => () =>\n        runRegionNode(id).then((res) => ({ id, res }))))",
+          "replace": "      const outs = []\n      for (const id of sinks) { outs.push(await runRegionNode(id).then((res) => ({ id, res }))) }"
+        },
+        {
+          "why": "waiting on every region node instead of a node's own dependencies is a WAVE scheduler: it still looks concurrent, but a node with one dependency is blocked by unrelated slow work",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "            const preds = regionPreds(graph, region, id)",
+          "replace": "            const preds = [...region].filter((x) => x !== id).flatMap((x) => regionPreds(graph, region, x).length ? [] : outEdges(graph, x).filter((e) => e.to === id || true).slice(0, 1))"
+        },
+        {
+          "why": "parallel() resolves a dead thunk to null rather than rejecting, so removing the guard silently crosses the join with a region node missing and reports the run complete",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "        if (!outs[i]) {\n          throw new Error('fork ' + node + ' region node ' + sinks[i] + ' did not complete '\n            + '\u2014 refusing to cross the join ' + n.join + ' with an incomplete region')\n        }",
+          "replace": "        if (!outs[i]) { continue }"
+        },
+        {
+          "why": "flat-merging a node's dependency carries lets one dependency silently overwrite another's field, and the node cannot tell which one it is reading",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "              carry[id] = { from }",
+          "replace": "              carry[id] = Object.assign({}, ...Object.keys(from).map((k) => from[k]))"
+        }
+      ]
+    },
     "terminal-requires-delivery-verdict": {
       "expect": "green",
       "mutations": [
         {
-          "why": "reverting the terminal edge to when:\"always\" is the original defect — a blocked delivery reporting `complete`",
+          "why": "reverting the terminal edge to when:\"always\" is the original defect \u2014 a blocked delivery reporting `complete`",
           "env": "LOOM_SEED_OVERRIDE",
           "file": "scripts/seeds/delivery.json",
           "find": "\"to\": \"Done\",\n      \"when\": {\n        \"field\": \"delivered\",\n        \"eq\": true\n      }",

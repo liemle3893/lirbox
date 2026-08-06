@@ -559,6 +559,164 @@ async function main() {
     assert.deepStrictEqual(v, []);
   });
 
+  section('validateGraph — fork / join DAG regions');
+
+  // A REAL DAG, not two lanes: Contract depends on BOTH ApiWork and UiWork, while
+  // UiPolish depends on UiWork alone. The only gate sits AFTER the join.
+  const FORK = () => ({
+    start: 'Plan',
+    terminal: 'Done',
+    nodes: [
+      { id: 'Plan', kind: 'work' },
+      { id: 'Fan', kind: 'fork', join: 'Integrate' },
+      { id: 'ApiWork', kind: 'work' }, { id: 'UiWork', kind: 'work' },
+      { id: 'Contract', kind: 'work' }, { id: 'UiPolish', kind: 'work' },
+      { id: 'Integrate', kind: 'work' },
+      { id: 'Review', kind: 'gate' },
+      { id: 'Done', kind: 'terminal' },
+    ],
+    edges: [
+      { from: 'Plan', to: 'Fan', when: 'always' },
+      { from: 'Fan', to: 'ApiWork', when: 'always' },
+      { from: 'Fan', to: 'UiWork', when: 'always' },
+      { from: 'ApiWork', to: 'Contract', when: 'always' },
+      { from: 'UiWork', to: 'Contract', when: 'always' },
+      { from: 'UiWork', to: 'UiPolish', when: 'always' },
+      { from: 'Contract', to: 'Integrate', when: 'always' },
+      { from: 'UiPolish', to: 'Integrate', when: 'always' },
+      { from: 'Integrate', to: 'Review', when: 'always' },
+      { from: 'Review', to: 'Done', when: { field: 'passed', eq: true }, locked: true },
+      { from: 'Review', to: 'Integrate', when: { field: 'passed', eq: false } },
+    ],
+    invariants: { mustCross: ['Review'] },
+  });
+  // Every rejection case below is a mutation of that ONE valid graph, so a test can never
+  // pass because the fixture was broken in some other way.
+  const forkViolations = (mutate) => {
+    const g = FORK();
+    if (mutate) mutate(g);
+    return core.validateGraph(g, null, null);
+  };
+  const rejects = (v, needle) => v.some((m) => m.includes(needle));
+
+  test('ACCEPT: a DAG region — one node depending on two, another on one', () => {
+    // Contract is reachable from BOTH entries on purpose. A model that required branches to
+    // be node-disjoint (which this one did before it was a DAG) rejects exactly this.
+    assert.deepStrictEqual(forkViolations(null), []);
+  });
+
+  test('regionNodes stops at the join and excludes it', () => {
+    const g = FORK();
+    const fork = g.nodes.find((n) => n.id === 'Fan');
+    assert.deepStrictEqual([...core.regionNodes(g, fork)].sort(),
+      ['ApiWork', 'Contract', 'UiPolish', 'UiWork']);
+  });
+
+  test('regionPreds gives a node exactly the dependencies it waits on', () => {
+    const g = FORK();
+    const region = core.regionNodes(g, g.nodes.find((n) => n.id === 'Fan'));
+    assert.deepStrictEqual(core.regionPreds(g, region, 'Contract').map((e) => e.from).sort(),
+      ['ApiWork', 'UiWork']);
+    assert.deepStrictEqual(core.regionPreds(g, region, 'UiPolish').map((e) => e.from),
+      ['UiWork']);
+    // An entry node waits on nothing inside the region — the fork is not a member.
+    assert.deepStrictEqual(core.regionPreds(g, region, 'ApiWork'), []);
+  });
+
+  test('regionOrder respects dependencies, and regionSinks finds the join feeders', () => {
+    const g = FORK();
+    const region = core.regionNodes(g, g.nodes.find((n) => n.id === 'Fan'));
+    const order = core.regionOrder(g, region);
+    assert.ok(order && order.length === region.size, 'a DAG region must order');
+    assert.ok(order.indexOf('Contract') > order.indexOf('ApiWork')
+      && order.indexOf('Contract') > order.indexOf('UiWork'), order.join(' -> '));
+    assert.deepStrictEqual(core.regionSinks(g, region, 'Integrate').sort(),
+      ['Contract', 'UiPolish']);
+  });
+
+  test('regionOrder returns null on a dependency cycle rather than looping', () => {
+    const g = FORK();
+    g.edges.push({ from: 'Contract', to: 'ApiWork', when: 'always' });
+    const region = core.regionNodes(g, g.nodes.find((n) => n.id === 'Fan'));
+    assert.strictEqual(core.regionOrder(g, region), null);
+  });
+
+  test('REJECT: a dependency cycle inside a region — a deadlock, not a retry', () => {
+    const v = forkViolations((g) => {
+      g.edges.push({ from: 'Contract', to: 'ApiWork', when: 'always' });
+    });
+    assert.ok(rejects(v, 'dependency cycle'), JSON.stringify(v));
+  });
+
+  test('REJECT: a region node that escapes instead of reaching the join', () => {
+    const v = forkViolations((g) => { g.edges.find((e) => e.from === 'UiPolish').to = 'Review'; });
+    assert.ok(rejects(v, 'without crossing its join Integrate'), JSON.stringify(v));
+  });
+
+  test('REJECT: a predicate on a region edge — a dependency is not a choice', () => {
+    const v = forkViolations((g) => {
+      g.edges.find((e) => e.from === 'UiWork' && e.to === 'UiPolish').when = { field: 'ui', eq: true };
+    });
+    assert.ok(rejects(v, 'carries a predicate'), JSON.stringify(v));
+  });
+
+  test('REJECT: a mustCross gate inside a region has nowhere to fail to', () => {
+    // Not because it would go unexecuted — every region node runs. Because a gate must
+    // route its failure BACKWARDS, and in here that is either the cycle rejected above or
+    // an escape from the join.
+    const v = forkViolations((g) => {
+      g.nodes.find((n) => n.id === 'Contract').kind = 'gate';
+      g.invariants.mustCross = ['Contract', 'Review'];
+    });
+    assert.ok(rejects(v, 'sits inside fork region Fan'), JSON.stringify(v));
+    // ...and the underlying structural proof still fires on its own. The explanation is
+    // additive; it never replaces the proof.
+    assert.ok(rejects(v, 'Contract no longer dominates Done'), JSON.stringify(v));
+  });
+
+  test('REJECT: a nested fork inside a region', () => {
+    const v = forkViolations((g) => { g.nodes.find((n) => n.id === 'UiWork').kind = 'fork'; });
+    assert.ok(rejects(v, 'nested fork'), JSON.stringify(v));
+  });
+
+  test('REJECT: a fork with a single entry is not a fork', () => {
+    const v = forkViolations((g) => {
+      g.edges = g.edges.filter((e) => e.from !== 'UiWork' && e.to !== 'UiPolish');
+      g.edges = g.edges.filter((e) => !(e.from === 'Fan' && e.to === 'UiWork'));
+      g.nodes = g.nodes.filter((n) => n.id !== 'UiWork' && n.id !== 'UiPolish');
+    });
+    assert.ok(rejects(v, 'at least 2 independent entry nodes'), JSON.stringify(v));
+  });
+
+  test('REJECT: a fork declaring a prompt or schema — it spawns no worker', () => {
+    assert.ok(rejects(forkViolations((g) => {
+      g.nodes.find((n) => n.id === 'Fan').prompt = 'decide the split';
+    }), 'must not declare a prompt or schema'));
+    assert.ok(rejects(forkViolations((g) => {
+      g.nodes.find((n) => n.id === 'Fan').schema = { type: 'object' };
+    }), 'must not declare a prompt or schema'));
+  });
+
+  test('REJECT: a fork whose join names a node that does not exist', () => {
+    const v = forkViolations((g) => { g.nodes.find((n) => n.id === 'Fan').join = 'Nope'; });
+    assert.ok(rejects(v, 'must declare `join` naming an existing node'), JSON.stringify(v));
+  });
+
+  test('a region survives the round trip through applyPatchTo', () => {
+    // Splicing a dependency into a region is legal reshaping and must stay legal.
+    const g = FORK();
+    const next = core.applyPatchTo(g, {
+      addNodes: [{ id: 'ApiDocs', kind: 'work' }],
+      removeEdges: [{ from: 'Contract', to: 'Integrate' }],
+      addEdges: [
+        { from: 'Contract', to: 'ApiDocs', when: 'always' },
+        { from: 'ApiDocs', to: 'Integrate', when: 'always' },
+      ],
+    });
+    assert.deepStrictEqual(core.validateGraph(next, null, null), []);
+    assert.ok(core.regionNodes(next, next.nodes.find((n) => n.id === 'Fan')).has('ApiDocs'));
+  });
+
   section('generator');
 
   const GEN = path.join(__dirname, 'scaffold-loom.cjs');
@@ -910,6 +1068,64 @@ async function main() {
     try { execFileSync('node', [GEN, '--name', 'bad', '--graph', badFile,
       '--out', path.join(tmp, 'bad.js')], { stdio: 'pipe' }); } catch (e) { threw = true; }
     assert.ok(threw, 'the generator must refuse a graph that violates its own invariants');
+  });
+
+  section('generator — fork regions');
+
+  const forkGraphFile = path.join(tmp, 'fork.json');
+  const forkApproved = FORK();
+  // The generator validates with prev=graph, so an unstamped freeze is (correctly) fatal.
+  forkApproved.invariants.lockedHash = core.lockedFingerprint(forkApproved);
+  fs.writeFileSync(forkGraphFile, JSON.stringify({ ...forkApproved, name: 'fan', goal: 'fan goal' }));
+  const forkOut = path.join(tmp, 'fan.js');
+  execFileSync('node', [GEN, '--name', 'fan', '--graph', forkGraphFile, '--out', forkOut]);
+  const forkEmitted = fs.readFileSync(forkOut, 'utf8');
+  const forkBody = conductorBody(forkEmitted);
+
+  test('a fork graph generates and parses', () => {
+    execFileSync('node', ['--check', forkOut]);
+  });
+
+  test('the emitted conductor runs the region through parallel()', () => {
+    // parallel() is the ONLY concurrency primitive available to this layer, so its
+    // presence in EXECUTING code (not a comment, not a prompt string) is the invariant:
+    // without it the branches are awaited one after another and the fork is decorative.
+    assert.ok(/\bawait\s+parallel\s*\(/.test(forkBody),
+      'no `await parallel(` in the executing body — the region would run sequentially');
+  });
+
+  test('each region gets its OWN visit counter', () => {
+    assert.ok(/regionVisits/.test(forkBody),
+      'a region must not share the caller visits map, or accounting is global not per-region');
+  });
+
+  test('a region node waits on ITS OWN dependencies, not on the whole region', () => {
+    // The difference between a dataflow scheduler and a wave scheduler. Both look
+    // concurrent; only the first lets a node with one dependency start while an unrelated
+    // slow node is still running.
+    assert.ok(/regionPreds\(graph, region, id\)/.test(forkBody),
+      'the runner must resolve per-node dependencies via regionPreds');
+  });
+
+  test('the fork conductor is still a restricted layer', () => {
+    for (const [name, re] of FORBIDDEN) {
+      assert.ok(!re.test(forkBody), `forbidden ${name} reached the fork conductor body`);
+    }
+  });
+
+  test('a fork node opens no phase group and spawns no worker', () => {
+    // meta.phases lists the APPROVED agent phases. A fork calls no agent, so a group for
+    // it would sit permanently empty in the progress tree.
+    const meta = forkEmitted.slice(0, forkEmitted.indexOf('\n}\n'));
+    assert.ok(!/title: 'Fan'/.test(meta), `fork node listed as a phase:\n${meta}`);
+    assert.ok(/title: 'ApiWork'/.test(meta), 'branch nodes must still be phases');
+  });
+
+  test('the interpreter refuses to cross a join with an incomplete region', () => {
+    // parallel() resolves a failed thunk to null rather than rejecting. Advancing anyway
+    // would hand the join a partial region and report the run as having done the work.
+    assert.ok(/refusing to cross the join/.test(forkEmitted),
+      'a null branch result must abort the run, not be skipped');
   });
 
   section('seed graphs');

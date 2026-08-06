@@ -23,11 +23,21 @@ const showViolations = (list) => {
 // ---- graph <-> React Flow ------------------------------------------------
 
 function toFlow(g) {
+  // A fork is the one node kind whose out-edges are ALL taken, at the same time. If the
+  // canvas draws it like an ordinary branch, the human approves a shape that does not
+  // describe what runs — which is the entire point of this gate. So a fork gets its own
+  // class, names its join in the label, and marks each out-edge as concurrent.
+  const kindOf = new Map(g.nodes.map((n) => [n.id, n.kind]));
   const nodes = g.nodes.map((n, i) => ({
     id: n.id,
     position: n.pos || { x: 60, y: 40 + i * 90 },
-    data: { label: n.id + (n.locked ? ' 🔒' : '') },
-    className: (n.kind === 'gate' ? 'node-gate' : 'node-work') + (n.locked ? ' locked' : ''),
+    data: {
+      label: n.id
+        + (n.kind === 'fork' ? ` ⑂ join: ${n.join || '(none)'}` : '')
+        + (n.locked ? ' 🔒' : ''),
+    },
+    className: (n.kind === 'gate' ? 'node-gate' : n.kind === 'fork' ? 'node-fork' : 'node-work')
+      + (n.locked ? ' locked' : ''),
     draggable: !readOnly,
     deletable: !readOnly && !n.locked,
   }));
@@ -39,8 +49,12 @@ function toFlow(g) {
     // `e.when.field`, which crashes inside loadGraph().then(...) with no error surfaced:
     // setFlow never runs and the canvas stays blank. A planner graphPatch that legally
     // omits `when` bricked the approval gate.
-    label: (!e.when || e.when === 'always') ? '' : `${e.when.field}=${JSON.stringify(e.when.eq ?? e.when.neq)}`,
-    animated: !!e.carry,
+    // A fork's out-edge is never a choice — labelling it with a predicate it is forbidden
+    // to have would read as "sometimes". It always runs, in parallel with its siblings.
+    label: kindOf.get(e.from) === 'fork' ? '∥ concurrent'
+      : (!e.when || e.when === 'always') ? ''
+        : `${e.when.field}=${JSON.stringify(e.when.eq ?? e.when.neq)}`,
+    animated: !!e.carry || kindOf.get(e.from) === 'fork',
     deletable: !readOnly && !e.locked,
   }));
   return { nodes, edges };

@@ -7,6 +7,93 @@ grounded in what the code actually reads — `scripts/graph-core.mjs` (validatio
 (what the browser reads). Where a field is purely descriptive — read by nothing, enforced by
 nothing — that is called out explicitly rather than implied.
 
+## Sequential by default, concurrent where you say so
+
+A `work` or `gate` node has **one** successor: `pickEdge()` returns the first out-edge whose
+predicate matches, so two out-edges mean *branch — take one*, never *fork — do both*. That is
+deliberate. Delivery work is git-serialized and serial application is usually what you want.
+
+Concurrency is **declared, never inferred**. A `fork` node opens a **region** that closes at
+the `join` it names:
+
+```json
+{ "id": "Fan", "kind": "fork", "join": "Integrate" }
+```
+
+**Inside a region, an edge means "depends on", not "go to next."** `X -> Y` says Y waits for
+X. A node runs as soon as *every* one of its in-region predecessors has finished — so a
+region is a real DAG, not a bundle of parallel lanes:
+
+```
+Plan ──▶ Fan ═╦═▶ ApiWork ══╗
+              ║             ╠═▶ Contract ═╗
+              ╠═▶ UiWork ═══╝              ╠═▶ Integrate ──▶ Review ──▶ Done
+              ║        ╚═▶ UiPolish ══════╝
+              ╚═▶ …
+```
+
+`Contract` waits for **both** `ApiWork` and `UiWork`. `UiPolish` waits for `UiWork` **only**
+and is not held up by `ApiWork`. Expressing that is the whole point — a model that could only
+say "these lanes run side by side" would either serialise `UiPolish` behind unrelated work or
+start `Contract` too early.
+
+Every node's carry is keyed by the predecessor it came from, at every join in the DAG:
+
+```json
+{ "from": { "ApiWork": { "note": "…" }, "UiWork": { "note": "…" } } }
+```
+
+Keyed, never flat-merged — two dependencies carrying the same field name would otherwise
+overwrite each other silently and the node could not tell which one it was reading.
+
+### The rules, and what each one buys
+
+`validateGraph` rejects a graph that breaks any of these before a run can start. Note that
+they are all **boundary** rules — they constrain how a region connects to the rest of the
+graph, never what it looks like inside. That is what lets the inside be any DAG.
+
+| Rule | Why it exists |
+|---|---|
+| A fork declares `join`, naming a real node that is not itself | A region needs a boundary to be a region |
+| At least **2** out-edges | One entry is a plain edge; calling it a fork misleads the reader |
+| Every region edge is **unconditional** | A dependency is not a choice. "Every region node runs" is the premise the gate reasoning rests on |
+| The region is **acyclic** | A dependency cycle is a **deadlock**, not a retry loop: each node waits on the other and there is no verdict to break it with |
+| **One exit**: `dominates(join, terminal, fork)` | A node that escaped would walk the rest of the graph concurrently with itself |
+| Every region node reaches the join, and nothing leaves the region except through it | Same reason, from the inside |
+| No `mustCross` gate **inside** a region | Not because it would go unexecuted — it *would* run. A gate exists to fail **backwards**, and in here that is either the cycle above or an escape from the join. A node that cannot route its own failure is not a gate |
+| No **nested** fork inside a region | A region is already a DAG and expresses anything a nested fork could |
+| A fork declares no `prompt` or `schema` | It spawns no worker. It opens a region |
+
+Nodes in a region are **not** required to be disjoint — a node depending on two others is the
+feature, not a violation.
+
+### What the interpreter does
+
+The region runs as **dataflow**, not as waves: every node is a memoised promise that first
+awaits its own in-region predecessors, so maximum concurrency falls out of the dependency
+structure and each node runs exactly once per region entry. Visit accounting is per-region and
+seeded from the outer counts, so re-entering a region (a gate after the join fails and routes
+back to the fork) counts the second pass rather than replaying the first from the resume cache.
+
+Three things are refused inside a region rather than silently raced:
+
+- **Graph patches.** A node reshaping the graph while its siblings are being scheduled against
+  that same structure is a data race. Patch from the join or after it.
+- **Checkpoints.** The run has one state file, so a region checkpoints at its boundaries only.
+  A kill inside a region replays that region; `results` makes every completed node free.
+- **A dead node.** `parallel()` resolves a failed thunk to `null` rather than rejecting, so the
+  run aborts instead of crossing the join with a partial region and calling it done.
+
+### Still out: fan-out over N runtime items
+
+A region's nodes are **declared statically**. Fanning out over a list of N discovered at
+runtime is not a scheduling problem — it conflicts with the skill's central promise. Visit
+caps, the trace and the frozen `lockedHash` all key on static node ids precisely so that *the
+shape a human approved is the shape that runs*; instantiating nodes at runtime means the shape
+is not knowable at approval time. Do it inside a work node (its worker spawns subagents and
+applies results serially), and accept that this concurrency is invisible to the graph and the
+report — so prefer it for read-only fan-out (surveying, searching) over concurrent mutation.
+
 ## Top level
 
 | Field | Type | Meaning |
@@ -25,7 +112,8 @@ nothing — that is called out explicitly rather than implied.
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | string | Unique per graph (`validateGraph` rejects duplicates). Referenced by every edge's `from`/`to`. |
-| `kind` | `"work" \| "gate" \| "plan" \| "terminal"` | **Descriptive only.** The interpreter's control flow never branches on `kind` — it is read solely by `scaffold-loom.cjs` for the `meta.phases` detail string (`'${kind} node'`, defaulting to `work`) and by `editor.js` to pick a CSS class (`node-gate` vs `node-work`; `plan` and `terminal` both render as `node-work`). A node's actual behavior — whether it must dominate the terminal, whether it is locked — comes entirely from `locked` and `invariants.mustCross`, not from `kind`. Calling something `"gate"` does not make it one. |
+| `kind` | `"work" \| "gate" \| "plan" \| "terminal" \| "fork"` | **`"fork"` is behavioural; every other value is descriptive.** A `fork` changes control flow: the interpreter takes *every* out-edge concurrently instead of calling `pickEdge`, `validateGraph` enforces the whole region contract above, and `scaffold-loom.cjs` emits no `meta.phases` entry for it (it spawns no worker). For the rest, control flow never branches on `kind` — it is read only for the `meta.phases` detail string (`'${kind} node'`, defaulting to `work`) and by `editor.js` to pick a CSS class (`node-gate` / `node-fork` / `node-work`; `plan` and `terminal` both render as `node-work`). Whether a node must dominate the terminal, and whether it is locked, still comes entirely from `locked` and `invariants.mustCross`. **Calling something `"gate"` does not make it one** — but calling something `"fork"` does. |
+| `join` | string | **Required on, and only meaningful for, a `fork`.** Names the node where the concurrent region closes. Must exist, must not be the fork itself, and must be crossed by every path leaving the fork (`dominates(join, terminal, fork)`). Inside the region it opens, edges are dependencies rather than transitions — see the region rules above. |
 | `prompt` | string | The node-specific instructions spliced into the worker prompt template (`node-lead.txt`) via `sub()`. Ignored for the terminal node, since the interpreter loop exits before reaching it. |
 | `schema` | JSON Schema object | Passed straight through as `{ schema: n.schema }` in the `agent()` call options — the structured-output contract the worker's result must satisfy. |
 | `model` | string | Passed straight through as `{ model: n.model }` when present (e.g. `"haiku"` for cheap deterministic nodes like `Setup`). Omitted entirely from the `agent()` call if absent, not defaulted to anything by loom itself. |
