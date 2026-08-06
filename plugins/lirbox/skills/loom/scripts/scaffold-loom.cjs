@@ -341,10 +341,19 @@ async function runNode(id, visits, inRegion) {
   // This fires on a CACHED result too, so a resume replays the refusal instead of sailing
   // past it. To get past a NO-GO, fix the plan and delete that result file — deliberately a
   // human action.
-  if (r && r.planCheck === 'NO-GO') {
-    throw new Error('plan-check returned NO-GO at ' + id + ' — refusing to re-implement '
-      + 'against a plan just found unsafe. Autofix cannot clear a NO-GO, only shrink one, so '
-      + 'this needs a human. Report: ' + (r.report || '(none written)'))
+  // Abort on the FACT, not only on the label. plan-check's rule is that NO-GO means exactly
+  // "a REFUTED row sits on a critical path", and autofix never touches REFUTED rows — so a
+  // surviving count is the ground truth and the verdict string is a summary of it. Trusting
+  // the summary alone would leave the whole gate resting on a worker correctly recomputing a
+  // verdict after autofix: get that one step wrong and a plan with live REFUTED rows arrives
+  // labelled GO-WITH-CONDITIONS and sails straight through. Checking both means the two have
+  // to agree, and disagreement fails closed.
+  const refuted = r && typeof r.refuted === 'number' ? r.refuted : 0
+  if (r && (r.planCheck === 'NO-GO' || refuted > 0)) {
+    throw new Error('plan-check refused the plan at ' + id + ' (verdict '
+      + (r.planCheck || '(none)') + ', ' + refuted + ' REFUTED on a critical path) — refusing '
+      + 'to re-implement against a plan just found unsafe. Autofix cannot clear a NO-GO, only '
+      + 'shrink one, so this needs a human. Report: ' + (r.report || '(none written)'))
   }
 
   if (r && r.graphPatch) {

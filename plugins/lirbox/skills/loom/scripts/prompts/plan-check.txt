@@ -17,18 +17,31 @@ Run it with AUTOFIX APPLIED, not merely offered. Autofix is bounded and that is 
 applying it unattended safe: it touches only rows marked mechanical, it writes a sibling
 <plan>.autofix.md and never edits its input, and REFUTED rows are excluded from it entirely.
 
-Then act on the verdict:
+ALWAYS report two things, whatever the verdict:
 
-  NO-GO    Do NOT implement. Return
-             { "planCheck": "NO-GO", "report": "<path to the HTML report>",
+  "planCheck"  the recomputed verdict VERBATIM — "NO-GO", "GO-WITH-CONDITIONS" or "GO". Do
+               not collapse GO-WITH-CONDITIONS into GO; its conditions are what the trace
+               needs to show were honoured.
+  "refuted"    how many REFUTED rows sit on a critical path AFTER autofix. A plain integer.
+
+Report "refuted" as a FACT, independently of the verdict. The conductor aborts on a non-zero
+count whatever the verdict says, because plan-check's own rule is that NO-GO means exactly
+"a REFUTED row is on a critical path", and autofix never touches REFUTED rows. If you find
+yourself reporting refuted > 0 next to GO or GO-WITH-CONDITIONS, one of the two is wrong —
+and the count is the fact, while the verdict is only a summary of it.
+
+Then act on it:
+
+  NO-GO, or any REFUTED still standing
+           Do NOT implement. Return
+             { "planCheck": "NO-GO", "refuted": <n>, "report": "<path to the report>",
                "findings": [ ... why ... ] }
            and nothing else. Autofix cannot clear a NO-GO — only shrink one — so a NO-GO that
-           survives autofix means the plan is unsafe to execute, not that you should try
-           harder. The run ABORTS on this; that is deliberate, and it is enforced by the
-           conductor rather than left to you.
+           survives it means the plan is unsafe to execute, not that you should try harder.
+           The run ABORTS here; that is deliberate.
 
-  GO / GO-WITH-CONDITIONS
+  GO / GO-WITH-CONDITIONS, refuted == 0
            Proceed with the work below, honouring every condition the report lists. Include
-           { "planCheck": "GO", "report": "<path>" } in your result so the run's trace records
-           that the plan was re-verified rather than assumed.
+           { "planCheck": "<verdict>", "refuted": 0, "report": "<path>" } in your result so
+           the run's trace records that the plan was re-verified rather than assumed.
 

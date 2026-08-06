@@ -148,9 +148,41 @@ ok(r4.threw && /NO-GO/.test(r4.threw) && /plan-check\.html/.test(r4.threw),
 // ---- 5. GO proceeds ---------------------------------------------------------------------
 const r5 = await exercise(emitted, {
   'Judge#1': { passed: false, findings: ['wrong approach'] },
-  'Build#2': { passed: true, planCheck: 'GO', report: '/tmp/plan-check.html' },
+  'Build#2': { passed: true, planCheck: 'GO', refuted: 0, report: '/tmp/plan-check.html' },
 });
-ok(!r5.threw, `a GO verdict lets the run continue (threw: ${r5.threw})`);
+ok(!r5.threw, `a GO verdict with no REFUTED rows lets the run continue (threw: ${r5.threw})`);
+
+// ---- 5b. THE LABEL IS NOT THE FACT -------------------------------------------------------
+// plan-check says NO-GO means exactly "a REFUTED row is on a critical path", and that autofix
+// never touches REFUTED. So autofix cannot legitimately turn NO-GO into GO-WITH-CONDITIONS.
+// But plan-check is prose executed by an agent, not a deterministic script: an agent that
+// mis-recomputes the verdict after autofix hands back a passing LABEL over a plan that still
+// has live REFUTED rows. Abort on the count as well and the two have to agree — disagreement
+// fails closed instead of open.
+const upgraded = await exercise(emitted, {
+  'Judge#1': { passed: false, findings: ['wrong approach'] },
+  'Build#2': {
+    passed: true, planCheck: 'GO-WITH-CONDITIONS', refuted: 2,
+    report: '/tmp/plan-check.html',
+  },
+});
+ok(!!upgraded.threw,
+  'a passing verdict that still reports REFUTED rows on a critical path ABORTS — autofix '
+  + 'cannot clear a NO-GO, so the label disagreeing with the count fails closed');
+ok(upgraded.threw && /2 REFUTED/.test(upgraded.threw),
+  `the abort reports the count that contradicted the verdict (got: ${upgraded.threw})`);
+
+// and the honest version of the same verdict is still allowed through
+const conditional = await exercise(emitted, {
+  'Judge#1': { passed: false, findings: ['wrong approach'] },
+  'Build#2': {
+    passed: true, planCheck: 'GO-WITH-CONDITIONS', refuted: 0,
+    report: '/tmp/plan-check.html',
+  },
+});
+ok(!conditional.threw,
+  `GO-WITH-CONDITIONS with zero REFUTED proceeds — conditions are not a refusal `
+  + `(threw: ${conditional.threw})`);
 
 // ---- 6. the escape hatch escapes --------------------------------------------------------
 const r6 = await exercise(generate(['--plan-check', 'off']),
