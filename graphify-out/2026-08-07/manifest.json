@@ -1975,8 +1975,8 @@
     "semantic_hash": "d622aa8e86a4177c75179b2b7e7bc76b"
   },
   "plugins/lirbox/skills/loom/evals/checks-manifest.json": {
-    "mtime": 1786035865.2301362,
-    "ast_hash": "b9733dfcd612b4f9ca13fbd8f522038d",
+    "mtime": 1786031547.3639112,
+    "ast_hash": "8a0e9779a8d7af75c53f9de873336929",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/baseline-discrimination-structural.check.mjs": {
@@ -2080,8 +2080,8 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/scaffold-loom.cjs": {
-    "mtime": 1786035445.6361651,
-    "ast_hash": "557c7611a73dded16870f9ad57a0315f",
+    "mtime": 1786030922.5467453,
+    "ast_hash": "cd80814785be9f499fd2ec02fa072292",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/seeds/delivery.json": {
@@ -2140,13 +2140,13 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/SKILL.md": {
-    "mtime": 1786034673.7694314,
-    "ast_hash": "e207cb9a0b8694ffcfa2781982665336",
+    "mtime": 1786030978.2195904,
+    "ast_hash": "762efd679c5bc18897e97c3009af041f",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/references/graph-spec.md": {
-    "mtime": 1786033493.3155208,
-    "ast_hash": "31f5e87bd6a6fa21fec91df81f780255",
+    "mtime": 1786030699.6144454,
+    "ast_hash": "f24ab4da85848090520780526850b81f",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/references/invariants.md": {
@@ -2165,8 +2165,8 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/prompts/node-lead.txt": {
-    "mtime": 1786034369.943746,
-    "ast_hash": "e1d60ec37a8578fb89d76c560d2f5522",
+    "mtime": 1786030942.4408386,
+    "ast_hash": "ba90e25acefba0c101c99ab2377d963d",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/arena/scripts/multi-grade.mjs": {
@@ -2547,21 +2547,6 @@
   "plugins/lirbox/skills/loom/harbor/tasks/scaffold-runtime-fanout/instruction.md": {
     "mtime": 1786030699.611917,
     "ast_hash": "61b441bd2d80dbe25d806ead68d31749",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/evals/checks/model-policy-follows-enforcement.check.mjs": {
-    "mtime": 1786033402.934233,
-    "ast_hash": "acc159487484a2cef394b542bbd2458b",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/evals/checks/rejected-reentry-rechecks-the-plan.check.mjs": {
-    "mtime": 1786035462.8127933,
-    "ast_hash": "1a31c9c95a8b3f21392a454073c9fa49",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/scripts/prompts/plan-check.txt": {
-    "mtime": 1786035434.2648857,
-    "ast_hash": "c1d1d24b9d2f2c3a51d1287222d0e26c",
     "semantic_hash": ""
   }
 }
