@@ -138,114 +138,172 @@ async function checkpoint(cursor) {
   )
 }
 
-// THE WALK IS RECURSIVE so that a fork's branches can run under parallel().
+// Visit accounting. \`visits\` is whichever counter map the caller owns — a region is
+// handed its OWN, which is what makes accounting per-region rather than global.
+function bumpVisit(id, visits) {
+  const visit = (visits[id] || 0) + 1
+  const cap = capFor(graph, id)
+  if (visit > cap) {
+    throw new Error('visit cap exceeded at ' + id + ' (' + visit + ' > ' + cap + ')')
+  }
+  visits[id] = visit
+  return visit
+}
+
+// Execute ONE node: visit accounting, the resume cache, the worker call, and any graph
+// patch it returns. Shared by the sequential walk and the region's dataflow runner, so
+// there is exactly one place where a node is run and one definition of what that costs.
+async function runNode(id, visits, inRegion) {
+  const n = graph.nodes.find((x) => x.id === id)
+  if (!n) throw new Error('unknown node: ' + id)
+  const visit = bumpVisit(id, visits)
+  const cap = capFor(graph, id)
+
+  // phase() mutates a single global progress cursor, so concurrent region nodes calling
+  // it race each other's grouping. Inside a region the per-agent phase option passed to
+  // agent() below is the only grouping that is safe.
+  if (!inRegion) phase(id)
+
+  const key = id + '#' + visit
+  let r
+  if (results[key] !== undefined) {
+    log(key + ' already complete (resumed)')
+    r = results[key]
+  } else {
+    const carryIn = carry[id] || {}
+    const carryText = Object.keys(carryIn).length
+      ? 'CARRIED FORWARD from the edge that sent you here:\\n' + JSON.stringify(carryIn, null, 2)
+      : ''
+    const prompt = sub(\`${esc(tpl('node-lead.txt'))}\`, {
+      WORKTREE, BRANCH, nodeId: id, visit: String(visit), cap: String(cap),
+      carryText, nodePrompt: n.prompt || '', terminal: graph.terminal })
+    r = await agent(prompt, {
+      label: key, phase: id,
+      ...(n.agentType ? { agentType: n.agentType } : {}),
+      ...(n.model ? { model: n.model } : {}),
+      ...(n.schema ? { schema: n.schema } : {}),
+    })
+    results[key] = r
+  }
+
+  if (r && r.graphPatch) {
+    if (inRegion) {
+      // A region node reshaping the graph while its siblings are being scheduled against
+      // that same structure is a data race on the thing every concurrent worker reads.
+      // Refuse it here rather than validate a graph someone else is already walking.
+      const why = 'a node inside a fork region may not reshape the graph while sibling '
+        + 'nodes are running against it — patch from the join or after it'
+      log('patch REJECTED at ' + id + ': ' + why)
+      trace.push({ node: id, visit, patch: 'rejected', violations: [why] })
+    } else {
+      const next = applyPatchTo(graph, r.graphPatch)
+      const viol = validateGraph(next, graph, { node: id, unsatisfiedGates: unsatisfiedGates() })
+      if (viol.length) {
+        log('patch REJECTED at ' + id + ': ' + viol.join('; '))
+        trace.push({ node: id, visit, patch: 'rejected', violations: viol })
+      } else {
+        graph = next
+        graph.version = (graph.version || 0) + 1
+        log('patch accepted at ' + id + ' -> graph v' + graph.version)
+        trace.push({ node: id, visit, patch: 'accepted', version: graph.version })
+      }
+    }
+  }
+  return r
+}
+
+// The sequential walk: one cursor, one successor per node, exactly as before. It hands
+// off to the DAG runner when it meets a fork and resumes at that fork's join.
 //
-// \`stopAt\` is the boundary this walk must not cross: the join id when walking a branch,
-// null on the main line. \`visits\` is the caller's counter map — a branch is handed its
-// OWN, which is what makes visit accounting per-branch rather than global.
-// \`inRegion\` marks a walk running concurrently with siblings; three things are unsafe
-// there and are refused rather than silently raced (see below).
-//
-// Returns the boundary it stopped on plus the last result and the edge that reached the
-// boundary, so a fork can build the join's carry from what each branch actually reported.
+// \`stopAt\` is a boundary it must not cross (null on the main line). Returns the boundary
+// it stopped on plus the last result and the edge that reached it.
 async function walk(from, stopAt, visits, inRegion) {
   let node = from
   while (node && node !== stopAt && node !== graph.terminal) {
     const n = graph.nodes.find((x) => x.id === node)
     if (!n) throw new Error('unknown node: ' + node)
 
-    const visit = (visits[node] || 0) + 1
-    const cap = capFor(graph, node)
-    if (visit > cap) {
-      throw new Error('visit cap exceeded at ' + node + ' (' + visit + ' > ' + cap + ')')
-    }
-    visits[node] = visit
-
-    // ---- fork: every out-edge, concurrently -------------------------------------
+    // ---- fork: run the region as a DAG ------------------------------------------
+    //
+    // Inside a region an edge means DEPENDS ON, not go-to-next. So this is not a set of
+    // parallel lanes being awaited — it is dataflow: every node is a memoised promise
+    // that first awaits its in-region predecessors. A node with two predecessors waits
+    // for both; a node with one waits only for that one and does not block on its
+    // sibling. Maximum concurrency falls out of the dependency structure itself, and
+    // each node runs exactly ONCE per region entry because the promise is memoised.
     if (n.kind === 'fork') {
-      const branches = outEdges(graph, node)
-      log(node + ': forking ' + branches.length + ' concurrent branches -> ' + n.join)
-      trace.push({ node, visit, fork: branches.map((e) => e.to), join: n.join })
+      const visit = bumpVisit(node, visits)
+      const region = regionNodes(graph, n)
+      // Re-checked at RUNTIME, not trusted from pre-flight: a runtime graphPatch could
+      // have introduced a cycle since approval, and a cycle here is a deadlock — every
+      // node waiting on another, with no verdict able to break it.
+      if (!regionOrder(graph, region)) {
+        throw new Error('fork ' + node + ' region contains a dependency cycle — refusing '
+          + 'to schedule it, every node would wait on another forever')
+      }
+      log(node + ': region of ' + region.size + ' node(s) as a DAG -> ' + n.join)
+      trace.push({ node, visit, fork: [...region], join: n.join })
 
-      // PER-BRANCH visit accounting. Each branch counts in its own map; validateGraph
-      // has already proven the branches node-disjoint, so merging back cannot collide
-      // and the merged numbers are exact — not a max or a sum over a shared counter.
-      const branchVisits = branches.map(() => ({}))
-      const outs = await parallel(branches.map((e, i) => () =>
-        walk(e.to, n.join, branchVisits[i], true).then((res) => ({ entry: e.to, res }))))
-
-      const merged = {}
-      for (let i = 0; i < outs.length; i++) {
-        // parallel() resolves a failed thunk to null. Advancing past the join with a
-        // branch missing would hand the join node a partial region and call it done.
-        if (!outs[i]) {
-          throw new Error('fork ' + node + ' branch ' + branches[i].to + ' did not complete '
-            + '— refusing to cross the join ' + n.join + ' with an incomplete region')
+      // PER-REGION visit accounting. The region counts in its own map; its nodes are
+      // reachable only through this fork, so merging back cannot collide with the outer
+      // walk, and the merged numbers are exact rather than a max over a shared counter.
+      // Seeded from the OUTER counts, not from zero. A region can be re-entered (a gate
+      // after the join fails and routes back to the fork); starting fresh would make the
+      // second pass reuse id#1 and hit the resume cache, replaying the first pass's
+      // results as if the work had been redone, while every visit cap silently reset.
+      const regionVisits = {}
+      for (const id of region) if (visits[id]) regionVisits[id] = visits[id]
+      const started = {}
+      const runRegionNode = (id) => {
+        if (!started[id]) {
+          started[id] = (async () => {
+            const preds = regionPreds(graph, region, id)
+            const done = await Promise.all(preds.map((e) =>
+              runRegionNode(e.from).then((res) => ({ e, res }))))
+            // Carry keyed BY PREDECESSOR, never flat-merged: two dependencies carrying
+            // the same field name would silently overwrite each other and the node could
+            // not tell which one it was reading. Entry nodes inherit the fork's own carry.
+            if (done.length) {
+              const from = {}
+              for (const d of done) from[d.e.from] = carryFor(d.e, d.res)
+              carry[id] = { from }
+            } else if (carry[node]) {
+              carry[id] = carry[node]
+            }
+            return await runNode(id, regionVisits, true)
+          })()
         }
-        for (const k of Object.keys(branchVisits[i])) visits[k] = branchVisits[i][k]
-        merged[outs[i].entry] = carryFor(outs[i].res.edge, outs[i].res.result)
+        return started[id]
       }
 
-      // Keyed BY BRANCH, never flat-merged. Two branches carrying the same field name
-      // would silently overwrite each other, and the join node would never know which
-      // branch it was reading.
-      carry[n.join] = { branches: merged }
-      trace.push({ node, visit, joined: branches.map((e) => e.to), to: n.join })
+      // Running the sinks pulls in every other region node through its dependencies —
+      // validateGraph has proven every region node reaches the join.
+      const sinks = regionSinks(graph, region, n.join)
+      const outs = await parallel(sinks.map((id) => () =>
+        runRegionNode(id).then((res) => ({ id, res }))))
+
+      const from = {}
+      for (let i = 0; i < outs.length; i++) {
+        // parallel() resolves a failed thunk to null. Crossing the join with a node
+        // missing would hand the join a partial region and report it as done.
+        if (!outs[i]) {
+          throw new Error('fork ' + node + ' region node ' + sinks[i] + ' did not complete '
+            + '— refusing to cross the join ' + n.join + ' with an incomplete region')
+        }
+        const e = outEdges(graph, outs[i].id).find((x) => x.to === n.join)
+        from[outs[i].id] = carryFor(e, outs[i].res)
+      }
+      for (const k of Object.keys(regionVisits)) visits[k] = regionVisits[k]
+
+      carry[n.join] = { from }
+      trace.push({ node, visit, joined: sinks, to: n.join })
       if (!inRegion) await checkpoint(n.join)
       node = n.join
       continue
     }
 
-    // phase() mutates a single global progress cursor, so concurrent branches calling it
-    // race each other's grouping. Inside a region the per-agent \`phase\` option below is
-    // the only grouping that is safe.
-    if (!inRegion) phase(node)
-
-    const key = node + '#' + visit
-    let r
-    if (results[key] !== undefined) {
-      log(key + ' already complete (resumed)')
-      r = results[key]
-    } else {
-      const carryIn = carry[node] || {}
-      const carryText = Object.keys(carryIn).length
-        ? 'CARRIED FORWARD from the edge that sent you here:\\n' + JSON.stringify(carryIn, null, 2)
-        : ''
-      const prompt = sub(\`${esc(tpl('node-lead.txt'))}\`, {
-        WORKTREE, BRANCH, nodeId: node, visit: String(visit), cap: String(cap),
-        carryText, nodePrompt: n.prompt || '', terminal: graph.terminal })
-      r = await agent(prompt, {
-        label: key, phase: node,
-        ...(n.agentType ? { agentType: n.agentType } : {}),
-        ...(n.model ? { model: n.model } : {}),
-        ...(n.schema ? { schema: n.schema } : {}),
-      })
-      results[key] = r
-    }
-
-    if (r && r.graphPatch) {
-      if (inRegion) {
-        // A branch reshaping the graph while its siblings are walking that same graph is
-        // a data race on the one structure every concurrent worker is reading. Refuse it
-        // here rather than validate a graph that is already being read by someone else.
-        const why = 'a node inside a fork branch may not reshape the graph while sibling '
-          + 'branches are walking it — patch from the join or after it'
-        log('patch REJECTED at ' + node + ': ' + why)
-        trace.push({ node, visit, patch: 'rejected', violations: [why] })
-      } else {
-        const next = applyPatchTo(graph, r.graphPatch)
-        const viol = validateGraph(next, graph, { node, unsatisfiedGates: unsatisfiedGates() })
-        if (viol.length) {
-          log('patch REJECTED at ' + node + ': ' + viol.join('; '))
-          trace.push({ node, visit, patch: 'rejected', violations: viol })
-        } else {
-          graph = next
-          graph.version = (graph.version || 0) + 1
-          log('patch accepted at ' + node + ' -> graph v' + graph.version)
-          trace.push({ node, visit, patch: 'accepted', version: graph.version })
-        }
-      }
-    }
+    const r = await runNode(node, visits, inRegion)
+    const visit = visits[node]
 
     // NO SILENT FALLBACK TO THE TERMINAL. pickEdge returns null when no declared
     // predicate matches the result, and predicates compare with ===. Routing to

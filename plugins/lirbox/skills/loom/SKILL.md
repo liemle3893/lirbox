@@ -27,10 +27,12 @@ All of: multi-step with subagents; a gate failure should re-enter real work rath
 narrow fix worker; the decomposition is not knowable up front. Otherwise use `conductor`
 (fixed pipeline) or call `Workflow` directly (one-shot).
 
-Work is sequential unless you **declare** otherwise: a `fork` node takes every out-edge at
-once and the region closes at the `join` it names. Branches must be node-disjoint, must have
-that one exit, and may not hide a `mustCross` gate — put the gate at or after the join. See
-`references/graph-spec.md` § *Sequential by default, concurrent where you say so*.
+Work is sequential unless you **declare** otherwise: a `fork` node opens a **region** that
+closes at the `join` it names, and inside a region an edge means *depends on* — so the region
+is a real DAG. A node with two arrows in waits for both; a node with one is not held up by
+unrelated work. The region must be acyclic, must have that one exit, and may not hide a
+`mustCross` gate (a gate has nowhere legal to fail to in there) — put it at or after the join.
+See `references/graph-spec.md` § *Sequential by default, concurrent where you say so*.
 </when-to-use>
 
 <core-model>

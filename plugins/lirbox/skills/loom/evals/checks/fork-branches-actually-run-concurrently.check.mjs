@@ -32,17 +32,22 @@ const genFile = process.env.LOOM_SCAFFOLD_OVERRIDE || join(SCRIPTS, 'scaffold-lo
 let bad = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
 
-// Two branches of DIFFERENT lengths. Equal-length branches can look interleaved under a
-// sequential walk if the stub timings line up; unequal ones cannot.
-//   Plan -> Fan => { ApiWork -> ApiTest , UiWork } -> Integrate -> Review -> Done
+// A GENUINE DAG REGION, not two parallel lanes — this is the shape the old model could
+// not express at all:
+//
+//   Plan -> Fan =>{ ApiWork , UiWork } ; Contract needs BOTH ; UiPolish needs UiWork ONLY
+//                 -> Integrate -> Review -> Done
+//
+// UiPolish must NOT wait for ApiWork, and Contract must wait for both. A scheduler that
+// only understands lanes either serialises them or runs Contract too early.
 const GRAPH = {
   name: 'forkcheck', goal: 'fork concurrency check',
   start: 'Plan', terminal: 'Done',
   nodes: [
     { id: 'Plan', kind: 'work' },
     { id: 'Fan', kind: 'fork', join: 'Integrate' },
-    { id: 'ApiWork', kind: 'work' }, { id: 'ApiTest', kind: 'work' },
-    { id: 'UiWork', kind: 'work' },
+    { id: 'ApiWork', kind: 'work' }, { id: 'UiWork', kind: 'work' },
+    { id: 'Contract', kind: 'work' }, { id: 'UiPolish', kind: 'work' },
     { id: 'Integrate', kind: 'work' },
     { id: 'Review', kind: 'gate' },
     { id: 'Done', kind: 'terminal' },
@@ -51,9 +56,13 @@ const GRAPH = {
     { from: 'Plan', to: 'Fan', when: 'always' },
     { from: 'Fan', to: 'ApiWork', when: 'always' },
     { from: 'Fan', to: 'UiWork', when: 'always' },
-    { from: 'ApiWork', to: 'ApiTest', when: 'always' },
-    { from: 'ApiTest', to: 'Integrate', when: 'always', carry: ['note'] },
-    { from: 'UiWork', to: 'Integrate', when: 'always', carry: ['note'] },
+    // Contract is the DAG join-within-the-region: two arrows in, two things waited on.
+    { from: 'ApiWork', to: 'Contract', when: 'always', carry: ['note'] },
+    { from: 'UiWork', to: 'Contract', when: 'always', carry: ['note'] },
+    // ...while UiPolish depends on UiWork alone and must not be held up by ApiWork.
+    { from: 'UiWork', to: 'UiPolish', when: 'always', carry: ['note'] },
+    { from: 'Contract', to: 'Integrate', when: 'always', carry: ['note'] },
+    { from: 'UiPolish', to: 'Integrate', when: 'always', carry: ['note'] },
     { from: 'Integrate', to: 'Review', when: 'always' },
     { from: 'Review', to: 'Done', when: { field: 'passed', eq: true } },
     { from: 'Review', to: 'Integrate', when: { field: 'passed', eq: false } },
@@ -98,26 +107,34 @@ const parallel = (thunks) => Promise.all(thunks.map((t) => {
   try { return Promise.resolve(t()).catch(() => null); } catch { return Promise.resolve(null); }
 }));
 
+// ApiWork is deliberately the SLOW node. UiPolish depends only on UiWork, so if the
+// scheduler understands dependencies it starts long before ApiWork finishes; if it only
+// understands lanes, or runs in waves, it does not.
+const DELAY = { ApiWork: 40 };
+
 async function exercise({ failNode } = {}) {
-  let maxLive = 0;
+  let maxLive = 0, clock = 0;
   const live = new Set();
   const overlapped = new Set();
+  const started = {}, ended = {};
   const agent = async (_prompt, opts) => {
     const label = String((opts && opts.label) || '');
     const node = label.split('#')[0];
     if (label.startsWith('checkpoint:')) return {};
+    started[node] = clock++;
     live.add(node);
     if (live.size > maxLive) maxLive = live.size;
     // Record EVERY node live during an overlap, not just the one that arrived into it —
-    // the arriving node alone would name the second branch and never the first.
+    // the arriving node alone would name the second worker and never the first.
     if (live.size > 1) for (const n of live) overlapped.add(n);
-    // Two ticks, so a sequential walk cannot accidentally look interleaved.
-    await new Promise((r) => setTimeout(r, 4));
+    await new Promise((r) => setTimeout(r, DELAY[node] || 4));
     live.delete(node);
-    if (failNode && node === failNode) throw new Error('branch worker died: ' + node);
+    ended[node] = clock++;
+    if (failNode && node === failNode) throw new Error('region worker died: ' + node);
     return node === 'Review' ? { passed: true, note: node } : { note: node };
   };
-  return { out: await run(agent, parallel, () => {}, () => {}, undefined), maxLive, overlapped };
+  const out = await run(agent, parallel, () => {}, () => {}, undefined);
+  return { out, maxLive, overlapped, started, ended };
 }
 
 // ---- 1. concurrency, observed ------------------------------------------------------
@@ -126,45 +143,63 @@ try { normal = await exercise(); }
 catch (e) { ok(false, `a valid fork graph must run to completion (threw: ${e.message})`); }
 
 if (normal) {
+  const { started, ended } = normal;
   ok(normal.maxLive >= 2,
-    `two branch workers were in flight at the same time (max concurrent = ${normal.maxLive})`);
+    `two region workers were in flight at the same time (max concurrent = ${normal.maxLive})`);
   ok(normal.overlapped.has('ApiWork') && normal.overlapped.has('UiWork'),
-    `both branches overlapped, not just one (overlapped: ${[...normal.overlapped].join(', ') || 'none'})`);
+    `both region entries overlapped, not just one (overlapped: ${[...normal.overlapped].join(', ') || 'none'})`);
 
-  // ---- 2. per-branch visit accounting, merged exactly ------------------------------
+  // ---- 2. IT IS A DAG, not two lanes ------------------------------------------------
+  // Contract declares two dependencies and must wait for BOTH...
+  ok(started.Contract > ended.ApiWork && started.Contract > ended.UiWork,
+    `Contract waited for BOTH its dependencies (start ${started.Contract} vs ends `
+    + `ApiWork ${ended.ApiWork}, UiWork ${ended.UiWork})`);
+  // ...while UiPolish declares only one and must NOT be held up by the other.
+  ok(started.UiPolish < ended.ApiWork,
+    `UiPolish depends only on UiWork and did NOT wait for the slow ApiWork `
+    + `(start ${started.UiPolish} vs ApiWork end ${ended.ApiWork}) — a lane scheduler or a `
+    + `wave scheduler would have blocked it`);
+
+  // ---- 3. per-region visit accounting, merged exactly -------------------------------
   const visits = (normal.out && normal.out.visits) || {};
-  ok(visits.ApiWork === 1 && visits.ApiTest === 1 && visits.UiWork === 1,
-    `every branch node counted exactly once (got ${JSON.stringify(visits)})`);
+  ok(visits.ApiWork === 1 && visits.UiWork === 1 && visits.Contract === 1
+    && visits.UiPolish === 1,
+    `every region node ran exactly once (got ${JSON.stringify(visits)})`);
   ok(visits.Integrate === 1,
-    `the join ran ONCE for the whole region, not once per branch (got ${visits.Integrate})`);
+    `the join ran ONCE for the whole region, not once per path (got ${visits.Integrate})`);
 
-  // ---- 3. the join sees every branch, attributed ------------------------------------
-  const carry = ((normal.out && normal.out.carry) || {}).Integrate || {};
-  ok(!!carry.branches, `the join's carry is keyed by branch (got ${JSON.stringify(carry)})`);
-  if (carry.branches) {
-    const keys = Object.keys(carry.branches).sort().join(',');
-    ok(keys === 'ApiWork,UiWork',
-      `both branches reported into the join, keyed by entry (got ${keys})`);
-    // Flat-merging would have let one branch's `note` silently overwrite the other's.
-    ok(carry.branches.ApiWork && carry.branches.UiWork
-      && carry.branches.ApiWork.note !== carry.branches.UiWork.note,
-      'each branch keeps its own values — no silent last-writer-wins overwrite');
+  // ---- 4. carry is keyed by predecessor, at every DAG join --------------------------
+  const carry = (normal.out && normal.out.carry) || {};
+  const atJoin = (carry.Integrate || {}).from;
+  ok(!!atJoin, `the join's carry is keyed by predecessor (got ${JSON.stringify(carry.Integrate)})`);
+  if (atJoin) {
+    ok(Object.keys(atJoin).sort().join(',') === 'Contract,UiPolish',
+      `every sink reported into the join, keyed by node (got ${Object.keys(atJoin).sort().join(',')})`);
+  }
+  // The in-region DAG join gets the same treatment — flat-merging would have let one
+  // dependency's `note` silently overwrite the other's.
+  const atContract = (carry.Contract || {}).from;
+  ok(!!atContract && Object.keys(atContract).sort().join(',') === 'ApiWork,UiWork',
+    `a node with two dependencies sees BOTH, attributed (got ${JSON.stringify(carry.Contract)})`);
+  if (atContract && atContract.ApiWork && atContract.UiWork) {
+    ok(atContract.ApiWork.note !== atContract.UiWork.note,
+      'each dependency keeps its own values — no silent last-writer-wins overwrite');
   }
 
-  // ---- 4. the trace records the fork, so the report can describe what ran -----------
+  // ---- 5. the trace records the region, so a report can describe what ran -----------
   const trace = (normal.out && normal.out.trace) || [];
-  ok(trace.some((t) => Array.isArray(t.fork) && t.fork.length === 2),
-    'the trace records the fork and its branches');
+  ok(trace.some((t) => Array.isArray(t.fork) && t.fork.length === 4),
+    'the trace records the region and its nodes');
   ok(trace.some((t) => Array.isArray(t.joined)),
     'the trace records the join, so a report can show where the region closed');
 }
 
-// ---- 5. a dead branch must ABORT, never be skipped ----------------------------------
+// ---- 6. a dead region node must ABORT, never be skipped -----------------------------
 let aborted = false;
 try { await exercise({ failNode: 'UiWork' }); }
 catch { aborted = true; }
 ok(aborted,
-  'a branch that dies aborts the run — the join is never crossed with a partial region');
+  'a region node that dies aborts the run — the join is never crossed with a partial region');
 
 if (bad) { console.error(`\nfork-branches-actually-run-concurrently: ${bad} failed`); process.exit(1); }
 console.log('fork-branches-actually-run-concurrently: ok');

@@ -73,6 +73,13 @@ RUN printf '%s\n' \
   '    return cells' \
   > /app/src/exporters/xlsx_export.py
 
+# Golden fixtures for TWO of the three formats. The regeneration step therefore depends on
+# csv and xlsx and on neither the pdf work — the asymmetry that makes the region a DAG rather
+# than three parallel lanes.
+RUN mkdir -p /app/tests/golden
+RUN printf '%s\n' 'name,email,phone,ssn,amount' 'a,a@x,1,2,3' > /app/tests/golden/report.csv
+RUN printf '%s\n' '{"(0, 0)": "name", "(0, 1)": "email"}' > /app/tests/golden/report.xlsx.json
+
 # loom's Setup node runs git and expects a working tree.
 RUN git init -q /app \
  && git -C /app config user.email harbor@local \

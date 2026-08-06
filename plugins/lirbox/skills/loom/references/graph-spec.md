@@ -11,72 +11,88 @@ nothing — that is called out explicitly rather than implied.
 
 A `work` or `gate` node has **one** successor: `pickEdge()` returns the first out-edge whose
 predicate matches, so two out-edges mean *branch — take one*, never *fork — do both*. That is
-deliberate. Delivery work is git-serialized (one branch, a gate before each commit) and
-serial application is what you want.
+deliberate. Delivery work is git-serialized and serial application is usually what you want.
 
-Concurrency is **declared, never inferred**. A `fork` node takes every out-edge at once; the
-region it opens ends at the `join` it names.
+Concurrency is **declared, never inferred**. A `fork` node opens a **region** that closes at
+the `join` it names:
 
 ```json
 { "id": "Fan", "kind": "fork", "join": "Integrate" }
 ```
 
+**Inside a region, an edge means "depends on", not "go to next."** `X -> Y` says Y waits for
+X. A node runs as soon as *every* one of its in-region predecessors has finished — so a
+region is a real DAG, not a bundle of parallel lanes:
+
 ```
-Plan ──▶ Fan ═╦═▶ ApiWork ──▶ ApiTest ═╗
-              ║                        ╠═▶ Integrate ──▶ Review ──▶ Done
-              ╚═▶ UiWork ══════════════╝
+Plan ──▶ Fan ═╦═▶ ApiWork ══╗
+              ║             ╠═▶ Contract ═╗
+              ╠═▶ UiWork ═══╝              ╠═▶ Integrate ──▶ Review ──▶ Done
+              ║        ╚═▶ UiPolish ══════╝
+              ╚═▶ …
 ```
 
-`ApiWork` and `UiWork` run at the same time. `Integrate` runs **once**, after both branches
-reach it, and receives every branch's carry keyed by branch entry:
+`Contract` waits for **both** `ApiWork` and `UiWork`. `UiPolish` waits for `UiWork` **only**
+and is not held up by `ApiWork`. Expressing that is the whole point — a model that could only
+say "these lanes run side by side" would either serialise `UiPolish` behind unrelated work or
+start `Contract` too early.
+
+Every node's carry is keyed by the predecessor it came from, at every join in the DAG:
 
 ```json
-{ "branches": { "ApiWork": { "note": "..." }, "UiWork": { "note": "..." } } }
+{ "from": { "ApiWork": { "note": "…" }, "UiWork": { "note": "…" } } }
 ```
 
-Keyed, never flat-merged — two branches carrying the same field name would otherwise
-overwrite each other silently and the join could not tell which branch reported what.
+Keyed, never flat-merged — two dependencies carrying the same field name would otherwise
+overwrite each other silently and the node could not tell which one it was reading.
 
 ### The rules, and what each one buys
 
-`validateGraph` rejects a graph that breaks any of these, before a run can start.
+`validateGraph` rejects a graph that breaks any of these before a run can start. Note that
+they are all **boundary** rules — they constrain how a region connects to the rest of the
+graph, never what it looks like inside. That is what lets the inside be any DAG.
 
 | Rule | Why it exists |
 |---|---|
-| A fork declares `join`, naming a real node that is not itself | The region needs a boundary to be a region |
-| At least **2** out-edges | One branch is a plain edge; calling it a fork misleads the reader |
-| Every fork out-edge is **unconditional** | Every branch always runs. That is the premise the dominance reasoning below rests on — a predicate here is a choice that is never made |
-| **One exit**: `dominates(join, terminal, fork)` | A branch that escapes the region would walk the rest of the graph concurrently with its own sibling |
-| Branches are **node-disjoint** | Two workers would otherwise race the same node, and visit accounting could not be per-branch |
-| No `mustCross` gate **inside** a branch | A gate guarding one branch is not a gate on the run: the sibling branch reaches the join, and so the terminal, without ever crossing it. Put the gate at the join or after it |
-| A fork declares no `prompt` or `schema` | It spawns no worker. It routes |
+| A fork declares `join`, naming a real node that is not itself | A region needs a boundary to be a region |
+| At least **2** out-edges | One entry is a plain edge; calling it a fork misleads the reader |
+| Every region edge is **unconditional** | A dependency is not a choice. "Every region node runs" is the premise the gate reasoning rests on |
+| The region is **acyclic** | A dependency cycle is a **deadlock**, not a retry loop: each node waits on the other and there is no verdict to break it with |
+| **One exit**: `dominates(join, terminal, fork)` | A node that escaped would walk the rest of the graph concurrently with itself |
+| Every region node reaches the join, and nothing leaves the region except through it | Same reason, from the inside |
+| No `mustCross` gate **inside** a region | Not because it would go unexecuted — it *would* run. A gate exists to fail **backwards**, and in here that is either the cycle above or an escape from the join. A node that cannot route its own failure is not a gate |
+| No **nested** fork inside a region | A region is already a DAG and expresses anything a nested fork could |
+| A fork declares no `prompt` or `schema` | It spawns no worker. It opens a region |
 
-Back-edges *within* a branch stay legal — a gate inside a branch that is not in `mustCross`
-can still route back to an earlier node in the same branch, bounded by its own visit cap.
+Nodes in a region are **not** required to be disjoint — a node depending on two others is the
+feature, not a violation.
 
 ### What the interpreter does
 
-Each branch walks under `parallel()` with **its own visits map**. Because branches are
-proven node-disjoint, merging those maps back is exact — not a max or a sum over a shared
-counter. Three things are refused inside a region rather than silently raced:
+The region runs as **dataflow**, not as waves: every node is a memoised promise that first
+awaits its own in-region predecessors, so maximum concurrency falls out of the dependency
+structure and each node runs exactly once per region entry. Visit accounting is per-region and
+seeded from the outer counts, so re-entering a region (a gate after the join fails and routes
+back to the fork) counts the second pass rather than replaying the first from the resume cache.
 
-- **Graph patches.** A branch reshaping the graph while its siblings are walking it is a data
-  race on the one structure every concurrent worker reads. Patch from the join or after it.
+Three things are refused inside a region rather than silently raced:
+
+- **Graph patches.** A node reshaping the graph while its siblings are being scheduled against
+  that same structure is a data race. Patch from the join or after it.
 - **Checkpoints.** The run has one state file, so a region checkpoints at its boundaries only.
   A kill inside a region replays that region; `results` makes every completed node free.
-- **A dead branch.** `parallel()` resolves a failed thunk to `null` rather than rejecting, so
-  the run aborts instead of crossing the join with a partial region and calling it done.
+- **A dead node.** `parallel()` resolves a failed thunk to `null` rather than rejecting, so the
+  run aborts instead of crossing the join with a partial region and calling it done.
 
-### Still sequential: fan-out over N runtime items
+### Still out: fan-out over N runtime items
 
-A fork's branches are **declared statically**. Fanning out over a list of N discovered at
-runtime is a different feature, and it is not a scheduling problem — it conflicts with the
-skill's central promise. Visit caps, the trace and the frozen `lockedHash` all key on static
-node ids precisely so that *the shape a human approved is the shape that runs*. Instantiating
-nodes at runtime means the shape is not knowable at approval time. Do it inside a work node
-(its worker spawns subagents and applies results serially), and accept that this concurrency
-is invisible to the graph and the report — so prefer it for read-only fan-out (surveying,
-searching) over concurrent mutation.
+A region's nodes are **declared statically**. Fanning out over a list of N discovered at
+runtime is not a scheduling problem — it conflicts with the skill's central promise. Visit
+caps, the trace and the frozen `lockedHash` all key on static node ids precisely so that *the
+shape a human approved is the shape that runs*; instantiating nodes at runtime means the shape
+is not knowable at approval time. Do it inside a work node (its worker spawns subagents and
+applies results serially), and accept that this concurrency is invisible to the graph and the
+report — so prefer it for read-only fan-out (surveying, searching) over concurrent mutation.
 
 ## Top level
 
@@ -97,7 +113,7 @@ searching) over concurrent mutation.
 |---|---|---|
 | `id` | string | Unique per graph (`validateGraph` rejects duplicates). Referenced by every edge's `from`/`to`. |
 | `kind` | `"work" \| "gate" \| "plan" \| "terminal" \| "fork"` | **`"fork"` is behavioural; every other value is descriptive.** A `fork` changes control flow: the interpreter takes *every* out-edge concurrently instead of calling `pickEdge`, `validateGraph` enforces the whole region contract above, and `scaffold-loom.cjs` emits no `meta.phases` entry for it (it spawns no worker). For the rest, control flow never branches on `kind` — it is read only for the `meta.phases` detail string (`'${kind} node'`, defaulting to `work`) and by `editor.js` to pick a CSS class (`node-gate` / `node-fork` / `node-work`; `plan` and `terminal` both render as `node-work`). Whether a node must dominate the terminal, and whether it is locked, still comes entirely from `locked` and `invariants.mustCross`. **Calling something `"gate"` does not make it one** — but calling something `"fork"` does. |
-| `join` | string | **Required on, and only meaningful for, a `fork`.** Names the node where the concurrent region closes. Must exist, must not be the fork itself, and must be crossed by every path leaving the fork (`dominates(join, terminal, fork)`) — see the region rules above. |
+| `join` | string | **Required on, and only meaningful for, a `fork`.** Names the node where the concurrent region closes. Must exist, must not be the fork itself, and must be crossed by every path leaving the fork (`dominates(join, terminal, fork)`). Inside the region it opens, edges are dependencies rather than transitions — see the region rules above. |
 | `prompt` | string | The node-specific instructions spliced into the worker prompt template (`node-lead.txt`) via `sub()`. Ignored for the terminal node, since the interpreter loop exits before reaching it. |
 | `schema` | JSON Schema object | Passed straight through as `{ schema: n.schema }` in the `agent()` call options — the structured-output contract the worker's result must satisfy. |
 | `model` | string | Passed straight through as `{ model: n.model }` when present (e.g. `"haiku"` for cheap deterministic nodes like `Setup`). Omitted entirely from the `agent()` call if absent, not defaulted to anything by loom itself. |

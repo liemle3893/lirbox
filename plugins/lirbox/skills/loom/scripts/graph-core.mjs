@@ -72,28 +72,99 @@ function pickEdge(graph, from, result) {
   return null;
 }
 
-// ---- fork / join --------------------------------------------------------------------
+// ---- fork / join: a DAG region ------------------------------------------------------
 //
-// A `fork` node's out-edges are ALL taken, CONCURRENTLY. That is the one place in this
-// model where two workers run at the same time, and it is the only construct that can
-// express "these are independent" instead of "pick one".
+// A `fork` node opens a REGION that closes at the `join` it names. This is the one place
+// in the model where two workers run at the same time, and the only construct that can
+// say "these are independent" rather than "pick one".
 //
-// Everything about a fork is built so that concurrency costs nothing in provability:
+// INSIDE A REGION, AN EDGE MEANS "DEPENDS ON", NOT "GO TO NEXT". `X -> Y` says Y needs X.
+// A node runs as soon as EVERY one of its in-region predecessors has finished, so the
+// region is a genuine DAG, not a bundle of parallel lanes:
 //
-//   * A fork's out-edges must be UNCONDITIONAL. Every branch always runs, so "which
-//     branch" is never a runtime question — and that is exactly what keeps the reasoning
-//     below sound rather than probabilistic.
-//   * The region has ONE exit: the `join`. `dominates(join, terminal, fork)` says every
-//     path leaving the fork crosses it, so a branch can never escape into the rest of the
-//     graph and start running it concurrently.
-//   * Branches are NODE-DISJOINT. This is what makes visit accounting per-branch and
-//     EXACT: each branch counts in its own map and the merge cannot collide, so no
-//     max/sum approximation is needed and no two workers ever race the same node.
+//     Fan ═╦═▶ B ═╦═▶ D ═╗          D needs BOTH B and C
+//          ║      ║      ╠═▶ Join   E needs ONLY B, and does not wait for C
+//          ╚═▶ C ═╝  E ══╝
 //
-// The nodes strictly inside one branch: everything reachable from the branch entry once
+// That shape is why nodes may NOT be required to be disjoint: D is reachable from both B
+// and C on purpose, and the two arrows into it are the two things it waits for.
+//
+// The properties that make this safe are boundary properties, not shape properties — they
+// constrain how a region connects to the rest of the graph, never what it looks like
+// inside:
+//
+//   * ONE ENTRY, ONE EXIT. `dominates(join, terminal, fork)`: every path leaving the fork
+//     crosses the join, so nothing in a region can escape into the rest of the graph and
+//     start running it concurrently with itself.
+//   * EVERY REGION EDGE IS UNCONDITIONAL. A dependency is not a choice. This is also what
+//     makes the reasoning above sound rather than probabilistic: every region node runs.
+//   * THE REGION IS ACYCLIC. A dependency cycle is a deadlock — each node waiting on the
+//     other — and there is no verdict to break it with, because dependencies are not
+//     predicates.
+//
+// The nodes strictly inside a region: everything reachable from the fork's targets once
 // the join is deleted. The join is the boundary, so it is never a member.
-function branchRegion(graph, entry, join) {
-  return reachable(graph, entry, [join]);
+function regionNodes(graph, fork) {
+  const out = new Set();
+  for (const e of outEdges(graph, fork.id)) {
+    for (const id of reachable(graph, e.to, [fork.join])) out.add(id);
+  }
+  return out;
+}
+
+// The edges a region node WAITS ON: in-region predecessors. Deduplicated, because two
+// identical arrows are one dependency, not two.
+function regionPreds(graph, region, id) {
+  const seen = new Set();
+  const out = [];
+  for (const e of graph.edges) {
+    if (e.to !== id || !region.has(e.from)) continue;
+    const k = e.from + '→' + e.to;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(e);
+  }
+  return out;
+}
+
+// Kahn's algorithm over the region's internal edges. Returns a dependency-respecting order,
+// or NULL when the region contains a cycle — which is the deadlock case, reported as a
+// violation before a run rather than discovered as a hang during one.
+function regionOrder(graph, region) {
+  const indeg = new Map();
+  const succ = new Map();
+  for (const id of region) { indeg.set(id, 0); succ.set(id, []); }
+  const seen = new Set();
+  for (const e of graph.edges) {
+    if (!region.has(e.from) || !region.has(e.to)) continue;
+    const k = e.from + '→' + e.to;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    succ.get(e.from).push(e.to);
+    indeg.set(e.to, indeg.get(e.to) + 1);
+  }
+  const ready = [];
+  for (const id of region) if (indeg.get(id) === 0) ready.push(id);
+  const order = [];
+  while (ready.length) {
+    const id = ready.shift();
+    order.push(id);
+    for (const to of succ.get(id)) {
+      indeg.set(to, indeg.get(to) - 1);
+      if (indeg.get(to) === 0) ready.push(to);
+    }
+  }
+  return order.length === region.size ? order : null;
+}
+
+// The region nodes that feed the join. Running these pulls every other region node in
+// through its dependencies, since every region node must reach the join.
+function regionSinks(graph, region, join) {
+  const out = [];
+  for (const id of region) {
+    if (outEdges(graph, id).some((e) => e.to === join)) out.push(id);
+  }
+  return out;
 }
 
 // Visit caps live ONLY in invariants.visitCaps so the validator has one source
@@ -261,10 +332,12 @@ function validateGraph(next, prev, cursor) {
   }
 
   // ---- fork / join regions ----------------------------------------------------------
-  // See the block comment above branchRegion for WHY each of these rules exists. In short:
-  // a fork is the only construct that runs two workers at once, and these rules are what
-  // buy that concurrency without weakening a single dominance proof below.
-  const regionOf = new Map(); // node id -> "<fork>/<branch entry>", for the gate rule
+  // See the block comment above regionNodes for WHY each of these rules exists. In short:
+  // a region is the only construct that runs two workers at once, and every rule here is a
+  // BOUNDARY rule — it constrains how a region connects to the rest of the graph, never
+  // what it looks like inside. That is what lets the inside be an arbitrary DAG while not
+  // one dominance proof below gets weaker.
+  const regionOf = new Map(); // node id -> owning fork id, for the gate rule
   for (const f of next.nodes.filter((n) => n.kind === 'fork')) {
     if (typeof f.join !== 'string' || !idSet.has(f.join)) {
       v.push('fork ' + f.id + ' must declare `join` naming an existing node (got '
@@ -273,75 +346,81 @@ function validateGraph(next, prev, cursor) {
     }
     if (f.join === f.id) { v.push('fork ' + f.id + ' cannot join to itself'); continue; }
 
-    // A fork spawns no worker: it routes. A prompt or schema on one is a modelling error
-    // that would silently never run.
+    // A fork spawns no worker: it opens a region. A prompt or schema on one is a modelling
+    // error that would silently never run.
     if (f.prompt !== undefined || f.schema !== undefined) {
       v.push('fork ' + f.id + ' must not declare a prompt or schema — a fork spawns no '
-        + 'worker, it only routes concurrently; put the work in a branch node');
+        + 'worker, it only opens a concurrent region; put the work in a region node');
     }
 
-    const branches = outEdges(next, f.id);
-    if (branches.length < 2) {
-      v.push('fork ' + f.id + ' has ' + branches.length + ' out-edge(s) — a fork needs at '
-        + 'least 2 concurrent branches; one branch is a plain edge, not a fork');
-    }
-    for (const e of branches) {
-      if (!(e.when === undefined || e.when === null || e.when === 'always')) {
-        v.push('fork ' + f.id + ' -> ' + e.to + ' carries a predicate — every branch of a '
-          + 'fork always runs, so a predicate here reads as a choice that is never made');
-      }
+    const entries = outEdges(next, f.id);
+    if (entries.length < 2) {
+      v.push('fork ' + f.id + ' has ' + entries.length + ' out-edge(s) — a fork needs at '
+        + 'least 2 independent entry nodes; one is a plain edge, not a fork');
     }
 
-    // ONE EXIT. Without this a branch could route back into the main line and the run
-    // would walk the rest of the graph concurrently with its own sibling.
+    // ONE EXIT. Without this a region node could route back into the main line and the run
+    // would walk the rest of the graph concurrently with itself.
     if (!dominates(next, f.join, next.terminal, f.id)) {
       v.push('fork ' + f.id + ' can reach ' + next.terminal + ' without crossing its join '
-        + f.join + ' — a branch that escapes the region would run the rest of the graph '
+        + f.join + ' — a node that escapes the region would run the rest of the graph '
         + 'concurrently with itself');
     }
 
-    const regions = [];
-    for (const e of branches) {
-      if (!idSet.has(e.to)) continue;
-      if (!reachable(next, e.to, []).has(f.join)) {
-        v.push('fork ' + f.id + ' branch ' + e.to + ' never reaches its join ' + f.join);
+    const region = regionNodes(next, f);
+
+    // Every edge into or inside the region is a DEPENDENCY, never a choice. A predicate
+    // here reads as a decision that is never made.
+    const regionEdges = entries.slice();
+    for (const id of region) for (const oe of outEdges(next, id)) regionEdges.push(oe);
+    for (const e of regionEdges) {
+      if (!(e.when === undefined || e.when === null || e.when === 'always')) {
+        v.push('fork ' + f.id + ' region edge ' + e.from + ' -> ' + e.to + ' carries a '
+          + 'predicate — inside a region an edge means "depends on", not "go to next", and '
+          + 'every region node runs');
       }
-      const region = branchRegion(next, e.to, f.join);
-      for (const id of region) {
-        for (const oe of outEdges(next, id)) {
-          if (oe.to === f.join || region.has(oe.to)) continue;
-          v.push('fork ' + f.id + ' branch node ' + id + ' -> ' + oe.to + ' leaves the '
-            + 'branch without passing through the join ' + f.join);
-        }
-      }
-      regions.push({ entry: e.to, region });
     }
 
-    for (let i = 0; i < regions.length; i++) {
-      for (let j = i + 1; j < regions.length; j++) {
-        const shared = [...regions[i].region].filter((id) => regions[j].region.has(id));
-        if (shared.length) {
-          v.push('fork ' + f.id + ' branches ' + regions[i].entry + ' and ' + regions[j].entry
-            + ' share node(s): ' + shared.join(', ') + ' — concurrent branches must be '
-            + 'node-disjoint, so that visit accounting is per-branch and exact and no two '
-            + 'workers ever race the same node');
-        }
-      }
+    // A dependency cycle is a DEADLOCK, not a retry loop: each node waits on the other and
+    // there is no verdict to break it with. Catch it here rather than as a hang.
+    if (region.size && regionOrder(next, region) === null) {
+      v.push('fork ' + f.id + ' region contains a dependency cycle — inside a region an '
+        + 'edge means "depends on", so a cycle is a deadlock, not a retry. A back-edge '
+        + 'belongs outside a region, on a gate.');
     }
-    for (const { entry, region } of regions) {
-      for (const id of region) if (!regionOf.has(id)) regionOf.set(id, f.id + '/' + entry);
+
+    for (const id of region) {
+      if (!reachable(next, id, []).has(f.join)) {
+        v.push('fork ' + f.id + ' region node ' + id + ' never reaches its join ' + f.join);
+      }
+      // Containment: a region node feeds other region nodes, or the join. Nothing else.
+      for (const oe of outEdges(next, id)) {
+        if (oe.to === f.join || region.has(oe.to)) continue;
+        v.push('fork ' + f.id + ' region node ' + id + ' -> ' + oe.to + ' leaves the region '
+          + 'without passing through the join ' + f.join);
+      }
+      // A region is already a DAG and can express anything a nested fork could; the
+      // dataflow runner schedules one region at a time.
+      const rn = next.nodes.find((n) => n.id === id);
+      if (rn && rn.kind === 'fork') {
+        v.push('fork ' + f.id + ' region contains a nested fork ' + id + ' — a region is '
+          + 'already a DAG; express the extra concurrency as dependencies inside it');
+      }
+      if (!regionOf.has(id)) regionOf.set(id, f.id);
     }
   }
 
-  // A mustCross gate inside a branch is NOT a gate on the run: its sibling branch reaches
-  // the join — and so the terminal — without ever crossing it, which `dominates` below
-  // reports as a bare "no longer dominates". Say what it actually is, and what to do,
-  // rather than leaving the author to work out why their gate is rejected inside a fork.
+  // A mustCross gate may not live inside a region — and NOT because it would go unexecuted.
+  // Every region node runs, so a gate in there really would be crossed. The reason is that a
+  // gate exists to FAIL BACKWARDS, and inside a region there is nowhere legal to fail to: a
+  // back-edge within the region is the dependency cycle rejected above, and one leaving it
+  // breaks the single exit. A node that cannot route its own failure is not a gate. At the
+  // join or after it, it can see every region node's output anyway.
   for (const gate of inv.mustCross || []) {
     if (!regionOf.has(gate)) continue;
-    v.push('mustCross gate ' + gate + ' sits inside fork branch ' + regionOf.get(gate)
-      + ' — a gate that guards one branch does not gate the run, because the sibling '
-      + 'branches reach the join without it. Move it to the join or after it.');
+    v.push('mustCross gate ' + gate + ' sits inside fork region ' + regionOf.get(gate)
+      + ' — a gate must be able to route its failure backwards, and inside a region that is '
+      + 'either a dependency cycle or an escape from the join. Move it to the join or after.');
   }
 
   // Structural dominance — from `start`, over EVERY declared gate. Position-independent,
@@ -418,4 +497,4 @@ function validateGraph(next, prev, cursor) {
   return v;
 }
 
-export { outEdges, reachable, dominates, matches, pickEdge, branchRegion, capFor, carryFor, stableStringify, fnv1a, lockedFingerprint, applyPatchTo, validateGraph };
+export { outEdges, reachable, dominates, matches, pickEdge, regionNodes, regionPreds, regionOrder, regionSinks, capFor, carryFor, stableStringify, fnv1a, lockedFingerprint, applyPatchTo, validateGraph };

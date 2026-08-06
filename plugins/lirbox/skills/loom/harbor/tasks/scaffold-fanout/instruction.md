@@ -29,8 +29,13 @@ How the run has to behave:
   not one after another — the run should not be three times as long as it needs to be. Whatever
   the run does to one exporter must not be able to disturb the other two while it happens.
 
-- Once all three are done they must come back together into a single step that reconciles them,
-  before anything is judged. They must not be signed off one at a time.
+- There is one piece of work that is NOT independent: the golden-file fixtures in
+  `tests/golden/` cover the csv and xlsx outputs only (the pdf layout is not snapshotted).
+  Regenerating them needs BOTH of those exporters finished, and nothing about the pdf one — so
+  it must not be left waiting on pdf work that has nothing to do with it.
+
+- Once everything is done it must come back together into a single step that reconciles the
+  three exporters, before anything is judged. They must not be signed off one at a time.
 
 - A privacy review must happen over the finished, reconciled result — there must be no way for the
   run to reach the end without it. It has to see all three exporters together: a redaction bug is

@@ -60,6 +60,24 @@ branch_nodes = [
     }
     for bid, path, quirk in BRANCHES
 ]
+# The DAG edge: regenerating the golden fixtures needs csv AND xlsx finished, and nothing
+# from the pdf branch. Two arrows in, and it must not wait on the third exporter.
+golden_node = {
+    "id": "RegenGolden",
+    "kind": "work",
+    "prompt": (
+        "Regenerate the golden fixtures under tests/golden/ for the REDACTED csv and xlsx "
+        "outputs. They cover those two formats only; the pdf layout is not snapshotted, so "
+        "nothing here depends on the pdf work.\n\n"
+        "Your carry arrives keyed by the node it came from — read both exporters' notes and "
+        "make sure the two fixtures drop the same columns."
+    ),
+    "schema": {
+        "type": "object",
+        "properties": {"regenerated": {"type": "boolean"}, "notes": {"type": "string"}},
+        "required": ["regenerated", "notes"],
+    },
+}
 join_node = {
     "id": JOIN,
     "kind": "work",
@@ -80,7 +98,7 @@ join_node = {
 
 # Splice the region in where Implement was, preserving node ORDER: every back-edge target must
 # still sort before the gate that routes to it.
-nodes[impl_ix:impl_ix + 1] = [fork] + branch_nodes + [join_node]
+nodes[impl_ix:impl_ix + 1] = [fork] + branch_nodes + [golden_node, join_node]
 
 rewired = []
 for e in edges:
@@ -95,9 +113,16 @@ for e in edges:
 
 # The fork's own out-edges: unconditional, one per branch. Every branch always runs.
 rewired += [{"from": FAN, "to": b["id"], "when": "always"} for b in branch_nodes]
-# ...and each branch closes into the join, carrying what it did so the join can reconcile.
-rewired += [{"from": b["id"], "to": JOIN, "when": "always", "carry": ["exporter", "notes"]}
-            for b in branch_nodes]
+# csv and xlsx feed the golden regeneration; pdf does not, and goes straight to the join.
+# That asymmetry is the DAG: RegenGolden waits on exactly two of the three.
+GOLDEN_DEPS = {"CsvRedact", "XlsxRedact"}
+rewired += [
+    {"from": b["id"], "to": ("RegenGolden" if b["id"] in GOLDEN_DEPS else JOIN),
+     "when": "always", "carry": ["exporter", "notes"]}
+    for b in branch_nodes
+]
+rewired.append({"from": "RegenGolden", "to": JOIN, "when": "always",
+                "carry": ["regenerated", "notes"]})
 
 seed["nodes"], seed["edges"] = nodes, rewired
 seed["goal"] = "Add a redaction mode to the csv/pdf/xlsx exporters, concurrently, then reconcile."
@@ -105,6 +130,7 @@ seed["name"] = "redact"
 caps = seed.setdefault("invariants", {}).setdefault("visitCaps", {})
 for b in branch_nodes:
     caps[b["id"]] = 3
+caps["RegenGolden"] = 3
 caps[JOIN] = 4
 
 json.dump(seed, open(".loom/redact.graph.json", "w"), indent=2)

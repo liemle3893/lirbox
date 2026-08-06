@@ -14,8 +14,8 @@ THE CRITERIA SPLIT, AND THE SPLIT IS THE POINT:
       The baseline (loom at git HEAD, no fork support) can score all four. This is the only half
       where comparing two arms means anything — it answers "no worse".
 
-  NEW CAPABILITY         declares_a_fork, branches_are_disjoint, region_has_one_exit,
-                         no_gate_inside_a_branch
+  NEW CAPABILITY         declares_a_fork, region_is_a_dag, dependencies_not_serialised,
+                         region_has_one_exit, no_gate_inside_the_region
       The baseline cannot express a fork at all, so a 0 here measures the feature's absence rather
       than the model. Read the AFTER arm absolute. A "lift" on these four is arithmetic.
 
@@ -76,6 +76,39 @@ def _reachable(g, start, skip=()):
 
 def _forks(g):
     return [n for n in (g.get("nodes") or []) if n.get("kind") == "fork"]
+
+
+def _region(g, f):
+    """Nodes strictly inside a fork's region: reachable from its targets, join deleted."""
+    join = f.get("join")
+    out = set()
+    for e in _out(g, f["id"]):
+        out |= _reachable(g, e.get("to"), skip=[join])
+    return out
+
+
+def _topo_order(g, region):
+    """Kahn over the region's internal edges. None when the region has a dependency cycle."""
+    indeg = {n: 0 for n in region}
+    succ = {n: [] for n in region}
+    seen = set()
+    for e in g.get("edges") or []:
+        a, b = e.get("from"), e.get("to")
+        if a not in region or b not in region or (a, b) in seen:
+            continue
+        seen.add((a, b))
+        succ[a].append(b)
+        indeg[b] += 1
+    ready = [n for n in region if indeg[n] == 0]
+    order = []
+    while ready:
+        n = ready.pop()
+        order.append(n)
+        for m in succ[n]:
+            indeg[m] -= 1
+            if indeg[m] == 0:
+                ready.append(m)
+    return order if len(order) == len(region) else None
 
 
 def _fail_edges(g, gate):
@@ -149,7 +182,7 @@ def back_edge_carries_findings(workspace: Path) -> bool:
 # --------------------------------------------------------------------------------------
 
 
-@criterion(description="a fork node declares a join and opens at least two concurrent branches")
+@criterion(description="a fork node declares a join and opens at least two independent entries")
 def declares_a_fork(workspace: Path) -> bool:
     """The instruction says the three exporters must be worked on AT THE SAME TIME.
 
@@ -167,12 +200,17 @@ def declares_a_fork(workspace: Path) -> bool:
     return False
 
 
-@criterion(description="the fork's branches are node-disjoint")
-def branches_are_disjoint(workspace: Path) -> bool:
-    """Two branches sharing a node means two concurrent workers racing it.
+@criterion(description="the region is an acyclic dependency graph, not a set of parallel lanes")
+def region_is_a_dag(workspace: Path) -> bool:
+    """Inside a region an edge means DEPENDS ON, so the region must be a DAG.
 
-    It is also what makes visit accounting per-branch and exact rather than an approximation over
-    a shared counter.
+    Two things are graded here. It must be ACYCLIC — a dependency cycle is a deadlock, each
+    node waiting on the other with no verdict able to break it. And every edge into or
+    inside it must be unconditional: a dependency is not a choice, and "every region node
+    runs" is the premise the gate reasoning rests on.
+
+    Note what is NOT required: that the region's nodes be disjoint. A node depending on two
+    others is the whole point of a DAG, and rejecting it would be rejecting the feature.
     """
     g = _graph(workspace)
     if not g or not _forks(g):
@@ -181,21 +219,25 @@ def branches_are_disjoint(workspace: Path) -> bool:
         join = f.get("join")
         if not isinstance(join, str):
             return False
-        regions = [_reachable(g, e.get("to"), skip=[join]) for e in _out(g, f["id"])]
-        if len(regions) < 2:
+        region = _region(g, f)
+        if not region:
             return False
-        for i in range(len(regions)):
-            for j in range(i + 1, len(regions)):
-                if regions[i] & regions[j]:
-                    return False
+        # Unconditional: entry edges and every edge inside the region.
+        edges = _out(g, f["id"]) + [e for n in region for e in _out(g, n)]
+        for e in edges:
+            when = e.get("when")
+            if when not in (None, "always"):
+                return False
+        if _topo_order(g, region) is None:
+            return False
     return True
 
 
 @criterion(description="every path out of the fork crosses its join — the region has one exit")
 def region_has_one_exit(workspace: Path) -> bool:
-    """A branch that escapes the region would walk the rest of the graph concurrently with its
-    own sibling. Proof by deletion: remove the join; the terminal must become unreachable from
-    the fork.
+    """A node that escapes the region would walk the rest of the graph concurrently with
+    itself. Proof by deletion: remove the join; the terminal must become unreachable from
+    the fork. Every region node must also actually arrive there.
     """
     g = _graph(workspace)
     if not g or not _forks(g):
@@ -207,21 +249,21 @@ def region_has_one_exit(workspace: Path) -> bool:
             return False
         if terminal in _reachable(g, f["id"], skip=[join]):
             return False
-        # ...and each branch must actually arrive there, rather than dead-ending.
-        for e in _out(g, f["id"]):
-            if join not in _reachable(g, e.get("to")):
+        # ...and every region node must actually arrive there, rather than dead-ending.
+        for n in _region(g, f):
+            if join not in _reachable(g, n):
                 return False
     return True
 
 
-@criterion(description="no enforced gate hides inside a concurrent branch")
-def no_gate_inside_a_branch(workspace: Path) -> bool:
-    """THE dominance question for concurrency, and the one the instruction states in plain words:
-    the privacy review must see all three exporters together.
+@criterion(description="no enforced gate hides inside the concurrent region")
+def no_gate_inside_the_region(workspace: Path) -> bool:
+    """The instruction states this one in plain words: the privacy review must see all three
+    exporters together, because a redaction bug lives BETWEEN formats.
 
-    A gate inside one branch is not a gate on the run — the sibling branches reach the join, and
-    so the terminal, without ever crossing it. It also would not have seen the other two
-    exporters, which is where a redaction inconsistency actually lives.
+    A gate inside the region would have seen one exporter. It also could not route its own
+    failure anywhere legal — backwards inside the region is a dependency cycle, and outside
+    it breaks the single exit.
     """
     g = _graph(workspace)
     if not g or not _forks(g):
@@ -233,7 +275,37 @@ def no_gate_inside_a_branch(workspace: Path) -> bool:
         join = f.get("join")
         if not isinstance(join, str):
             return False
-        for e in _out(g, f["id"]):
-            if _reachable(g, e.get("to"), skip=[join]) & must:
-                return False
+        if _region(g, f) & must:
+            return False
     return True
+
+
+@criterion(description="a real dependency is declared — not a chain, and not three isolated lanes")
+def dependencies_not_serialised(workspace: Path) -> bool:
+    """The DAG discriminator, and the one the instruction spells out.
+
+    Regenerating the golden fixtures needs the csv AND xlsx work finished, and nothing from the
+    pdf work. So a correct region contains a node with TWO in-region dependencies, and at least
+    one region node that is NOT one of its ancestors — the exporter it must not wait for.
+
+    Three isolated lanes fail the first half (no node ever waits on two). A chain that
+    serialises all three fails the second (everything is an ancestor of everything downstream),
+    which is the shape a model reaches for when it cannot express a dependency and settles for
+    an order instead.
+    """
+    g = _graph(workspace)
+    if not g or not _forks(g):
+        return False
+    for f in _forks(g):
+        region = _region(g, f)
+        if not region:
+            continue
+        for node in region:
+            preds = {e["from"] for e in (g.get("edges") or [])
+                     if e.get("to") == node and e.get("from") in region}
+            if len(preds) < 2:
+                continue
+            ancestors = {n for n in region if node in _reachable(g, n, skip=[f.get("join")])}
+            if region - ancestors - {node}:
+                return True
+    return False

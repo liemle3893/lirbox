@@ -1,22 +1,29 @@
 // CHECK — a fork region must be structurally safe BEFORE anything runs concurrently.
 //
-// A `fork` node takes every out-edge at once. That is the only construct in loom where two
-// workers run simultaneously, and it is the only thing the model has ever had that can say
-// "these are independent" rather than "pick one". It is also the only construct that can
-// quietly destroy every guarantee the skill sells, so each rule below buys the concurrency
-// back:
+// A `fork` node opens a REGION that closes at its `join`. Inside a region an edge means
+// DEPENDS ON, not go-to-next, so the region is a genuine DAG: a node with two arrows in
+// waits for both, a node with one waits only for that one. It is the only construct in
+// loom that runs two workers at once, and the only one that can say "these are
+// independent" rather than "pick one".
 //
-//   one exit      a branch that escapes the region walks the rest of the graph concurrently
-//                 with its own sibling
-//   disjointness  two branches sharing a node means two workers racing it, and visit
-//                 accounting that cannot be per-branch
-//   unconditional every branch always runs; a predicate there is a choice never made, and
-//   fork edges    it is what makes the dominance reasoning sound instead of probabilistic
-//   no gate in    a mustCross gate guarding ONE branch is not a gate on the run: the sibling
-//   a branch      branch reaches the join, and so the terminal, without ever crossing it
+// Every rule below is a BOUNDARY rule — it constrains how a region connects to the rest
+// of the graph, never what it looks like inside. That is deliberate: the inside has to be
+// free to be any DAG, and the safety argument has to survive that.
 //
-// This check is BEHAVIOURAL, not a text scan: it calls validateGraph with one valid fork
-// graph and with a mutation of that same graph per rule, so a rule that stops firing is
+//   one exit         a node escaping the region would walk the rest of the graph
+//                    concurrently with itself
+//   region edges     a dependency is not a choice; a predicate here is a decision never
+//   unconditional    made, and "every region node runs" is what the reasoning rests on
+//   acyclic          a dependency cycle is a DEADLOCK, not a retry loop — each node
+//                    waiting on the other, with no verdict able to break it
+//   no gate inside   NOT because it would go unexecuted (it would run). A gate exists to
+//                    fail BACKWARDS, and inside a region that is either the cycle above or
+//                    an escape from the join. A node that cannot route its failure is not
+//                    a gate
+//   no nested fork   a region is already a DAG and expresses anything a nested fork could
+//
+// This check is BEHAVIOURAL, not a text scan: it calls validateGraph with one valid DAG
+// region and with a mutation of that same graph per rule, so a rule that stops firing is
 // caught even if its source text survives.
 // Locked (evals/**): improvement loops may NEVER edit this file.
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -33,16 +40,17 @@ const core = await import(pathToFileURL(coreFile).href);
 let bad = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };
 
-// Plan -> Fan =>{ApiWork -> ApiTest, UiWork} -> Integrate -> Review -> Done
-// Two independent branches, one join, and the only gate AFTER the join.
+// A REAL DAG region, not two lanes:
+//   Fan => { ApiWork, UiWork } ; Contract needs BOTH ; UiPolish needs UiWork only
+//   -> Integrate -> Review -> Done         (the gate sits AFTER the join)
 const FORK = () => ({
   start: 'Plan',
   terminal: 'Done',
   nodes: [
     { id: 'Plan', kind: 'work' },
     { id: 'Fan', kind: 'fork', join: 'Integrate' },
-    { id: 'ApiWork', kind: 'work' }, { id: 'ApiTest', kind: 'work' },
-    { id: 'UiWork', kind: 'work' },
+    { id: 'ApiWork', kind: 'work' }, { id: 'UiWork', kind: 'work' },
+    { id: 'Contract', kind: 'work' }, { id: 'UiPolish', kind: 'work' },
     { id: 'Integrate', kind: 'work' },
     { id: 'Review', kind: 'gate' },
     { id: 'Done', kind: 'terminal' },
@@ -51,9 +59,11 @@ const FORK = () => ({
     { from: 'Plan', to: 'Fan', when: 'always' },
     { from: 'Fan', to: 'ApiWork', when: 'always' },
     { from: 'Fan', to: 'UiWork', when: 'always' },
-    { from: 'ApiWork', to: 'ApiTest', when: 'always' },
-    { from: 'ApiTest', to: 'Integrate', when: 'always' },
-    { from: 'UiWork', to: 'Integrate', when: 'always' },
+    { from: 'ApiWork', to: 'Contract', when: 'always' },
+    { from: 'UiWork', to: 'Contract', when: 'always' },
+    { from: 'UiWork', to: 'UiPolish', when: 'always' },
+    { from: 'Contract', to: 'Integrate', when: 'always' },
+    { from: 'UiPolish', to: 'Integrate', when: 'always' },
     { from: 'Integrate', to: 'Review', when: 'always' },
     { from: 'Review', to: 'Done', when: { field: 'passed', eq: true }, locked: true },
     { from: 'Review', to: 'Integrate', when: { field: 'passed', eq: false } },
@@ -61,12 +71,13 @@ const FORK = () => ({
   invariants: { mustCross: ['Review'] },
 });
 
-// THE POSITIVE CONTROL. Every rejection below is a mutation of this one graph, so a
-// rejection can never be credited to a fixture that was broken some other way — and a
-// validator that rejects everything is caught here rather than reported as five passes.
+// THE POSITIVE CONTROL, and it is doing real work here: `Contract` is reachable from BOTH
+// ApiWork and UiWork. An implementation that required branches to be node-disjoint — the
+// shape this model had before it was a DAG — rejects this graph, so this single assertion
+// is what stops the feature silently regressing to parallel lanes.
 const clean = core.validateGraph(FORK(), null, null);
 ok(clean.length === 0,
-  `a valid two-branch fork with the gate after the join is ACCEPTED (got ${JSON.stringify(clean)})`);
+  `a DAG region with a shared dependency is ACCEPTED (got ${JSON.stringify(clean)})`);
 
 const rejects = (label, needle, mutate) => {
   const g = FORK();
@@ -75,42 +86,34 @@ const rejects = (label, needle, mutate) => {
   ok(v.some((m) => m.includes(needle)), `REJECTED: ${label} (got ${JSON.stringify(v)})`);
 };
 
-rejects('a branch that escapes its region instead of reaching the join',
+rejects('a region node that escapes instead of reaching the join',
   'without crossing its join Integrate',
-  (g) => { g.edges.find((e) => e.from === 'ApiTest').to = 'Review'; });
+  (g) => { g.edges.find((e) => e.from === 'UiPolish').to = 'Review'; });
 
-rejects('two branches sharing a node', 'node-disjoint',
-  (g) => { g.edges.find((e) => e.from === 'UiWork').to = 'ApiTest'; });
+rejects('a dependency cycle inside the region — a deadlock, not a retry',
+  'dependency cycle',
+  (g) => { g.edges.push({ from: 'Contract', to: 'ApiWork', when: 'always' }); });
 
-rejects('a predicate on a fork edge', 'carries a predicate',
+rejects('a predicate on a region edge', 'carries a predicate',
   (g) => {
-    g.edges.find((e) => e.from === 'Fan' && e.to === 'UiWork').when = { field: 'ui', eq: true };
+    g.edges.find((e) => e.from === 'UiWork' && e.to === 'UiPolish').when = { field: 'ui', eq: true };
   });
 
-rejects('a mustCross gate hidden inside one branch', 'sits inside fork branch',
+rejects('a nested fork inside a region', 'nested fork',
+  (g) => { g.nodes.find((n) => n.id === 'UiWork').kind = 'fork'; });
+
+rejects('a mustCross gate hidden inside the region', 'sits inside fork region',
   (g) => {
-    g.nodes.find((n) => n.id === 'ApiTest').kind = 'gate';
-    g.invariants.mustCross = ['ApiTest', 'Review'];
-    g.edges.push({ from: 'ApiTest', to: 'ApiWork', when: { field: 'passed', eq: false } });
+    g.nodes.find((n) => n.id === 'Contract').kind = 'gate';
+    g.invariants.mustCross = ['Contract', 'Review'];
   });
 
-// The friendly message above is ADDITIVE. The structural proof it explains must still fire
-// on its own — if the explanation ever replaced the proof, a graph would be rejected for a
-// reason that is easy to argue away rather than for the one that is not.
-{
-  const g = FORK();
-  g.nodes.find((n) => n.id === 'ApiTest').kind = 'gate';
-  g.invariants.mustCross = ['ApiTest', 'Review'];
-  g.edges.push({ from: 'ApiTest', to: 'ApiWork', when: { field: 'passed', eq: false } });
-  const v = core.validateGraph(g, null, null);
-  ok(v.some((m) => m.includes('ApiTest no longer dominates Done')),
-    'the underlying dominance proof still fires independently of the friendlier message');
-}
-
-rejects('a fork with a single branch', 'at least 2 concurrent branches',
+rejects('a fork with a single entry', 'at least 2 independent entry nodes',
   (g) => {
     g.edges = g.edges.filter((e) => !(e.from === 'Fan' && e.to === 'UiWork'));
-    g.nodes = g.nodes.filter((n) => n.id !== 'UiWork');
+    g.edges = g.edges.filter((e) => e.from !== 'UiWork');
+    g.nodes = g.nodes.filter((n) => n.id !== 'UiWork' && n.id !== 'UiPolish');
+    g.edges = g.edges.filter((e) => e.to !== 'UiPolish');
   });
 
 rejects('a fork declaring a prompt', 'must not declare a prompt or schema',
@@ -119,15 +122,26 @@ rejects('a fork declaring a prompt', 'must not declare a prompt or schema',
 rejects('a fork whose join does not exist', 'naming an existing node',
   (g) => { g.nodes.find((n) => n.id === 'Fan').join = 'Nope'; });
 
-// branchRegion is what every rule above is computed from; a wrong boundary would make all
-// of them agree with each other and with nothing else.
+// The region helpers are what every rule above is computed from; a wrong boundary would
+// make all of them agree with each other and with nothing else.
 {
   const g = FORK();
-  ok(typeof core.branchRegion === 'function', 'branchRegion is exported from graph-core');
-  if (typeof core.branchRegion === 'function') {
-    const api = [...core.branchRegion(g, 'ApiWork', 'Integrate')].sort().join(',');
-    ok(api === 'ApiTest,ApiWork', `branchRegion stops AT the join, excluding it (got ${api})`);
-  }
+  const fork = g.nodes.find((n) => n.id === 'Fan');
+  ok(typeof core.regionNodes === 'function' && typeof core.regionPreds === 'function'
+    && typeof core.regionOrder === 'function' && typeof core.regionSinks === 'function',
+    'the region helpers are exported from graph-core');
+  const region = core.regionNodes(g, fork);
+  ok([...region].sort().join(',') === 'ApiWork,Contract,UiPolish,UiWork',
+    `the region stops AT the join, excluding it (got ${[...region].sort().join(',')})`);
+  const preds = core.regionPreds(g, region, 'Contract').map((e) => e.from).sort().join(',');
+  ok(preds === 'ApiWork,UiWork',
+    `a node's dependencies are its in-region predecessors (got ${preds})`);
+  ok(core.regionSinks(g, region, 'Integrate').sort().join(',') === 'Contract,UiPolish',
+    'the sinks are the nodes feeding the join');
+  const order = core.regionOrder(g, region) || [];
+  ok(order.length === region.size && order.indexOf('Contract') > order.indexOf('ApiWork')
+    && order.indexOf('Contract') > order.indexOf('UiWork'),
+    `regionOrder returns a dependency-respecting order (got ${order.join(' -> ')})`);
 }
 
 if (bad) { console.error(`\nfork-regions-are-provably-safe: ${bad} failed`); process.exit(1); }

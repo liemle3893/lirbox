@@ -14,10 +14,15 @@
 #   one of these. This half answers "is the change NO WORSE" and is the only half where comparing
 #   the two arms means anything.
 #
-#   NEW CAPABILITY — declares_a_fork, branches_are_disjoint, region_has_one_exit,
-#   no_gate_inside_a_branch. The baseline cannot express a fork at all, so a 0 here measures the
-#   feature's absence, not the model. Read the AFTER arm absolute; a "lift" on these four is
-#   arithmetic, not evidence.
+#   NEW CAPABILITY — declares_a_fork, region_is_a_dag, dependencies_not_serialised,
+#   region_has_one_exit, no_gate_inside_the_region. The baseline cannot express a fork at all, so a
+#   0 here measures the feature's absence, not the model. Read the AFTER arm absolute; a "lift" on
+#   these five is arithmetic, not evidence.
+#
+# `dependencies_not_serialised` is the DAG discriminator. Measured on the host: the oracle scores
+# 1.000, three isolated parallel lanes 0.889, and a serialised chain 0.889 — one criterion, and it
+# is the one that separates "a graph that declares a dependency" from "a graph that picked an
+# order because it could not".
 #
 # The graders reimplement reachability in Python rather than importing the skill's graph-core.mjs:
 # grading the code under test with the code under test proves only that it agrees with itself.
@@ -25,7 +30,7 @@
 [task]
 name = "lirbox/loom__scaffold-fanout"
 version = "1.0.0"
-description = "loom must author a graph that runs independent work concurrently, joins it, and keeps the gate un-bypassable"
+description = "loom must author a graph whose concurrent region is a real DAG — declaring which work depends on what — with the gate still un-bypassable"
 
 [metadata]
 skill = "loom"
