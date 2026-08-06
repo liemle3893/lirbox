@@ -3,7 +3,7 @@ Do every edit there. Never touch the main checkout.
 
 NODE: ${nodeId}   (visit ${visit} of at most ${cap})
 ${carryText}
-
+${planCheckText}
 ${nodePrompt}
 
 If — and only if — the work you just did proves this graph's shape is wrong, you MAY

@@ -1,7 +1,7 @@
 ---
 name: loom
 argument-hint: "[ <goal to start> | <name to resume> | list ]"
-description: "This skill should be used to run a multi-subagent delivery workflow whose SHAPE can change — where a gate failure must send the run back to an earlier stage rather than into a local retry, where the run should be able to add stages once it has read the code, and where a human wants to review and edit that shape in a browser before launch. It drives the Workflow tool with a node/edge graph the conductor interprets, validates every runtime graph patch so no path can reach the terminal without crossing every gate, and persists the patched graph so a resume restores structure, not just progress. Do NOT use for a fixed linear pipeline (use conductor) or a quick one-shot (call Workflow directly)."
+description: "This skill should be used to run a multi-subagent delivery workflow whose SHAPE can change — where a gate failure must send the run back to an earlier stage rather than into a local retry, and where the run should be able to add stages once it has read the code. It drives the Workflow tool with a node/edge graph the conductor interprets, validates every runtime graph patch so no path can reach the terminal without crossing every gate, re-verifies the plan (via plan-check, autofix applied) whenever an enforced gate rejects work and routes backwards, and persists the patched graph so a resume restores structure, not just progress. Launches without pre-approval by default; it can also serve the graph in a browser for a human to review and edit before launch, when asked. Do NOT use for a fixed linear pipeline (use conductor) or a quick one-shot (call Workflow directly)."
 allowed-tools:
   - Read
   - Write
@@ -88,12 +88,20 @@ confirm that waiver in the same one-shot `AskUserQuestion` as the criteria.
 Copy the seed: `scripts/seeds/lite.json` or `scripts/seeds/delivery.json` →
 `.loom/<name>.graph.json`, setting `name` and `goal`.
 
-### 3. Pre-flight — plan, review, approve
+### 3. Pre-flight — freeze always, review on request
 
-Serve the editor on the seed graph. (The human is reviewing the *shape* — which gates exist
-and where failures route — not repo-specific detail. The graph's own planner node refines it
-during the run, under the invariants frozen here. There is no separate pre-flight runner: the
-only launch path is step 4, which starts at `graph.start`.)
+**The freeze is mandatory. The human review is not.** These are two different things and were
+previously welded together: the freeze is a mechanical operation (two loops and a hash stamp),
+and the browser review is a person looking at a picture. Only the second is optional.
+
+**Default — no browser, no waiting:** perform the freeze below, set `approved: true`, and go
+straight to step 4. Every runtime invariant still holds: gates stay locked, `lockedHash` is
+stamped, and `validateGraph` rejects exactly the same patches it always did. What is skipped
+is only the *pre-launch eyeball* — nobody has looked at the initial shape before it runs.
+
+**Serve the editor only when the user asks for it** — "let me review the graph first",
+"show me the plan before running", "I want to approve it", or an explicit re-run of a graph
+they want to edit. When they do:
 
 ```
 node <skill-dir>/scripts/graph-server.mjs --name <name> --root . --port 0
@@ -104,7 +112,15 @@ the user `http://127.0.0.1:<port>`. Set `status: "awaiting-approval"`.
 
 Then poll `.loom/<name>.action.json`:
 - `replan` → run a replan worker over `(graph, comments)`, write the new graph, keep polling
-- `approve` → freeze. Lock every gate node, and of its edges lock **only the passing one**:
+- `approve` → freeze (below), then step 4
+
+(The human is reviewing the *shape* — which gates exist and where failures route — not
+repo-specific detail. The graph's own planner node refines it during the run, under the
+invariants frozen here. There is no separate pre-flight runner: the only launch path is step
+4, which starts at `graph.start`.)
+
+**The freeze — both paths, always.** Lock every gate node, and of its edges lock **only the
+passing one**:
 
   ```js
   for (const n of g.nodes)
@@ -149,6 +165,16 @@ node's own `model`/`effort` outranking both. Tune with `--model-think`/`--model-
 `--model-mode inherit` to emit no policy. **The tier follows `mustCross`, not the `"gate"`
 label** — see [graph-spec.md](references/graph-spec.md#which-model-each-worker-runs-on) for why
 that distinction is load-bearing.
+
+**Plan re-check on rejected re-entry (`--plan-check`, default `on`).** When an enforced gate
+rejects the work and routes the run backwards, the node it lands on runs `lirbox:plan-check`
+over the plan node's recorded result *before* redoing anything, with autofix applied. Without
+it the loop is *implement → rejected → implement the same wrong thing → rejected → visit cap*,
+and every structural check stays green while the budget burns. A **`NO-GO` aborts the run** —
+enforced in the conductor, not left to the worker — because autofix can shrink a NO-GO but
+never clear one, so a surviving NO-GO needs a human. To resume past one, fix the plan and
+delete that result file. Each trigger costs a full plan-check pass; `--plan-check off` opts
+out.
 
 **Headless (`claude -p`): launch in the FOREGROUND (`run_in_background: false`) and do not
 end your turn while it runs.** The blocking call IS the wait. Afterwards re-read

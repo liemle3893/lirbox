@@ -487,6 +487,46 @@
           "replace": "      void flag;"
         }
       ]
+    },
+    "rejected-reentry-rechecks-the-plan": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "triggering on the \"gate\" LABEL instead of on invariants.mustCross bills a full plan-check pass for every ordinary non-passing branch in the graph",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "      return must.indexOf(t.node) !== -1 && t.verdict !== true ? t.node : null",
+          "replace": "      return t.verdict !== true ? t.node : null"
+        },
+        {
+          "why": "routing a NO-GO onward like any other result sends the run straight back into the work plan-check just condemned; instructing the worker to stop is not a guarantee that it did",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  if (r && r.planCheck === 'NO-GO') {\n    throw new Error('plan-check returned NO-GO at ' + id + ' \u2014 refusing to re-implement '\n      + 'against a plan just found unsafe. Autofix cannot clear a NO-GO, only shrink one, so '\n      + 'this needs a human. Report: ' + (r.report || '(none written)'))\n  }\n",
+          "replace": ""
+        },
+        {
+          "why": "attaching the block to every node makes each first visit pay for a plan-check that nothing has rejected yet",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "    const gateId = PLAN_CHECK === 'on' && !inRegion ? rejectedInto(id) : null",
+          "replace": "    const gateId = PLAN_CHECK === 'on' && !inRegion ? (rejectedInto(id) || 'any') : null"
+        },
+        {
+          "why": "hard-coding the mode ignores --plan-check off, so the one way to opt out of a per-back-edge cost silently does nothing",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "const PLAN_CHECK = ${JSON.stringify(planCheckMode)}",
+          "replace": "const PLAN_CHECK = 'on'"
+        },
+        {
+          "why": "offering autofix instead of applying it restores the interactive behaviour, which inside an unattended back-edge means no fix is ever applied at all",
+          "env": "LOOM_PLAN_CHECK_TXT_OVERRIDE",
+          "file": "scripts/prompts/plan-check.txt",
+          "find": "Run it with AUTOFIX APPLIED, not merely offered.",
+          "replace": "Autofix is available if you want it."
+        }
+      ]
     }
   }
 }

@@ -52,6 +52,17 @@ if (modelMode === 'inherit') {
     }
   }
 }
+// --- plan-check on rejected re-entry (--plan-check) ---
+// on (DEFAULT): when an ENFORCED gate rejects the work and routes the run backwards, the node
+// it lands on re-verifies the plan (via the lirbox:plan-check skill, autofix applied) BEFORE
+// doing any work. Re-implementing against a plan that was just proven wrong is how a run
+// spends its whole visit budget arriving at the same verdict repeatedly.
+// off: emit no such block. Each triggered check costs a full plan-check pass, so a run over a
+// plan that is known-good but noisy may legitimately want it out of the way.
+const planCheckMode = arg('plan-check', 'on');
+if (planCheckMode !== 'on' && planCheckMode !== 'off') {
+  die(`--plan-check must be 'on' (the default) or 'off' (got '${planCheckMode}')`);
+}
 const modelThink = arg('model-think', 'opus');
 const modelWork = arg('model-work', 'sonnet');
 for (const [flag, val] of [['--model-think', modelThink], ['--model-work', modelWork]]) {
@@ -219,6 +230,37 @@ function modelOpts(n) {
   return out
 }
 
+const PLAN_CHECK = ${JSON.stringify(planCheckMode)}
+
+// Did an ENFORCED gate reject the work and send the run back to this node? Derived from the
+// trace rather than stored in its own field, so a resume reconstructs it for free instead of
+// carrying yet another thing that can go stale.
+//
+// Keyed on invariants.mustCross for the same reason the model policy is: a node merely
+// labelled "gate" adjudicates nothing, and an enforced gate is free to be labelled anything.
+// A non-passing verdict from a node that is not enforced is an ordinary branch, not a
+// rejection, and must not trigger a plan-check the human never asked to pay for.
+function rejectedInto(id) {
+  const must = (graph.invariants && graph.invariants.mustCross) || []
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const t = trace[i]
+    if (t.to === id) {
+      return must.indexOf(t.node) !== -1 && t.verdict !== true ? t.node : null
+    }
+  }
+  return null
+}
+
+// The plan node's most recent recorded result — the artifact plan-check re-verifies. Each
+// worker persists its own result, so this path exists on disk by the time any re-entry
+// happens; there is nothing for the conductor to read or pass through.
+function planResultKey() {
+  const p = graph.nodes.find((x) => x.kind === 'plan')
+  if (!p) return ''
+  const v = visits[p.id] || 0
+  return v ? p.id + '#' + v : ''
+}
+
 // Visit accounting. \`visits\` is whichever counter map the caller owns — a region is
 // handed its OWN, which is what makes accounting per-region rather than global.
 function bumpVisit(id, visits, base) {
@@ -264,8 +306,20 @@ async function runNode(id, visits, inRegion) {
     // \`resultKey\` is the SAME key this conductor caches under, handed to the worker so the
     // file it writes is the file a resume looks up. Any other naming makes the persistence
     // real but unreachable.
+    // Re-verify the plan before redoing work an enforced gate just rejected. Needs a plan
+    // node that has actually run: with no recorded plan there is no artifact to check, and
+    // inventing one to check would be worse than skipping.
+    const gateId = PLAN_CHECK === 'on' && !inRegion ? rejectedInto(id) : null
+    const planKey = gateId ? planResultKey() : ''
+    if (gateId && !planKey) {
+      log(id + ': ' + gateId + ' rejected the previous attempt, but no plan node result is '
+        + 'recorded — skipping plan-check rather than checking an imagined plan')
+    }
+    const planCheckText = (gateId && planKey)
+      ? sub(\`${esc(tpl('plan-check.txt'))}\`, { name: NAME, planKey, gateId })
+      : ''
     const prompt = sub(\`${esc(tpl('node-lead.txt'))}\`, {
-      WORKTREE, BRANCH, name: NAME, nodeId: id, resultKey: key,
+      WORKTREE, BRANCH, name: NAME, nodeId: id, resultKey: key, planCheckText,
       visit: String(visit), cap: String(cap),
       carryText, nodePrompt: n.prompt || '', terminal: graph.terminal })
     r = await agent(prompt, {
@@ -275,6 +329,22 @@ async function runNode(id, visits, inRegion) {
       ...(n.schema ? { schema: n.schema } : {}),
     })
     results[key] = r
+  }
+
+  // A NO-GO is a REFUSAL, not a verdict to route on. Every other loom refusal — fan-out over
+  // its bound, an unmatched edge, an incomplete region, a blown visit cap — aborts rather
+  // than continuing quietly, and this is the same shape: the plan the run is about to execute
+  // has been found unsafe, so routing onward would send it straight back into the work the
+  // check just condemned. Enforced here rather than left to the worker's own instructions,
+  // because "the agent was told to stop" is not a guarantee that it did.
+  //
+  // This fires on a CACHED result too, so a resume replays the refusal instead of sailing
+  // past it. To get past a NO-GO, fix the plan and delete that result file — deliberately a
+  // human action.
+  if (r && r.planCheck === 'NO-GO') {
+    throw new Error('plan-check returned NO-GO at ' + id + ' — refusing to re-implement '
+      + 'against a plan just found unsafe. Autofix cannot clear a NO-GO, only shrink one, so '
+      + 'this needs a human. Report: ' + (r.report || '(none written)'))
   }
 
   if (r && r.graphPatch) {
