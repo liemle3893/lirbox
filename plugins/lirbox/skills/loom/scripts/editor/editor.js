@@ -3,7 +3,7 @@
 // Validation here is a COURTESY — the server re-validates every POST and its answer
 // is final. Importing the same graph-core the conductor inlines guarantees the
 // message you see in the browser is the message the run would produce.
-import { validateGraph, capFor } from './graph-core.mjs';
+import { messages, validateGraph, capFor } from './graph-core.mjs';
 
 const { useState, useEffect, useCallback, createElement: h } = React;
 const RF = window.ReactFlow;
@@ -108,7 +108,7 @@ async function loadGraph() {
 async function save(next) {
   // Local pre-check first: identical rules, instant feedback, no round trip.
   const local = validateGraph(next, graph, null);
-  if (local.length) { showViolations(local); return false; }
+  if (local.length) { showViolations(messages(local)); return false; }
 
   // Send the version this edit was based on. Without it two saves close together —
   // two tabs, or an auto-save racing a manual one — both return 200 and one edit is

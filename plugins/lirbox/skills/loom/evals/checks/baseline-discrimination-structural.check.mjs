@@ -3,14 +3,19 @@
 // reporting discriminates:false routed onward and the run continued. Worse than enforced by
 // prose — enforced by nothing.
 // Locked (evals/**): improvement loops may NEVER edit this file.
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = resolve(HERE, '..', '..', 'scripts');
-const core = await import(join(SCRIPTS, 'graph-core.mjs'));
-const seed = JSON.parse(readFileSync(join(SCRIPTS, 'seeds', 'delivery.json'), 'utf8'));
+// Mutation hatch for scripts/prove-checks.mjs: it copies the skill tree, mutates ONE
+// file in the copy, and points this variable at it. Without a hatch a check cannot be
+// mutation-proven, and an unproven check is not known to be measuring anything.
+const coreFile = process.env.LOOM_GRAPH_CORE_OVERRIDE
+  || join(SCRIPTS, 'graph-core.mjs');
+const core = await import(pathToFileURL(coreFile).href);
+const seed = JSON.parse(readFileSync((process.env.LOOM_SEED_OVERRIDE || join(SCRIPTS, 'seeds', 'delivery.json')), 'utf8'));
 
 let bad = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); } else { console.error(`FAIL ${m}`); bad++; } };

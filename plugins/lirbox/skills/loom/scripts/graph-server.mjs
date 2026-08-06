@@ -15,7 +15,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateGraph } from './graph-core.mjs';
+import { messages, validateGraph } from './graph-core.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv;
@@ -141,7 +141,13 @@ const server = http.createServer(async (req, res) => {
       // Re-validate server-side ALWAYS. The editor's lock badges are a courtesy;
       // this is the enforcement.
       const violations = validateGraph(next, prev, null);
-      if (violations.length) return send(res, 422, { violations });
+      // BOTH shapes on the wire. `violations` stays the array of human strings the editor
+      // has always rendered, so nothing downstream regresses; `diagnostics` carries the
+      // structured objects — code, offending node/edge, suggested fix — for a non-browser
+      // client (a worker whose graphPatch was rejected) that would otherwise parse English.
+      if (violations.length) {
+        return send(res, 422, { violations: messages(violations), diagnostics: violations });
+      }
 
       // The server owns `version` — a client-submitted value is always ignored.
       next.version = prevVersion + 1;

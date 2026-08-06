@@ -83,7 +83,8 @@ const rejects = (label, needle, mutate) => {
   const g = FORK();
   mutate(g);
   const v = core.validateGraph(g, null, null);
-  ok(v.some((m) => m.includes(needle)), `REJECTED: ${label} (got ${JSON.stringify(v)})`);
+  ok(v.some((m) => m.message.includes(needle)),
+    `REJECTED: ${label} (got ${JSON.stringify(core.messages(v))})`);
 };
 
 rejects('a region node that escapes instead of reaching the join',
@@ -108,7 +109,7 @@ rejects('a mustCross gate hidden inside the region', 'sits inside fork region',
     g.invariants.mustCross = ['Contract', 'Review'];
   });
 
-rejects('a fork with a single entry', 'at least 2 independent entry nodes',
+rejects('a static fork with a single entry', 'at least 2 entry node(s)',
   (g) => {
     g.edges = g.edges.filter((e) => !(e.from === 'Fan' && e.to === 'UiWork'));
     g.edges = g.edges.filter((e) => e.from !== 'UiWork');
@@ -121,6 +122,52 @@ rejects('a fork declaring a prompt', 'must not declare a prompt or schema',
 
 rejects('a fork whose join does not exist', 'naming an existing node',
   (g) => { g.nodes.find((n) => n.id === 'Fan').join = 'Nope'; });
+
+// ---- runtime fan-out: the bound is the approval ------------------------------------
+// A fanning fork is the one place the running shape differs from the approved shape. What
+// the human signs is a TEMPLATE plus a BOUND, so both have to be well-formed, and the list
+// that drives instantiation has to be guaranteed to arrive — an instantiation driven by a
+// field the previous node was free to omit fans out over nothing and reports success.
+const FANNING = () => {
+  const g = FORK();
+  g.nodes = g.nodes.filter((n) => !['Contract', 'UiPolish', 'UiWork'].includes(n.id));
+  g.edges = g.edges.filter((e) => !['Contract', 'UiPolish', 'UiWork'].includes(e.from)
+    && !['Contract', 'UiPolish', 'UiWork'].includes(e.to));
+  g.nodes.find((n) => n.id === 'Fan').fanOut = { field: 'targets', max: 4 };
+  g.nodes.find((n) => n.id === 'Plan').schema = {
+    type: 'object', properties: { targets: { type: 'array' } }, required: ['targets'],
+  };
+  g.edges.find((e) => e.to === 'Fan').carry = ['targets'];
+  g.edges.push({ from: 'ApiWork', to: 'Integrate', when: 'always' });
+  return g;
+};
+
+{
+  const v = core.validateGraph(FANNING(), null, null);
+  // A single entry is the NORMAL shape for a fanning fork — its concurrency comes from N
+  // instances, not from two lanes — so the >= 2 rule must not fire here.
+  ok(v.length === 0,
+    `a fanning fork with ONE template entry is ACCEPTED (got ${JSON.stringify(v)})`);
+}
+
+const rejectsFan = (label, needle, mutate) => {
+  const g = FANNING();
+  mutate(g);
+  const v = core.validateGraph(g, null, null);
+  ok(v.some((m) => m.message.includes(needle)), `REJECTED: ${label} (got ${JSON.stringify(core.messages(v))})`);
+};
+
+rejectsFan('fanOut with no bound — `max` is what the human approves in place of a count',
+  'max: <integer >= 1>',
+  (g) => { g.nodes.find((n) => n.id === 'Fan').fanOut = { field: 'targets' }; });
+
+rejectsFan('fanOut over a list the entering edge does not carry',
+  'does not carry it',
+  (g) => { g.edges.find((e) => e.to === 'Fan').carry = []; });
+
+rejectsFan('fanOut over a field the source node may legally omit',
+  'does not list it in schema.required',
+  (g) => { g.nodes.find((n) => n.id === 'Plan').schema.required = []; });
 
 // The region helpers are what every rule above is computed from; a wrong boundary would
 // make all of them agree with each other and with nothing else.

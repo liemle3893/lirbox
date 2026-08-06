@@ -1,0 +1,54 @@
+# loom's third Harbor task. The graph is authored, never executed.
+#
+# WHY THIS TASK EXISTS (2026-08-06). Issue #70: a fork's region used to be declared statically,
+# so "one branch per thing, and I do not know how many things there are yet" could not be said.
+# `fanOut: { field, max }` fixes that: the region becomes a template instantiated once per item,
+# under a bound the human approves in place of a node count.
+#
+# The tier-2 floor proves the runtime honours that bound (runtime-fanout-honours-its-bound
+# EXECUTES the emitted conductor). This grades the half no artifact check can see: whether a
+# model given the skill reaches for a BOUNDED fan-out on a goal whose N is genuinely unknown at
+# authoring time, and wires the list so it is guaranteed to arrive.
+#
+# ITS CRITERIA SPLIT, and reading them apart is the point:
+#
+#   PRE-EXISTING CONTRACT — graph_exists, gate_enforced, failure_edge_routes_back,
+#   back_edge_carries_findings. The baseline can score all four; this half answers "no worse".
+#
+#   NEW CAPABILITY — declares_bounded_fanout, fanout_list_is_guaranteed, gate_outside_region.
+#   The baseline cannot express fanOut at all, so a 0 here measures the feature's absence, not
+#   the model. Read the AFTER arm absolute.
+#
+# `fanout_list_is_guaranteed` is the discriminator that is NOT satisfied by simply knowing the
+# keyword: the array must be carried on the edge into the fork AND listed in the source node's
+# schema.required, or the region instantiates zero times and reports success.
+#
+# The graders reimplement reachability in Python rather than importing the skill's
+# graph-core.mjs: grading the code under test with the code under test proves only that it
+# agrees with itself.
+
+[task]
+name = "lirbox/loom__scaffold-runtime-fanout"
+version = "1.0.0"
+description = "loom must author a graph whose concurrent region is a real DAG — declaring which work depends on what — with the gate still un-bypassable"
+
+[metadata]
+skill = "loom"
+difficulty = "medium"
+category = "agent-workflow-authoring"
+
+[environment]
+cpus = 2
+memory_mb = 4096
+
+[agent]
+timeout_sec = 900.0
+
+[verifier]
+timeout_sec = 900.0
+
+# Only the subscription token is declared. Harbor validates this table BEFORE the run and aborts on
+# any unset variable, so declaring ANTHROPIC_API_KEY here would make the task unrunnable for anyone
+# holding only a subscription token; pass an API key ad hoc with --ve instead.
+[verifier.env]
+CLAUDE_CODE_OAUTH_TOKEN = "${CLAUDE_CODE_OAUTH_TOKEN}"
