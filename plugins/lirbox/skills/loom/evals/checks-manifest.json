@@ -77,6 +77,25 @@
           "replace": "\"buildExit\"\n        ],"
         }
       ]
+    },
+    "terminal-requires-delivery-verdict": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "reverting the terminal edge to when:\"always\" is the original defect — a blocked delivery reporting `complete`",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "\"to\": \"Done\",\n      \"when\": {\n        \"field\": \"delivered\",\n        \"eq\": true\n      }",
+          "replace": "\"to\": \"Done\",\n      \"when\": \"always\""
+        },
+        {
+          "why": "dropping `delivered` from required lets the node omit its verdict entirely",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "\"prUrl\",\n          \"delivered\"",
+          "replace": "\"prUrl\""
+        }
+      ]
     }
   }
 }
