@@ -1975,8 +1975,8 @@
     "semantic_hash": "d622aa8e86a4177c75179b2b7e7bc76b"
   },
   "plugins/lirbox/skills/loom/evals/checks-manifest.json": {
-    "mtime": 1786260283.1890986,
-    "ast_hash": "e3fd07db15018953137b0454be9a13ae",
+    "mtime": 1786035865.2301362,
+    "ast_hash": "b9733dfcd612b4f9ca13fbd8f522038d",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/baseline-discrimination-structural.check.mjs": {
@@ -2075,23 +2075,23 @@
     "semantic_hash": "ad85e46bf6ed2b2bdca63feeaefc75d0"
   },
   "plugins/lirbox/skills/loom/scripts/loom-report.cjs": {
-    "mtime": 1786259455.7982738,
+    "mtime": 1786030970.4944654,
     "ast_hash": "b3780c7bb4c2636e6618c5b014df9b89",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/scaffold-loom.cjs": {
-    "mtime": 1786259844.2801414,
-    "ast_hash": "7a082c82289b9c062d922e32670d56d3",
+    "mtime": 1786035445.6361651,
+    "ast_hash": "557c7611a73dded16870f9ad57a0315f",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/seeds/delivery.json": {
-    "mtime": 1786259915.8701851,
-    "ast_hash": "2b0547754b36dd6d8092272b1d8b1cca",
+    "mtime": 1785992640.2407038,
+    "ast_hash": "6f70c57af81f37acc758476f96a2be7b",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/seeds/lite.json": {
-    "mtime": 1786259915.8698459,
-    "ast_hash": "66a0ae9ae7f51018cd553c71cbb80f0e",
+    "mtime": 1785992640.2410269,
+    "ast_hash": "2a9f1b00943c74d0fda2cb4d39eff30e",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/test-loom.cjs": {
@@ -2140,13 +2140,13 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/SKILL.md": {
-    "mtime": 1786260504.8659027,
-    "ast_hash": "e6abfcf4804e6b5f5e06e18c65b98f2e",
+    "mtime": 1786034673.7694314,
+    "ast_hash": "e207cb9a0b8694ffcfa2781982665336",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/references/graph-spec.md": {
-    "mtime": 1786260537.4371042,
-    "ast_hash": "aab3c2e4665823c0596d62ac41552050",
+    "mtime": 1786033493.3155208,
+    "ast_hash": "31f5e87bd6a6fa21fec91df81f780255",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/references/invariants.md": {
@@ -2160,13 +2160,13 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/prompts/checkpoint.txt": {
-    "mtime": 1786259455.798489,
+    "mtime": 1786030948.7852776,
     "ast_hash": "c34fdcc2d6fb9e239e1c2c59d129255d",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/prompts/node-lead.txt": {
-    "mtime": 1786259809.2073133,
-    "ast_hash": "050caaefbacbb7259837b9376a418daf",
+    "mtime": 1786034369.943746,
+    "ast_hash": "e1d60ec37a8578fb89d76c560d2f5522",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/arena/scripts/multi-grade.mjs": {
@@ -2485,7 +2485,7 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/checkpoint-cost-is-bounded.check.mjs": {
-    "mtime": 1786259455.7966373,
+    "mtime": 1786030893.712021,
     "ast_hash": "4112fc32ba4656a142e76ae1f7aa86f1",
     "semantic_hash": ""
   },
@@ -2550,48 +2550,18 @@
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/model-policy-follows-enforcement.check.mjs": {
-    "mtime": 1786259455.7970653,
+    "mtime": 1786033402.934233,
     "ast_hash": "acc159487484a2cef394b542bbd2458b",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/evals/checks/rejected-reentry-rechecks-the-plan.check.mjs": {
-    "mtime": 1786259455.7974405,
+    "mtime": 1786035462.8127933,
     "ast_hash": "1a31c9c95a8b3f21392a454073c9fa49",
     "semantic_hash": ""
   },
   "plugins/lirbox/skills/loom/scripts/prompts/plan-check.txt": {
-    "mtime": 1786259455.7990694,
+    "mtime": 1786035434.2648857,
     "ast_hash": "c1d1d24b9d2f2c3a51d1287222d0e26c",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/evals/checks/plan-authors-self-sufficient-prompts.check.mjs": {
-    "mtime": 1786260163.817253,
-    "ast_hash": "5dd716cc230650c0bc70ac46725fb3a7",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/evals/checks/worker-prompt-carries-the-run-brief.check.mjs": {
-    "mtime": 1786260106.1944838,
-    "ast_hash": "a3e33206b0d9f7b99a34c38b395d20da",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/harbor/tasks/self-sufficient-prompts/solution/solve.sh": {
-    "mtime": 1786261694.7271314,
-    "ast_hash": "ec8937c8f9d7c017e00d4a05ca571f44",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/harbor/tasks/self-sufficient-prompts/tests/reward/checks.py": {
-    "mtime": 1786261641.6430583,
-    "ast_hash": "ef118ea87917ec79e820ed9526827e4d",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/harbor/tasks/self-sufficient-prompts/tests/test.sh": {
-    "mtime": 1786261545.085768,
-    "ast_hash": "d622aa8e86a4177c75179b2b7e7bc76b",
-    "semantic_hash": ""
-  },
-  "plugins/lirbox/skills/loom/harbor/tasks/self-sufficient-prompts/instruction.md": {
-    "mtime": 1786261584.220337,
-    "ast_hash": "c78ce62b26fa53a04db14624133bb8f5",
     "semantic_hash": ""
   }
 }
