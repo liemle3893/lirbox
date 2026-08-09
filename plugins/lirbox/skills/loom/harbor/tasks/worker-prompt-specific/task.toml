@@ -25,7 +25,11 @@ memory_mb = 4096
 timeout_sec = 1200.0
 
 [verifier]
-timeout_sec = 600.0
+# 1800, not 600: the graders are fast, but a loaded host (other workloads competing for
+# CPU) pushed four of five trials into VerifierTimeoutError on a run whose agents had all
+# succeeded. A timeout that trips on host load manufactures a null result. Raised on BOTH
+# variants together — they must stay identical apart from instruction.md.
+timeout_sec = 1800.0
 
 [verifier.env]
 CLAUDE_CODE_OAUTH_TOKEN = "${CLAUDE_CODE_OAUTH_TOKEN}"
