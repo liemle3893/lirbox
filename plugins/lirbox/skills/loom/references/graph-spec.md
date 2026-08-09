@@ -164,7 +164,7 @@ server's 422 carries both: `violations` (strings, unchanged) and `diagnostics` (
 | `nodes` | array | See below. |
 | `edges` | array | See below. |
 | `invariants` | object | See below. |
-| `name`, `goal` | string | Set by the skill when it copies a seed to `.loom/<name>.graph.json` (step 2). `scaffold-loom.cjs` reads `graph.goal` for the emitted `meta.description` (falling back to `name`, truncated to 160 chars); `name` there is the `--name` CLI arg, not this field. |
+| `name`, `goal` | string | Set by the skill when it copies a seed to `.loom/<name>.graph.json` (step 2). `scaffold-loom.cjs` reads `graph.goal` twice: for the emitted `meta.description` (falling back to `name`, truncated to 160 chars), and at **runtime** for the run brief every worker prompt opens with — see *The run brief* below. `name` in `meta.description` is the `--name` CLI arg, not this field. |
 
 ## Node fields
 
@@ -181,6 +181,33 @@ server's 422 carries both: `violations` (strings, unchanged) and `diagnostics` (
 | `agentType` | string | Passed straight through as `{ agentType: n.agentType }` when present — which subagent type `Workflow`'s `agent()` should spawn for this node. Omitted if absent. |
 | `locked` | boolean | Frozen at approval (step 3) for every `invariants.mustCross` node. Feeds `lockedFingerprint()`: a locked node's `id`/`prompt`/`schema`/etc. changing under a later patch changes the fingerprint, and `validateGraph` rejects any submission whose fingerprint no longer matches `invariants.lockedHash`. This is what makes a gate's own instructions non-negotiable once approved — see [`invariants.md`](invariants.md). |
 | `pos` | `{ x: number, y: number }` | Editor-only canvas coordinates (`editor.js`: `n.pos \|\| { x: 60, y: 40 + i * 90 }` on load, written back to `n.pos` on drag). Never read by `graph-core.mjs` or the generated conductor. Purely a layout hint for the human reviewing the graph in the browser. |
+
+## The run brief
+
+Every worker prompt opens with what the run is for and where to find what earlier nodes
+recorded:
+
+```
+THIS RUN EXISTS TO: <graph.goal>
+
+  .loom/state/<name>/results/<nodeId>#<visit>.json   what an earlier node returned
+  .loom/<name>.dod.json                              this run's definition of done
+  .loom/<name>.checks/                               the frozen DoD check files
+```
+
+`graph.goal` is read from the **live** graph at runtime, not baked in at generation time, so a
+runtime `graphPatch` cannot leave the brief describing a graph that no longer exists.
+
+It is an **index, never a payload** — paths the worker opens only if its own task needs them,
+so its size does not grow with how much earlier nodes produced. The goal is truncated at 600
+characters for the same reason. Both properties are load-bearing rather than tidiness: a brief
+that inlined predecessors' results, or that re-sent an unbounded goal once per node, would
+re-create on the worker side exactly the O(n²) prompt cost that moving `results` out of the
+checkpoint removed. `evals/checks/worker-prompt-carries-the-run-brief.check.mjs` holds both
+halves — that the brief is present, and that it stays bounded.
+
+The brief tells a worker where the answers are. It does not excuse a vague node `prompt`: the
+brief is identical for every node, so nothing in it says what *this* node must do.
 
 ## Which model each worker runs on
 

@@ -251,6 +251,26 @@ function rejectedInto(id) {
   return null
 }
 
+// THE RUN BRIEF. Every worker is a fresh context that knows nothing about why the run exists.
+// Before this, a node's entire instruction could be "Implement the goal in the worktree" with
+// the goal itself appearing nowhere in the prompt, so each worker opened by rediscovering the
+// run's purpose from the repository — and the next worker did it again.
+//
+// Read at RUNTIME from the live graph rather than baked in at generation time, for the same
+// reason the model policy is: a runtime graphPatch may rewrite the graph this conductor walks.
+//
+// BOUNDED, and the bound is the point rather than tidiness. The cost this skill just finished
+// removing was O(n^2): every worker's output re-sent into every later prompt. A brief that is
+// O(1) in the length of the run cannot decay into that. An UNBOUNDED string spliced into every
+// worker prompt could — paste a 200KB spec into graph.goal and it is re-sent once per node.
+// GOAL_MAX is what keeps the O(1) true regardless of what a human put in the field.
+const GOAL_MAX = 600
+function runGoal() {
+  const g = String(graph.goal || '').trim()
+  if (!g) return '(no goal recorded in the graph — read the DoD file below)'
+  return g.length > GOAL_MAX ? g.slice(0, GOAL_MAX) + ' ... [truncated]' : g
+}
+
 // The plan node's most recent recorded result — the artifact plan-check re-verifies. Each
 // worker persists its own result, so this path exists on disk by the time any re-entry
 // happens; there is nothing for the conductor to read or pass through.
@@ -320,7 +340,7 @@ async function runNode(id, visits, inRegion) {
       : ''
     const prompt = sub(\`${esc(tpl('node-lead.txt'))}\`, {
       WORKTREE, BRANCH, name: NAME, nodeId: id, resultKey: key, planCheckText,
-      visit: String(visit), cap: String(cap),
+      visit: String(visit), cap: String(cap), goal: runGoal(),
       carryText, nodePrompt: n.prompt || '', terminal: graph.terminal })
     r = await agent(prompt, {
       label: key, phase: id,
