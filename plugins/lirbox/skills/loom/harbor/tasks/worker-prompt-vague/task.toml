@@ -1,0 +1,31 @@
+# One half of a matched pair (worker-prompt-vague / worker-prompt-specific). The two differ ONLY in
+# instruction.md — same image, same graders, same oracle — so any difference in turns, tokens or
+# reward is attributable to the node prompt's specificity and nothing else.
+#
+# WHY (2026-08-10). loom's cost is dominated by `turns x accumulated context`. The skill's design
+# assumes a self-sufficient node prompt makes a worker cheaper; the shipped seed hands its worker
+# "Implement the goal in the worktree." This pair measures that assumption directly, on the WORKER
+# role rather than on graph authoring. No skill is installed: the agent IS the worker.
+
+[task]
+name = "lirbox/loom__worker-prompt-vague"
+version = "1.0.0"
+description = "worker implementing idempotency keys from a vague node prompt"
+
+[metadata]
+skill = "loom"
+difficulty = "medium"
+category = "agent-workflow-worker"
+
+[environment]
+cpus = 2
+memory_mb = 4096
+
+[agent]
+timeout_sec = 1200.0
+
+[verifier]
+timeout_sec = 600.0
+
+[verifier.env]
+CLAUDE_CODE_OAUTH_TOKEN = "${CLAUDE_CODE_OAUTH_TOKEN}"
