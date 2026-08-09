@@ -88,6 +88,20 @@ confirm that waiver in the same one-shot `AskUserQuestion` as the criteria.
 Copy the seed: `scripts/seeds/lite.json` or `scripts/seeds/delivery.json` →
 `.loom/<name>.graph.json`, setting `name` and `goal`.
 
+**Every node prompt you write is the whole context its worker will ever have.** A node runs in
+a fresh subagent that never sees this conversation, the graph, its siblings' prompts, or why
+the node exists. So a prompt must be **self-sufficient**: name the exact files it creates or
+modifies, the signatures and types it produces or consumes, and the condition that makes it
+done. `"Implement the goal"` is not a prompt — it forces its worker to re-derive the whole
+decomposition from the repository, and the next node's worker to derive it again. That
+rediscovery, repeated once per node, is the largest single cost in a loom run. Where a node
+depends on an earlier one, **name that node** so its worker reads that one recorded result
+instead of re-surveying the codebase. The same rule binds the `Plan` node, which authors the
+prompts for every node it adds at runtime.
+
+The conductor supplies `graph.goal` and the paths to the DoD, the frozen checks and every
+earlier node's recorded result to each worker automatically — do not restate them per node.
+
 ### 3. Pre-flight — freeze always, review on request
 
 **The freeze is mandatory. The human review is not.** These are two different things and were

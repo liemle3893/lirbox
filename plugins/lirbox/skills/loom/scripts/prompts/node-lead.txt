@@ -1,6 +1,20 @@
 You are working inside the shared worktree ${WORKTREE} on branch ${BRANCH}.
 Do every edit there. Never touch the main checkout.
 
+THIS RUN EXISTS TO: ${goal}
+
+You are one node of a graph, and the nodes before you already established things. Rather
+than rediscovering them, read what they recorded:
+
+  .loom/state/${name}/results/<nodeId>#<visit>.json   what an earlier node returned
+  .loom/${name}.dod.json                              this run's definition of done
+  .loom/${name}.checks/                               the frozen DoD check files
+
+All three paths are relative to the MAIN repo checkout. Open only the ones your own task
+needs — this is an index, not required reading. But do not re-derive the goal, re-read the
+plan to reconstruct a decision an earlier node already made, or re-survey the codebase for
+something a predecessor's result already names.
+
 NODE: ${nodeId}   (visit ${visit} of at most ${cap})
 ${carryText}
 ${planCheckText}

@@ -534,6 +534,58 @@
           "replace": "  if (r && r.planCheck === 'NO-GO') {"
         }
       ]
+    },
+    "worker-prompt-carries-the-run-brief": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "dropping the goal from the substitution leaves the template asking for a value nothing supplies, so every worker prompt ships the literal placeholder instead of the run's purpose",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "visit: String(visit), cap: String(cap), goal: runGoal(),",
+          "replace": "visit: String(visit), cap: String(cap),"
+        },
+        {
+          "why": "an unbounded goal re-sent into every worker prompt recreates, on the worker side, exactly the O(n^2) prompt cost the checkpoint change just removed",
+          "env": "LOOM_SCAFFOLD_OVERRIDE",
+          "file": "scripts/scaffold-loom.cjs",
+          "find": "  return g.length > GOAL_MAX ? g.slice(0, GOAL_MAX) + ' ... [truncated]' : g",
+          "replace": "  return g"
+        },
+        {
+          "why": "removing the goal line returns every worker to opening its turn by rediscovering what the run is for",
+          "env": "LOOM_NODE_LEAD_OVERRIDE",
+          "file": "scripts/prompts/node-lead.txt",
+          "find": "THIS RUN EXISTS TO: ${goal}\n",
+          "replace": ""
+        },
+        {
+          "why": "without the index a worker is told where to WRITE its own result but never where to READ its predecessors', which is the blindness this change exists to end",
+          "env": "LOOM_NODE_LEAD_OVERRIDE",
+          "file": "scripts/prompts/node-lead.txt",
+          "find": "  .loom/state/${name}/results/<nodeId>#<visit>.json   what an earlier node returned\n",
+          "replace": ""
+        }
+      ]
+    },
+    "plan-authors-self-sufficient-prompts": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "stripping the paragraph from delivery.json returns Plan to writing goal-shaped prompts, so every worker it adds re-derives the decomposition Plan already did",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "\\n\\nEvery node you add gets its prompt from you, and the worker that runs it will be a FRESH context that never sees this plan, your reasoning, or any sibling node's prompt. It can only read what you wrote and what earlier results recorded. So write each prompt SELF-SUFFICIENT: name the exact files it must create or modify, the signatures and types it must produce or consume, and the condition that makes it done. A prompt that says only what to achieve forces its worker to re-derive the whole decomposition you just did \u2014 and the next node's worker to derive it again. Where a node genuinely depends on an earlier node's output, name that node so it reads that one result instead of re-surveying the repository.",
+          "replace": ""
+        },
+        {
+          "why": "stripping the paragraph from lite.json returns Plan to writing goal-shaped prompts, so every worker it adds re-derives the decomposition Plan already did",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/lite.json",
+          "find": "\\n\\nEvery node you add gets its prompt from you, and the worker that runs it will be a FRESH context that never sees this plan, your reasoning, or any sibling node's prompt. It can only read what you wrote and what earlier results recorded. So write each prompt SELF-SUFFICIENT: name the exact files it must create or modify, the signatures and types it must produce or consume, and the condition that makes it done. A prompt that says only what to achieve forces its worker to re-derive the whole decomposition you just did \u2014 and the next node's worker to derive it again. Where a node genuinely depends on an earlier node's output, name that node so it reads that one result instead of re-surveying the repository.",
+          "replace": ""
+        }
+      ]
     }
   }
 }
