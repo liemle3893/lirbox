@@ -28,7 +28,7 @@
     {
       "id": "Plan",
       "kind": "plan",
-      "prompt": "Read the repository and decide this run's decomposition. Return a graphPatch that adds the work nodes you need between Plan and Review, with their dependency edges.\n\nEvery node you add gets its prompt from you, and the worker that runs it will be a FRESH context that never sees this plan, your reasoning, or any sibling node's prompt. It can only read what you wrote and what earlier results recorded. So write each prompt SELF-SUFFICIENT: name the exact files it must create or modify, the signatures and types it must produce or consume, and the condition that makes it done. A prompt that says only what to achieve forces its worker to re-derive the whole decomposition you just did — and the next node's worker to derive it again. Where a node genuinely depends on an earlier node's output, name that node so it reads that one result instead of re-surveying the repository.",
+      "prompt": "Read the repository and decide this run's decomposition. Return a graphPatch that adds the work nodes you need between Plan and Review, with their dependency edges.",
       "schema": {
         "type": "object",
         "required": [
