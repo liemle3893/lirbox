@@ -605,6 +605,13 @@
           "file": "scripts/graph-core.mjs",
           "find": "    if (cp > inv.maxCriticalPath) {",
           "replace": "    if (cp >= inv.maxCriticalPath) {"
+        },
+        {
+          "why": "a seed that stops shipping maxCriticalPath leaves the bound with no author: invariants are frozen at approval, so nothing would ever set it and the enforcement silently never fires on any real run",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "\"maxCriticalPath\": 20,\n    ",
+          "replace": ""
         }
       ]
     }

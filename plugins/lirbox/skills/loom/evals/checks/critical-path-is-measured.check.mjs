@@ -18,7 +18,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -186,6 +186,34 @@ const unbounded = linear(30);
 ok(!core.validateGraph(unbounded, null, {}).some((v) => v.code === 'critical-path-exceeded'),
   'a graph that sets no maxCriticalPath is never judged on it — plenty of work is genuinely '
   + 'sequential and refusing to run it would be wrong');
+
+// ---- 7. the bound has an AUTHOR ---------------------------------------------------------
+// An invariant nothing sets is not an invariant. `maxCriticalPath` is read from
+// `graph.invariants`, and `invariants` are FROZEN at approval — so if the seeds do not ship it,
+// the only window to add it is a human hand-editing the graph JSON between copying the seed and
+// the freeze, which nothing instructs them to do. The enforcement would then never fire on any
+// real run: correct code, dead in practice. `nodeBudget` is the precedent — the seeds ship it.
+const seedOverride = process.env.LOOM_SEED_OVERRIDE;
+const SEEDS = seedOverride ? dirname(seedOverride) : resolve(SCRIPTS, 'seeds');
+for (const seed of ['lite', 'delivery']) {
+  let g;
+  try { g = JSON.parse(readFileSync(join(SEEDS, seed + '.json'), 'utf8')); }
+  catch (e) { ok(false, `${seed}.json is readable (${e.message})`); continue; }
+  const inv = g.invariants || {};
+  ok(typeof inv.maxCriticalPath === 'number' && inv.maxCriticalPath > 0,
+    `${seed}.json SHIPS invariants.maxCriticalPath, so the bound exists before the freeze `
+    + `(got ${JSON.stringify(inv.maxCriticalPath)})`);
+  // And it has to bound something: a bound at or below the seed's own critical path would refuse
+  // the seed itself, while one at nodeBudget can never be reached before nodeBudget refuses first.
+  const cp = core.criticalPath(g);
+  ok(inv.maxCriticalPath > cp,
+    `${seed}.json's bound (${inv.maxCriticalPath}) admits its own shape (critical path ${cp})`);
+  if (inv.nodeBudget) {
+    ok(inv.maxCriticalPath < inv.nodeBudget,
+      `${seed}.json's bound (${inv.maxCriticalPath}) is tighter than nodeBudget `
+      + `(${inv.nodeBudget}) — otherwise nodeBudget always refuses first and this never fires`);
+  }
+}
 
 if (bad) { console.error(`\ncritical-path-is-measured: ${bad} failed`); process.exit(1); }
 console.log('critical-path-is-measured: ok');
