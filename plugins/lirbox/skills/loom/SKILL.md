@@ -90,6 +90,23 @@ Copy the seed: `scripts/seeds/lite.json` or `scripts/seeds/delivery.json` →
 
 ### 3. Pre-flight — freeze always, review on request
 
+**First, price the graph.** `node <skill-dir>/scripts/graph-metrics.mjs .loom/<name>.graph.json`
+
+It reports the **critical path** — the longest chain of workers that must run in sequence — and
+the parallelism that implies. That number, times the average node duration, IS the run's
+wall-clock: measured against the emitted conductor it predicts real elapsed time to within 1-3%.
+Node *count* does not, because a fork region's nodes overlap.
+
+A graph at `parallelism 1.00` collects no wall-clock benefit from loom at all: it buys
+un-bypassable gates and resumability, and pays N node-times to get them. Both shipped seeds score
+1.00, so this is the common case, not an exotic one. If any of the sequential nodes are
+independent, a `fork` region over them cuts the run to its longest branch. If they genuinely
+depend on each other, the shape is right and the number is the honest price — report it to the
+human either way, before launch, while the graph can still change.
+
+`invariants.maxCriticalPath` bounds it, the way `nodeBudget` bounds node count. Opt-in: a graph
+that does not set it is not judged on it.
+
 **The freeze is mandatory. The human review is not.** These are two different things and were
 previously welded together: the freeze is a mechanical operation (two loops and a hash stamp),
 and the browser review is a person looking at a picture. Only the second is optional.

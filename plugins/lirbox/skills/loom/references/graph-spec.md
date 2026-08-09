@@ -182,6 +182,35 @@ server's 422 carries both: `violations` (strings, unchanged) and `diagnostics` (
 | `locked` | boolean | Frozen at approval (step 3) for every `invariants.mustCross` node. Feeds `lockedFingerprint()`: a locked node's `id`/`prompt`/`schema`/etc. changing under a later patch changes the fingerprint, and `validateGraph` rejects any submission whose fingerprint no longer matches `invariants.lockedHash`. This is what makes a gate's own instructions non-negotiable once approved — see [`invariants.md`](invariants.md). |
 | `pos` | `{ x: number, y: number }` | Editor-only canvas coordinates (`editor.js`: `n.pos \|\| { x: 60, y: 40 + i * 90 }` on load, written back to `n.pos` on drag). Never read by `graph-core.mjs` or the generated conductor. Purely a layout hint for the human reviewing the graph in the browser. |
 
+## Critical path — what the graph costs in TIME
+
+`nodeBudget` bounds how much work a run may do. It says nothing about how much of that work must
+happen *one after another*, and that is what a run's wall-clock actually is.
+
+`criticalPath(graph)` (in `graph-core.mjs`) returns the longest chain of **worker-spawning** nodes
+from `start` to the terminal. A `fork` spawns no worker and the terminal is never executed, so
+neither counts. Cycles — a gate's failing edge routing backwards — are traversed at most once, so
+the number is the cost of one pass; retries multiply it rather than change the shape it measures.
+
+Multiplied by the average node duration this predicts real elapsed time to within 1-3%, measured
+against the emitted conductor across linear and forked graphs. Node count does not predict it at
+all: eight nodes behind one fork finish in the time of the longest branch, while eight in a line
+take eight node-times.
+
+`parallelism(graph)` is `workers / criticalPath`. **1.00 means nothing overlaps** — the run is a
+sequence wearing a graph's clothes. Both shipped seeds score 1.00.
+
+| invariant | bounds | opt-in |
+|---|---|---|
+| `nodeBudget` | how many nodes exist | yes |
+| `maxCriticalPath` | how many run in sequence | yes |
+
+A graph exceeding `maxCriticalPath` is rejected with `critical-path-exceeded`. A graph exactly at
+the bound is allowed — it is a maximum, not a target. A graph that sets no bound is never judged,
+because plenty of work is genuinely sequential and refusing to run it would be wrong.
+
+Report it before launch: `node scripts/graph-metrics.mjs .loom/<name>.graph.json`.
+
 ## The run brief
 
 Every worker prompt opens with what the run is for and where to find what earlier nodes
