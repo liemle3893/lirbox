@@ -2,8 +2,11 @@
 # WORKER role, receiving one node prompt exactly as loom's conductor would hand it over. The two
 # variants share this image byte-for-byte so the only variable is instruction.md.
 FROM node:22-bookworm-slim
+# curl is REQUIRED: tests/test.sh bootstraps uv via curl and suppresses its stderr, so
+# without it uvx is simply missing and NO grader runs — every trial scores a clean 0.000
+# that is indistinguishable from a real null result.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ca-certificates ripgrep python3 \
+      git ca-certificates curl ripgrep python3 \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /app/src/api /app/src/store /app/tests
 WORKDIR /app
