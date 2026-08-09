@@ -300,6 +300,7 @@
       "*": 3,
       "Implement": 4
     },
+    "maxCriticalPath": 20,
     "nodeBudget": 40,
     "lockedHash": "fnv1a:df1334b7"
   }

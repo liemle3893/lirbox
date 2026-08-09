@@ -567,6 +567,53 @@
           "replace": ""
         }
       ]
+    },
+    "critical-path-is-measured": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "counting fork and terminal nodes as workers inflates every estimate \u2014 the fork spawns no agent and the interpreter exits before the terminal, so the reported wall-clock would never match the run",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (!n || n.kind === 'terminal' || n.kind === 'fork') return 0;\n    return 1;",
+          "replace": "    if (!n) return 0;\n    return 1;"
+        },
+        {
+          "why": "taking the SHORTEST branch instead of the longest reports the best case, so a graph whose slow branch dominates the run is signed off on the fast one",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    for (const s of outs) best = Math.max(best, walk(s, next));",
+          "replace": "    for (const s of outs) best = outs.indexOf(s) === 0 ? walk(s, next) : Math.min(best, walk(s, next));"
+        },
+        {
+          "why": "sharing one visited-set across sibling branches charges the join to whichever branch reached it first, reporting a critical path shorter than the run executes",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    const next = new Set(seen);\n    next.add(id);",
+          "replace": "    const next = seen;\n    next.add(id);"
+        },
+        {
+          "why": "dropping the bound check makes invariants.maxCriticalPath decorative \u2014 a human approves a wall-clock ceiling the validator never enforces",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    const cp = criticalPath(next);\n    if (cp > inv.maxCriticalPath) {",
+          "replace": "    const cp = criticalPath(next);\n    if (false) {"
+        },
+        {
+          "why": "rejecting a graph that merely REACHES the bound turns a maximum into a target and refuses graphs the human approved",
+          "env": "LOOM_GRAPH_CORE_OVERRIDE",
+          "file": "scripts/graph-core.mjs",
+          "find": "    if (cp > inv.maxCriticalPath) {",
+          "replace": "    if (cp >= inv.maxCriticalPath) {"
+        },
+        {
+          "why": "a seed that stops shipping maxCriticalPath leaves the bound with no author: invariants are frozen at approval, so nothing would ever set it and the enforcement silently never fires on any real run",
+          "env": "LOOM_SEED_OVERRIDE",
+          "file": "scripts/seeds/delivery.json",
+          "find": "\"maxCriticalPath\": 20,\n    ",
+          "replace": ""
+        }
+      ]
     }
   }
 }
