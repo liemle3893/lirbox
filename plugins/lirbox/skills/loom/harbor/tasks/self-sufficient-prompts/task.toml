@@ -1,0 +1,51 @@
+# loom's fourth Harbor task. The graph is authored, never executed.
+#
+# WHY THIS TASK EXISTS (2026-08-09). loom's other three tasks all grade the SHAPE of an authored
+# graph — back-edges, fan-out, runtime fan-out — and all three are saturated at reward 1.000. None
+# of them looks at what a node's `prompt` actually SAYS, so every one of them stays green against a
+# graph whose nodes are wired perfectly and instructed uselessly.
+#
+# That gap is the whole cost centre. A loom worker is a fresh subagent: the node's prompt is the
+# entire context it will ever have. The shipped delivery seed's Implement node reads, in full,
+# "Implement the goal in the worktree. Commit your work on the branch." — a prompt that names no
+# file, no interface and no completion condition, handed to an agent that has never seen the goal.
+# Every worker therefore opens by re-deriving the decomposition from the repository, and the next
+# one derives it again. On an observed 17-node run the workers spent ~3.55M tokens against roughly
+# 2k per node of actual instruction.
+#
+# THE DISCRIMINATOR is that a bare `cp` of either seed cannot score. Both seeds carry exactly ONE
+# work node between planning and the first gate, so `implementation_decomposed` (>= 3) fails
+# outright; and the seed's stock prompts name no repository file, so `prompts_name_real_files`
+# fails too. Passing requires reading the goal AND writing prompts a stranger could act on.
+#
+# This task grades the AUTHORING half of the run-context change. The other half — the conductor's
+# run brief, which exists only in a prompt built at runtime — is not observable here, because
+# Harbor never executes the graph. That half is held by
+# evals/checks/worker-prompt-carries-the-run-brief.check.mjs, which executes the emitted conductor
+# directly. Do not read a green here as covering it.
+
+[task]
+name = "lirbox/loom__self-sufficient-prompts"
+version = "1.0.0"
+description = "loom must author a graph whose work-node prompts are actionable by a worker that sees nothing else"
+
+[metadata]
+skill = "loom"
+difficulty = "medium"
+category = "agent-workflow-authoring"
+
+[environment]
+cpus = 2
+memory_mb = 4096
+
+[agent]
+timeout_sec = 900.0
+
+[verifier]
+timeout_sec = 900.0
+
+# Only the subscription token is declared. Harbor validates this table BEFORE the run and aborts on
+# any unset variable, so declaring ANTHROPIC_API_KEY here would make the task unrunnable for anyone
+# holding only a subscription token; pass an API key ad hoc with --ve instead.
+[verifier.env]
+CLAUDE_CODE_OAUTH_TOKEN = "${CLAUDE_CODE_OAUTH_TOKEN}"
