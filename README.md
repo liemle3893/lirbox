@@ -28,6 +28,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`whetstone`** | Overnight, eval-gated skill improver on the same backbone: grinds a backlog through a deterministic floor + per-item acceptance-check (fail-before/pass-after), keeping only changes a check confirms, plus an optional compaction pass that shrinks the skill — then opens a PR for review (never auto-merges). Backlog items are filed by hand **or harvested from failing eval tasks**; SkillOpt-derived controls (train/val scoring, edit-size budget) keep fixes general. For sharpening skills (or other deterministic-output targets). See the [cookbook](./docs/skill-improvement-cookbook.md). |
 | **`arena`** | Reproducible pairwise **leaderboard** on the same backbone: runs `conductor` against frozen fixture tasks under multiple configs (model/mode/effort), judges the **delivered diffs** pairwise (3 runs × 5 position-swapped passes), and emits a Bradley-Terry/win-rate ranking — then opens a PR for review (never auto-merges). For answering "did this change actually improve conductor's output across a task suite?" when there's no single scalar to hill-climb. |
 | **`loom`** | Graph-shaped delivery — gate failures loop back, independent work forks and rejoins, the graph rewrites itself under invariants, previewed and edited in the browser before launch. |
+| **`lanes`** | The other execution model: work runs in **external agent processes** (herdr panes, worktrees, any harness) that outlive the session, so an orchestrator can die and re-attach. Append-only JSON store read through DuckDB views; `transition.mjs` refuses a self-report becoming `verified` and refuses `published` without `verified` in history; `reconcile.mjs` recomputes state from the artifacts and reports drift. Where `conductor`/`loom` gate structurally in pure JS, this gates procedurally — prevention plus detection, stated as weaker. |
 | **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over the word budget or dense with long prose), unbalanced/missing XML structural tags, weak frontmatter triggers, and oversized inline flowcharts or reference files. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
 
 ### Agents
@@ -42,6 +43,7 @@ agents for `conductor`, also usable standalone:
 | **`lirbox-code-reviewer`** | Reviews changed code (correctness/security/rules/quality) **and fixes** Critical/High, keeping the build green. |
 | **`lirbox-docs-writer`** | Writes a concise implementation summary into `docs/changes/` from the diff + goal + notes. |
 | **`lirbox-web-verifier`** | Web half of the frontend verification gate: writes Playwright E2E specs for assertable criteria and captures per-viewport screenshot/console evidence for judged ones; engine chain playwright → browser-MCP → OS-script, tooling failure never silently passes. |
+| **`lirbox-herdr-orchestrator`** | Runs a multi-agent session across Herdr panes — scopes work, writes success criteria *before* either lane starts, delegates to implementor and verifier panes, adjudicates their reports, commits and pushes. Never edits code, never verifies with its own hands, never believes a self-report. Pairs with the `lanes` skill. |
 | **`lirbox-mobile-verifier`** | Mobile half of the frontend verification gate: detects RN/Flutter/native, writes Maestro/Appium E2E flows, falls back to raw `simctl`/`adb` evidence capture on simulators/emulators; raw tier is honestly flagged evidence-only. |
 
 ## Install
@@ -72,7 +74,7 @@ which conductor config wins         # arena (pairwise leaderboard over frozen fi
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:arena`, `lirbox:skill-lint`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:arena`, `lirbox:lanes`, `lirbox:skill-lint`).
 
 ## Test locally (no install)
 
