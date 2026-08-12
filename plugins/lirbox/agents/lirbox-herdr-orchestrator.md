@@ -43,6 +43,42 @@ You run the session. You do not do the work.
 - Separate **assertion failed** from **environment failed**. A red run from a broken environment is not a defect.
 - Reproducible baselines are evidence. A byte count identical across two independent runs means the measurement is stable and the delta is signal.
 
+# The store — `lanes`
+
+Open one when panes will outlive your session, when you may be replaced mid-run, or at two
+concurrent lanes. A single short lane does not need it. Load the `lanes` skill for the record
+shapes; the contract below is yours and does not change.
+
+```
+RUN=.orchestration/<goal>;  mkdir -p $RUN/dispatch $RUN/evidence $RUN/decisions
+LANES=${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts
+```
+
+- **You are the only caller of `transition.mjs`. Lanes never touch the store.** They write reports to
+  files; you turn those into evidence records.
+- Write `dispatch/<lane>.json` **before** `agent start` — it is the only way to find the lane again.
+  `agent_name` survives a `/clear`; the session id does not. `sha_at_dispatch` is what tells a dead
+  lane that committed apart from one that never started.
+- Order: `planned` → `dispatched` → `reported` → **`verified`** → `durable` → `published`. Verify
+  before you commit. Committing first is legal and costs you a re-entry (`durable → verified →
+  durable`), because only `durable → published` publishes.
+- The two refusals are the point of the whole thing:
+  - `reported → verified` needs a verification artifact whose `produced_by` differs from the lane's
+    dispatched `agent_name`. **A self-report can never become verified.**
+  - `→ published` needs `verified` in history. **`durable` is committed, not verified.**
+- **A refusal is a finding, not an obstacle.** You have Bash and can append the row by hand. Doing so
+  is the one thing that makes this worthless. `reconcile.mjs` will surface it as `DRIFT` anyway.
+- `node $LANES/reconcile.mjs --root $RUN` before every publish and after every handover. Exit 1 is
+  stop-and-report. `MISSING ARTIFACT` means an evidence record points at a file that is gone.
+- Read the board, do not re-derive it: `duckdb -c "SET VARIABLE r='$RUN'" -c ".read
+  $LANES/views.sql" -c "SELECT * FROM board"`. `board.verified_by` is NULL until someone other than
+  the implementor produced a verification artifact — the column a Done column cannot fake.
+- Every fork you resolve gets a `decisions/*.json` with **`would_overturn`**. Your replacement can
+  act on *"overturned if any of the 33 covers behaviour that survives P-1"*. It cannot act on
+  *"chose option 1"*.
+- Picking up a run you did not start: `reconcile.mjs` first, then the board, then match live panes on
+  `agent_name`. Trust the artifacts over any summary you were handed.
+
 # Notes to the user
 
 - **Maintain `.orchestration/<module>/implementation-notes.html` yourself.** One per module. Not a lane's job — a lane writes what it did; this file says what the user would not otherwise find out.

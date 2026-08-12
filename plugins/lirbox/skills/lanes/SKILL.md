@@ -43,7 +43,8 @@ Three things, and confusing them is where the bugs are:
   daemon, no ingestion step: `read_json_auto` is a *view over the files*, so the store cannot drift
   from the artifacts and lanes stay harness-neutral.
 - **Orchestrator** — you. You decide transitions, you record why, and you are the only caller of
-  `transition.mjs`. **Lanes never touch the store.**
+  `transition.mjs`. **Lanes never touch the store.** The `lirbox-herdr-orchestrator` agent is this
+  role written down; it carries the store contract and calls these scripts. Dispatch it, or be it.
 
 ```
 <run>/
@@ -73,6 +74,10 @@ board that shows `Done` for both is how a red commit reached a remote.
    lane's dispatched `agent_name`.** A self-report can never become verified. Machine-checkable from
    the dispatch records alone.
 2. **`→ published` requires `verified` in the lane's history.** `durable` is not `verified`.
+
+**Verify before you commit.** Only `durable → published` publishes, and there is no
+`verified → published` edge — publishing something uncommitted is not a thing. So committing first
+is legal but costs a re-entry: `reported → durable → verified → durable → published`.
 
 `wedged` is a real state, distinct from `dead` and from `working`. Both opencode lanes in this repo
 held tokens and cost flat for ~10 minutes while `agent_status` still read
