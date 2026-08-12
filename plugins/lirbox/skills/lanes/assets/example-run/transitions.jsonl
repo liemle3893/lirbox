@@ -1,0 +1,29 @@
+{"lane":"merge","from":"proposed","to":"planned","reason":"CRITERIA.md written before the lane starts","at":"2026-08-12T20:35:00+07:00"}
+{"lane":"merge","from":"planned","to":"dispatched","reason":"branch merge-msn-20260812 cut from dev@05456e9","at":"2026-08-12T20:36:15+07:00"}
+{"lane":"merge","from":"dispatched","to":"reported","reason":"merge-report.md","at":"2026-08-12T22:01:00+07:00"}
+{"lane":"merge","from":"reported","to":"durable","reason":"9610e31 — committed with 5 failing tests. Committed is not verified.","at":"2026-08-12T22:01:49+07:00"}
+{"lane":"fix","from":"proposed","to":"planned","reason":"CRITERIA-FIX.md","at":"2026-08-12T22:02:00+07:00"}
+{"lane":"fix","from":"planned","to":"dispatched","reason":"pane wV:pF on merge-msn-20260812@9610e31","at":"2026-08-12T22:05:00+07:00"}
+{"lane":"fix","from":"dispatched","to":"reported","reason":"fix-report.md, three commits","at":"2026-08-12T22:29:08+07:00"}
+{"lane":"fix-verify","from":"proposed","to":"planned","reason":"VERIFIER-BRIEF-FIX.md: gate 2, a pane that is not pF","at":"2026-08-12T22:30:00+07:00"}
+{"lane":"fix-verify","from":"planned","to":"dispatched","reason":"dispatched to a pane other than pF","at":"2026-08-12T22:31:00+07:00"}
+{"lane":"fix-verify","from":"dispatched","to":"reported","reason":"verify-fix.md; found the brief's tip 3361490 stale, actual cd84185","at":"2026-08-12T22:45:00+07:00"}
+{"lane":"fix","from":"reported","to":"verified","reason":"verify-fix.md produced by lane-fix-verify, not lane-fix","at":"2026-08-12T22:46:00+07:00"}
+{"lane":"fix","from":"verified","to":"durable","reason":"cd84185","at":"2026-08-12T22:47:00+07:00"}
+{"lane":"flake","from":"proposed","to":"planned","reason":"CRITERIA-FLAKE.md","at":"2026-08-12T22:48:00+07:00"}
+{"lane":"flake","from":"planned","to":"dispatched","reason":"merge-msn-20260812@cd84185","at":"2026-08-12T22:49:00+07:00"}
+{"lane":"flake","from":"dispatched","to":"reported","reason":"flake-report.md","at":"2026-08-12T22:51:00+07:00"}
+{"lane":"flake","from":"reported","to":"durable","reason":"d041046","at":"2026-08-12T22:51:55+07:00"}
+{"lane":"b13","from":"proposed","to":"planned","reason":"CRITERIA-B13.md","at":"2026-08-12T23:00:00+07:00"}
+{"lane":"b13","from":"planned","to":"dispatched","reason":"collapse-msn@7ab2137","at":"2026-08-12T23:05:00+07:00"}
+{"lane":"b13","from":"dispatched","to":"reported","reason":"b13-report.md","at":"2026-08-12T23:27:00+07:00"}
+{"lane":"b13","from":"reported","to":"durable","reason":"c9bc9f2 then b947fe3","at":"2026-08-12T23:27:30+07:00"}
+{"lane":"debate-advocate","from":"proposed","to":"planned","reason":"QUESTIONS.md","at":"2026-08-13T02:55:00+07:00"}
+{"lane":"debate-advocate","from":"planned","to":"dispatched","reason":"pane wY:p1, worktree debate-advocate, branch debate-advocate@6c01f33","at":"2026-08-13T02:57:34+07:00"}
+{"lane":"debate-advocate","from":"dispatched","to":"reported","reason":"advocate.md, then FINDINGS.md synthesis","at":"2026-08-13T03:14:00+07:00"}
+{"lane":"debate-skeptic","from":"proposed","to":"planned","reason":"QUESTIONS.md","at":"2026-08-13T02:55:00+07:00"}
+{"lane":"debate-skeptic","from":"planned","to":"dispatched","reason":"pane wZ:p1, worktree debate-skeptic, branch debate-skeptic@6c01f33","at":"2026-08-13T02:57:35+07:00"}
+{"lane":"debate-skeptic","from":"dispatched","to":"reported","reason":"skeptic.md","at":"2026-08-13T03:05:00+07:00"}
+{"lane":"debate-researcher","from":"proposed","to":"planned","reason":"QUESTIONS.md","at":"2026-08-13T02:55:00+07:00"}
+{"lane":"debate-researcher","from":"planned","to":"dispatched","reason":"pane w0:p1, worktree debate-researcher, branch debate-researcher@6c01f33","at":"2026-08-13T02:57:36+07:00"}
+{"lane":"debate-researcher","from":"dispatched","to":"reported","reason":"researcher.md","at":"2026-08-13T03:05:00+07:00"}

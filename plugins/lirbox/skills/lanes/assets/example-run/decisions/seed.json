@@ -1,0 +1,30 @@
+[
+  {
+    "fork": "9610e31 is red (5 failing tests). Publish the branch as red-then-fixed, or collapse it?",
+    "options": [
+      "push merge-msn-20260812 as-is: 9610e31 red, then three green fix commits",
+      "collapse 9610e31 + the fix commits into one merge commit whose tree is the green one",
+      "abandon the branch and redo the merge on top of the fixes"
+    ],
+    "chosen": "collapse 9610e31 + the fix commits into one merge commit whose tree is the green one",
+    "reason": "The standing instruction is that a red commit reached a remote once and must not again. Gate 3 in PR-GATE.md. Landed as 9da03db on dev.",
+    "would_overturn": "The collapsed tree differing from the fixed tree at cd84185, or the collapse dropping a commit's authorship. Either means the published history is not the history that was verified.",
+    "at": "2026-08-12T22:55:24+07:00"
+  },
+  {
+    "fork": "xlsx C2 flakes. Cut the row count, or bound the clock?",
+    "options": ["reduce the 30,000 rows", "add an explicit 30_000ms timeout to C2", "mark C2 skipped until streaming is reworked"],
+    "chosen": "add an explicit 30_000ms timeout to C2",
+    "reason": "Row count is the thing under test; cutting it weakens the assertion to get green. One line plus a comment in xlsx.test.ts:189, no production code, writeXlsxStream unchanged. Landed as d041046.",
+    "would_overturn": "A measured C2 duration above 30s on the slowest observed run — then the timeout is the new flake and the sizing was a guess after all.",
+    "at": "2026-08-12T22:51:55+07:00"
+  },
+  {
+    "fork": "B-13 typecheck failure: is hasLazyStub dead code, so restructure the guard, or live, so fix the types only?",
+    "options": ["type-only fix", "restructure the guard", "delete the lazy half as dead"],
+    "chosen": "type-only fix",
+    "reason": "hasLazyStub WAS returning true at runtime — proven by driving the real guard through the real mocked createRoot, not inferred from the committed test, which cannot answer it (arm C: ARM_C_RESTORE_DIFF_EXIT=0, the committed test did not redden). Landed as c9bc9f2 + b947fe3.",
+    "would_overturn": "hasLazyStub returning false against the real guard. Then the lazy half is dead and a type fix would be dressing a corpse.",
+    "at": "2026-08-12T23:26:31+07:00"
+  }
+]

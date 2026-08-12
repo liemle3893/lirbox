@@ -1,0 +1,25 @@
+[
+  { "lane": "merge", "kind": "report", "produced_by": "lane-merge", "path": "/repo/.orchestration/merge-msn/merge-report.md", "at": "2026-08-12T22:01:00+07:00" },
+  { "lane": "merge", "kind": "commit", "produced_by": "lane-merge", "path": "/repo/.orchestration/merge-msn/merge-report.md", "sha": "9610e31", "branch": "merge-msn-20260812", "at": "2026-08-12T22:01:49+07:00",
+    "note": "9610e31 was committed with 5 failing tests. Durable, never verified. This lane is the reason `-> published requires verified` exists." },
+
+  { "lane": "fix", "kind": "report", "produced_by": "lane-fix", "path": "/repo/.orchestration/merge-msn/fix-report.md", "at": "2026-08-12T22:29:08+07:00" },
+  { "lane": "fix", "kind": "commit", "produced_by": "lane-fix", "path": "/repo/.orchestration/merge-msn/fix-report.md", "sha": "cd84185", "branch": "merge-msn-20260812", "at": "2026-08-12T22:29:08+07:00",
+    "note": "Three task commits 31058e2, 9249685, 3361490, then cd84185 for the report." },
+  { "lane": "fix", "kind": "verification", "produced_by": "lane-fix-verify", "path": "/repo/.orchestration/merge-msn/verify-fix.md", "at": "2026-08-12T22:45:00+07:00",
+    "note": "produced_by differs from dispatch.agent_name 'lane-fix'. This is the only lane in the run that can legally reach verified." },
+
+  { "lane": "fix-verify", "kind": "report", "produced_by": "lane-fix-verify", "path": "/repo/.orchestration/merge-msn/verify-fix.md", "at": "2026-08-12T22:45:00+07:00" },
+
+  { "lane": "flake", "kind": "report", "produced_by": "lane-flake", "path": "/repo/.orchestration/merge-msn/flake-report.md", "at": "2026-08-12T22:51:00+07:00" },
+  { "lane": "flake", "kind": "commit", "produced_by": "lane-flake", "path": "/repo/.orchestration/merge-msn/flake-report.md", "sha": "d041046", "branch": "merge-msn-20260812", "at": "2026-08-12T22:51:55+07:00" },
+
+  { "lane": "b13", "kind": "report", "produced_by": "lane-b13", "path": "/repo/.orchestration/merge-msn/b13-report.md", "at": "2026-08-12T23:27:00+07:00" },
+  { "lane": "b13", "kind": "commit", "produced_by": "lane-b13", "path": "/repo/.orchestration/merge-msn/b13-report.md", "sha": "b947fe3", "branch": "collapse-msn", "at": "2026-08-12T23:26:31+07:00",
+    "note": "Two commits: c9bc9f2 (type fix) then b947fe3 (commit the probe so the guard's lazy half can fail again)." },
+
+  { "lane": "debate-advocate", "kind": "report", "produced_by": "debate-advocate", "path": "/repo/.orchestration/skills-pipeline/advocate.md", "at": "2026-08-13T03:05:00+07:00" },
+  { "lane": "debate-advocate", "kind": "report", "produced_by": "debate-advocate", "path": "/repo/.orchestration/skills-pipeline/FINDINGS.md", "at": "2026-08-13T03:14:00+07:00" },
+  { "lane": "debate-skeptic", "kind": "report", "produced_by": "debate-skeptic", "path": "/repo/.orchestration/skills-pipeline/skeptic.md", "at": "2026-08-13T03:05:00+07:00" },
+  { "lane": "debate-researcher", "kind": "report", "produced_by": "debate-researcher", "path": "/repo/.orchestration/skills-pipeline/researcher.md", "at": "2026-08-13T03:05:00+07:00" }
+]
