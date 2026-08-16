@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "Expectation manifest for lanes' frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern). MUST exit 0 or 1.",
+    "",
+    "A check file missing from this manifest FAILS the gate.",
+    "LOCKED (evals/**): improvement loops may never edit this file."
+  ],
+  "checks": {
+    "ledger-never-loses": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "dropping superseded entries from the projection is the whole regression: the ledger silently loses its wrong claims, which teaches nothing and hides the error rate from both the user and the next orchestrator",
+          "env": "NOTES_OVERRIDE",
+          "file": "scripts/notes.mjs",
+          "find": "  const notes = entries.filter((e) => !['lane', 'ack', 'answer'].includes(e.type)).map((e) => ({",
+          "replace": "  const notes = entries.filter((e) => !['lane', 'ack', 'answer'].includes(e.type) && !superseded.has(e.id)).map((e) => ({"
+        },
+        {
+          "why": "accepting a finding with neither a command nor an explicit unproven marker puts an inference into the record in the same register as a measurement — the exact way a wrong fact becomes durable",
+          "env": "NOTES_OVERRIDE",
+          "file": "scripts/notes.mjs",
+          "find": "  if (type === 'finding' && !flags.cmd && !flags.unproven) {",
+          "replace": "  if (false) {"
+        },
+        {
+          "why": "a decision with no would_overturn leaves a successor unable to act: they can do something with 'overturned if X still holds' and nothing at all with 'chose option 1'",
+          "env": "NOTES_OVERRIDE",
+          "file": "scripts/notes.mjs",
+          "find": "  if (type === 'decision' && !flags['would-overturn']) {",
+          "replace": "  if (false) {"
+        },
+        {
+          "why": "a blocked lane with no reason shows a block in the Now table with no question attached, which is indistinguishable from work in progress — the failure that let a lane sit idle for an hour",
+          "env": "NOTES_OVERRIDE",
+          "file": "scripts/notes.mjs",
+          "find": "  if (status === 'blocked' && !flags['blocked-on']) {",
+          "replace": "  if (false) {"
+        },
+        {
+          "why": "letting anything be acked collapses the one distinction the band rests on: a decision is something the orchestrator resolved for you and you may still overturn, and acking is the user's act alone",
+          "env": "NOTES_OVERRIDE",
+          "file": "scripts/notes.mjs",
+          "find": "  if (target.type !== 'decision') die(`${id} is a ${target.type} — only decisions are acked`);",
+          "replace": "  if (false) die('unreachable');"
+        },
+        {
+          "why": "a replacement decision that never reaches decisions/ makes the store and the ledger disagree about what was decided, which is the drift the single-writer rule exists to prevent",
+          "env": "NOTES_OVERRIDE",
+          "file": "scripts/notes.mjs",
+          "find": "  if (entry.type === 'decision') writeStoreDecision(entry);\n  return entry;\n}\n\nfunction cmdAck",
+          "replace": "  return entry;\n}\n\nfunction cmdAck"
+        }
+      ]
+    }
+  }
+}

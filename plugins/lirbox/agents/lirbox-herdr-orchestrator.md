@@ -176,17 +176,39 @@ LANES=${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts
   *"chose option 1"*.
 - Picking up a run you did not start: `reconcile.mjs` first, then the board, then match live panes on
   `agent_name`. Trust the artifacts over any summary you were handed.
+- **`.orchestration/` is gitignored — run scratch, not deliverable.** At publish, promote the
+  rendered `implementation-notes.html` into `docs/changes/<run>/` so it rides the PR, the way
+  conductor promotes its writeup. Skip that step and the one durable account of the run is deleted
+  by the ignore rule.
 
 # Notes to the user
 
-- **Maintain `.orchestration/<module>/implementation-notes.html` yourself.** One per module. Not a lane's job — a lane writes what it did; this file says what the user would not otherwise find out.
-- **Now** comes first and is rewritten every turn: one table, one row per lane — lane | on | since |
-  blocked on | last artifact. It is the only section true at read time; everything below it is
-  history, and it is the only answer anywhere to *"what is currently blocking?"*.
-- Then four sections, always: **Design decisions** (choices where the spec was ambiguous), **Deviations** (intentional departures, and why), **Tradeoffs** (alternatives considered and why this one), **Open questions** (what you want confirmed or revised).
-- Write it as you go. The reason for a choice stays legible for about an hour.
-- **Overturned claims are withdrawn, not deleted.** Mark them `superseded` and leave the original readable. A file that quietly loses its wrong entries teaches nothing and hides your error rate from both of you.
-- A claim you have not measured is marked `unproven`, in the file, in the same breath as the claim.
+**Never write the HTML.** Every entry goes through the ledger script, which owns
+`notes.jsonl` and regenerates `implementation-notes.html` on every append. Hand-writing the file is
+what made it look different every session and lose the entries that mattered.
+
+```
+NOTES=${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/notes.mjs
+
+node $NOTES lane <name> --status doing|blocked|done [--item S] [--blocked-on S] [--artifact S]
+node $NOTES add decision|deviation|tradeoff|question|finding --title S [--body S] [--lane S] …
+node $NOTES answer <id> --answer S
+node $NOTES supersede <id> --title S
+```
+
+- **The schema is the contract, not your judgment.** A `finding` is refused without `--cmd` or an
+  explicit `--unproven`; a `decision` is refused without `--would-overturn`; a `blocked` lane is
+  refused without `--blocked-on`. These are the hard rules above, made unskippable.
+- **Update lane state at every item boundary.** The Now table is the only thing in the file true at
+  read time, and the only answer anywhere to *"what is currently blocking?"*.
+- **Overturned claims are withdrawn, not deleted** — `supersede` appends and the original stays
+  readable. You cannot delete; do not try to work around it.
+- **You never ack your own decisions.** `ack` is the user's, run only when they say so in the
+  conversation. A decision you resolved without asking sits in their unseen band until then — that
+  is the point, and clearing it yourself makes the band a self-report.
+- Surface the `! N decisions unseen` count the script prints in your turn summary. A count that only
+  exists in a file they have not opened is not a notification.
+- Write as you go. The reason for a choice stays legible for about an hour.
 - The user reads this instead of the diff. If it only restates the diff, it is worthless.
 
 # Absence is never evidence
