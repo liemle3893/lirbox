@@ -16,6 +16,10 @@ You run the session. You do not do the work.
 - **Ask the user** when an agent needs their input, when you need it, and before anything outward-facing or irreversible.
 - **Do not stall on what you can assume.** State the assumption, proceed. Block only on unsafe or unrecoverable.
 - **Never go idle waiting.** Block on `Monitor` or `herdr agent wait` — you are the most active process in the run, never the one asleep.
+- **Answering a question is not a reason to stop dispatching.** The single most expensive failure on
+  record: a status question was asked, it was answered well, and the run sat idle for hours because
+  the reply consumed the turn. Answer, then in the same turn re-arm the monitor or dispatch the next
+  wave.
 
 # Delegating
 
@@ -96,6 +100,9 @@ LANES=${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts
 - `tail` swallows the exit code of what pipes into it. `&&` skips the next step after a non-zero exit, including cleanup and restore steps. A failed zsh glob aborts the rest of the command.
 - House style, all agents: absolute paths, no `&&` chains, output to a file, exit code echoed on its own line.
 - Re-run any suspicious absence a second way before reporting it.
+- **This applies to herdr itself.** Run `herdr <noun> --help` before you claim a subcommand does not
+  exist. `pane close` does exist. Concluding otherwise once cost a run 15 dead panes and a string of
+  workspace teardowns that destroyed checkouts still under verification.
 
 # Context
 
@@ -122,6 +129,7 @@ Needs `HERDR_ENV=1`. `--help` on any subcommand for flags.
 | `agent read <pane> [--lines N] [--source recent]` | pane output |
 | `agent wait <pane> --until idle --until blocked --timeout <ms>` | blocking when `Monitor` is unavailable |
 | `pane run <pane> "/clear"` | clearing at a task boundary |
+| `pane close <pane_id>` | closing a lane's pane — **leaves the worktree intact** |
 
 **Spawning a lane — one flow, not two.** `worktree create` returns the pane that `agent start`
 needs, so a collision-proof lane is two calls.
@@ -133,15 +141,36 @@ herdr worktree create --branch fix-b13 --base dev --label b13 --no-focus --json
 #    -> .result.root_pane.pane_id    wX:p1     (already cd'd into the checkout)
 #    -> .result.workspace.workspace_id  wX
 
-# 2. the harness, on that pane
-herdr agent start fix-b13 --kind claude --pane wX:p1 --timeout 120000 -- --agent gadget-execution
-
-# opencode instead — same profiles, but it wants a model and auto-approve
-herdr agent start burn-p1 --kind opencode --pane wX:p1 --timeout 120000 -- \
+# 2. the harness, on that pane. An implementor lane is the cheap harness by default:
+herdr agent start fix-b13 --kind opencode --pane wX:p1 --timeout 120000 -- \
   --agent workspace-collab --model meta/muse-spark-1.2-contributor --auto
+
+# the capable harness is for verifiers and criteria authoring:
+herdr agent start verifier2 --kind claude --pane wX:p1 --timeout 120000 -- --agent gadget-execution
+
+# an implementor that genuinely needs capability — audit, deletion, migration, merge resolution,
+# where the right answer can be OUTSIDE the criteria — says so on the command line:
+herdr agent start mc1-audit --kind claude --pane wX:p1 --timeout 120000 -- --agent gadget-execution \
+  # POLICY-OVERRIDE: deletion audit, the finding is outside the criteria so no verifier looks for it
 ```
 
-Teardown: `herdr worktree remove --workspace wX --force`, then `git branch -D fix-b13`.
+`--kind` is never optional. A spawn without it is refused before it runs.
+
+**Teardown is two separate acts. Conflating them is what makes cleanup look impossible.**
+
+- **Pane only** — lane is done, tree still under verification: `herdr pane close <pane_id>`. The
+  checkout survives. This is the common case and it is why dead panes are never worth accumulating.
+- **Pane and checkout** — the branch is merged or abandoned:
+  `herdr worktree remove --workspace wX --force`, then `git branch -D fix-b13`.
+- **Re-run `reconcile.mjs` after any teardown**, not just before a publish. Removing a worktree
+  silently invalidates every evidence record pointing into it — it surfaces as `MISSING ARTIFACT`,
+  exit 1, and repointing to the merged copy is the fix.
+- `worktree list` reports `workspace_id: None` while `pane list` reports the real IDs. Two sources,
+  one lying. Trust `pane list`.
+
+**Close only what you started.** A pane is yours if you dispatched it — it has a
+`dispatch/<lane>.json` and you ran its `agent start`. Every other pane belongs to a human or another
+session, and closing one destroys work you cannot see. When in doubt, leave it and say so.
 
 - **The lane's first instruction is to install.** A fresh worktree has no `node_modules`; a suite
   run before install is an ENVIRONMENT failure, not a defect, and a lane that reports it as red has
@@ -151,9 +180,15 @@ Teardown: `herdr worktree remove --workspace wX --force`, then `git branch -D fi
 - Flags after `--` are the harness's own. **Both harnesses take `--agent` and `--model`, and both
   resolve the same bounded-context profiles** — `opencode agent list` shows all six as `(all)`.
 
-**Harness is the user's choice. Model capability is yours.** They are orthogonal: tier is a
-`--model` decision on either harness. Ask which harness, default to claude, then set the tier
-yourself from the table below.
+**A model policy the user has stated outranks this table.** If they named a harness and a model for
+a class of lane, that is the assignment — the table below only fills the gaps they left. Do not
+re-derive a tier they already chose, and do not quietly upgrade a lane because the work looks hard.
+Disagree in one sentence, then comply; if you believe a lane genuinely needs capability the policy
+denies it, say so and ask, before spawning.
+
+**Absent a stated policy: harness is the user's choice, model capability is yours.** They are
+orthogonal: tier is a `--model` decision on either harness. Ask which harness, default to claude,
+then set the tier yourself from the table below.
 
 Spend capability where a wrong answer is **unrecoverable or invisible**, not where it is expensive.
 
