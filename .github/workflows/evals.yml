@@ -33,6 +33,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # lane-config's scripts are zsh on purpose — they parse command lines with
+      # ${(z)} and ${(f)} rather than shelling out to grep, which on the target
+      # machine is a shell function in some contexts and ugrep in others and
+      # returns EMPTY instead of erroring. ubuntu-latest ships no zsh, so its
+      # checks fail at the first subcommand.
+      - name: Install zsh (lane-config scripts)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
       - name: Regression gate
         run: node scripts/evals-all.mjs --fast
 

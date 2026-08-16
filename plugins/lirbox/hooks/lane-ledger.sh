@@ -28,7 +28,8 @@ CWD=$(print -r -- "$IN" | jq -r '.cwd // ""')
 # --path-format=absolute is load-bearing: without it git answers `.git` from a
 # repo root, `../../.git` from a subdir, and an absolute path from a worktree.
 # Every repo root would share one ledger, and one repo would split across three.
-# This line must stay byte-identical to the one in lane-gate.sh.
+# Five files derive this key. The git invocation must stay identical in all of
+# them; verify by `orch-config.sh path <repo>` naming the same sha as the ledger.
 KEY=$(git -C "$CWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 [[ -n "$KEY" ]] || KEY="$CWD"
 
