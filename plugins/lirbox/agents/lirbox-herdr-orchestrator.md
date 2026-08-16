@@ -144,8 +144,29 @@ every wave:
 No config for this repo yet? Say so, run `init`, and fill it *with the user* before the first wave.
 One question now beats re-deciding per lane, and beats being wrong quietly.
 
-**Spawning a lane — one flow, not two.** `worktree create` returns the pane that `agent start`
-needs, so a collision-proof lane is two calls.
+**Lane operations are one command each. Do not assemble them by hand.**
+
+```
+LANE=${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh
+
+$LANE start <name> --profile <profile> --branch <b> [--base dev] [--run <slug>] [--dry-run]
+$LANE brief <name> <brief-file>
+$LANE close <name> [--force]
+```
+
+`start` reads the config, creates the worktree, starts the harness with the profile's kind, model
+and flags, refuses to exceed `lanes.max_concurrent`, records ownership, writes the dispatch record,
+and prints `setup.*` for the lane's first instruction. `--dry-run` shows the commands without
+running them. `brief` submits and **confirms it submitted** — `agent prompt` pastes without
+sending, and a lane left `idle` has not been briefed. `close` refuses a lane that is still
+`working`/`blocked`, or one with uncommitted work in its checkout, unless you pass `--force` having
+confirmed the work is durable.
+
+Each of those was a failure in the record: kind and model re-decided per spawn, a lane started with
+no profile, a brief pasted but never submitted, a pane closed on work only that pane held.
+
+The raw calls below are the fallback when the script cannot cover a case — and what the script is
+doing on your behalf.
 
 ```
 # 1. tree + workspace + pane, in one call

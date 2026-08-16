@@ -64,11 +64,16 @@ deny() { print -u2 -r -- "DENIED: $1"; exit 2 }
 profile has no invariants and no ubiquitous language, and will invent both."
 
 if [[ ! -r "$CFG" ]]; then
-  # Nothing declared for this project yet. Both universal rules passed, so allow
-  # — but say where the answer belongs, so the next spawn need not be guessed.
-  print -u2 -r -- "note: no orchestration config for this repo, so harness/model are unchecked.
-Declare them once at $CFG (\`orch-config.sh init\`) and every later lane is decided, not judged."
-  exit 0
+  # An earlier version allowed this and printed a note. Measured: stderr from a
+  # hook that exits 0 never reaches the model, so that note was decoration and
+  # nobody ever ran init. Only a deny is heard, so the first spawn is the deny.
+  deny "this project has no orchestration config, so no lane can be decided rather than guessed.
+
+  ${CLAUDE_PLUGIN_ROOT:-<plugin>}/scripts/orch-config.sh init
+
+Then fill it WITH THE USER — profiles they want, and which harness and model each
+one runs on — before starting any lane. One conversation now replaces a decision
+per lane, and a wrong guess here is invisible until it has cost a wave."
 fi
 
 WANT=$(jq -r --arg p "$PROFILE" '.profiles[$p] // empty | "\(.kind)\t\(.model // "")"' "$CFG" 2>/dev/null)
