@@ -37,6 +37,11 @@ jobs/
 # Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
 implementation-notes/
 
+# Per-run orchestration store + run ledger written by the herdr orchestrator
+# (dispatch/, evidence/, decisions/, progress/, notes.jsonl, implementation-notes.html).
+# Run scratch — the finished ledger is PROMOTED into docs/changes/<run>/ at publish, like conductor's.
+.orchestration/
+
 # Git worktrees created by conductor/prospector/whetstone
 .worktrees/
 
