@@ -22,8 +22,12 @@ if (!/profiles:\s*\{\}/.test(initBlock)) {
   throw new Error('orch-config.sh init: must write an EMPTY profiles object, never invented ones');
 }
 
-// Effort is one intent with two spellings; the translation must live in the
-// script, never in the agent's head.
-if (!/--variant/.test(lane) || !/--effort/.test(lane)) {
-  throw new Error('orch-lane.sh: must emit --effort (claude) and --variant (opencode) for effort');
+// Effort is a claude flag. The interactive opencode entry herdr starts has none
+// (--variant is `opencode run` only) AND ignores unknown flags without error, so
+// emitting one would do nothing while looking like it worked.
+if (!/--effort/.test(lane)) throw new Error('orch-lane.sh: must emit --effort for a claude lane');
+const emitsVariant = /EFLAG="--variant"|\+=\(--variant/.test(lane);
+if (emitsVariant) throw new Error('orch-lane.sh: must NOT emit --variant — the interactive opencode entry ignores it silently');
+if (!/claude/.test(cfg) || !/effort is not settable on an opencode lane/.test(cfg)) {
+  throw new Error('orch-config.sh: set-profile must refuse effort on a non-claude harness');
 }

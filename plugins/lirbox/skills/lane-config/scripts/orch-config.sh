@@ -8,7 +8,7 @@
 #   orch-config.sh detect   [repo]              JSON of what can be measured here
 #   orch-config.sh init     [repo]              write a skeleton (NO invented profiles)
 #   orch-config.sh validate [repo]              exit 1 with reasons if unusable
-#   orch-config.sh set-profile <name> --kind K [--model M] [--flags "a b"] [repo]
+#   orch-config.sh set-profile <name> --kind K --model M [--effort E] [--flags "a b"] [repo]
 #   orch-config.sh set-lanes [--max N] [--timeout MS] [--context N] [repo]
 #   orch-config.sh set-setup [--install C] [--build C] [--test C] [--baseline S] [repo]
 #
@@ -85,7 +85,8 @@ detect)
              test:(if $t=="" then null else $t end)},
       cpus:$cpu, suggested_max_concurrent:(($cpu/2)|floor),
       profiles_discovered:$prof, opencode_bin:(if $oc=="" then null else $oc end),
-      effort_flag:{claude:"--effort", opencode:"--variant"},
+      effort_flag:{claude:"--effort", opencode:null},
+      effort_note:"the interactive opencode entry has no effort flag: --variant belongs to opencode run only, and unknown flags are ignored silently",
       note:"profiles and setup.baseline are decisions, not measurements — ask the user"}' ;;
 
 init)
@@ -116,6 +117,8 @@ validate)
   [[ -z "$bad" ]] || problems+=("profile(s) with missing/unknown kind (want claude|opencode): $bad")
   bad=$(jq -r '.profiles | to_entries[] | select((.value.model // "") == "") | .key' "$CFG")
   [[ -z "$bad" ]] || problems+=("profile(s) with no model: $bad — an unnamed model is the harness default, not a decision")
+  bad=$(jq -r '.profiles | to_entries[] | select((.value.effort // "") != "" and .value.kind != "claude") | .key' "$CFG")
+  [[ -z "$bad" ]] || problems+=("profile(s) declaring effort on a non-claude harness: $bad — the interactive opencode entry has no effort flag, so it would be silently ignored")
   local dp; dp=$(jq -r '.default_profile // ""' "$CFG")
   if [[ -n "$dp" ]]; then
     jq -e --arg p "$dp" '.profiles[$p]' "$CFG" >/dev/null 2>&1 || problems+=("default_profile '$dp' is not a declared profile")
@@ -144,6 +147,17 @@ set-profile)
   done
   [[ "$KIND" == (claude|opencode) ]] || die "set-profile needs --kind claude|opencode (got '${KIND:-none}')"
   [[ -n "$MODEL" ]] || die "set-profile needs --model. An unnamed model is the harness default, not a decision."
+  # Reasoning effort is a claude flag. opencode's INTERACTIVE entry — the one
+  # herdr starts — has no equivalent: --variant exists only on `opencode run`,
+  # and the tui silently ignores unknown flags. Storing effort for an opencode
+  # profile would emit a flag that does nothing and report success.
+  if [[ -n "$EFFORT" ]]; then
+    [[ "$KIND" == claude ]] || die "effort is not settable on an opencode lane.
+  --variant exists on \`opencode run\` but not on the interactive entry herdr starts,
+  and unknown flags are ignored without error. Leave it unset rather than store
+  something that cannot take effect."
+    [[ "$EFFORT" == (low|medium|high|xhigh|max) ]] || die "unknown effort '$EFFORT' (want: low medium high xhigh max)"
+  fi
   local fj; fj=$(print -r -- "$FLAGS" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s . 2>/dev/null || print -r -- '[]')
   write "$(jq --arg n "$NAME" --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" --argjson f "$fj" \
     '.profiles[$n] = ({kind:$k, model:$m}

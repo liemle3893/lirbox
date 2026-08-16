@@ -46,14 +46,14 @@ Ask these together, not one per turn. Offer the recommendation; take the answer.
   and exact model. Recommend capable for verifiers, criteria authoring and adjudication; cheap
   otherwise — spend capability where a wrong answer is unrecoverable or invisible, not where it
   is expensive.
-- **Effort per profile**, if not the harness default. Store the intent (`high`, `max`, `low`),
-  never the flag: `orch-lane.sh start` spells it `--effort` on claude, `--variant` on opencode.
+- **Effort per profile — claude only** (`low medium high xhigh max`). The opencode entry herdr
+  starts has no effort flag and ignores unknown ones silently, so `set-profile` refuses that
+  combination rather than store what cannot take effect.
 - **Default profile** for a lane that names none.
 - **Lane cap** — `detect` suggests cpus/2. Confirm or override.
-- **Suite baseline** — exact pass/fail/skip counts a green run gives on the base branch. The one
-  thing `detect` cannot supply and the one a lane most needs; without it a lane cannot tell its
-  own red from an inherited one. If the user does not know it, say the config is incomplete and
-  offer to have a lane measure it.
+- **Suite baseline** — exact pass/fail/skip counts a green run gives on the base branch. `detect`
+  cannot supply it and a lane most needs it: without it a lane cannot tell its own red from an
+  inherited one. If the user does not know, say the config is incomplete and offer to measure it.
 </questions>
 
 <reconfigure>

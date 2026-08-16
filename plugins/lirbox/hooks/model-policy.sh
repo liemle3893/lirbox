@@ -46,9 +46,8 @@ for (( i = s; i <= $#TOK; i++ )); do
     --kind=*)   KIND="${TOK[i]#--kind=}" ;;
     --model)    MODEL="${TOK[i+1]}" ;;
     --model=*)  MODEL="${TOK[i]#--model=}" ;;
-    --effort|--variant)   EFFORT="${TOK[i+1]}" ;;
+    --effort)   EFFORT="${TOK[i+1]}" ;;
     --effort=*) EFFORT="${TOK[i]#--effort=}" ;;
-    --variant=*) EFFORT="${TOK[i]#--variant=}" ;;
     --agent)    PROFILE="${TOK[i+1]}" ;;
     --agent=*)  PROFILE="${TOK[i]#--agent=}" ;;
   esac
@@ -102,12 +101,12 @@ if [[ -n "$WANT_MODEL" && -z "$MODEL" ]]; then
 Pass it explicitly — an unnamed model is the harness default, which is not a decision."
 fi
 
-# Reasoning effort is one concept with two spellings: --effort on claude,
-# --variant on opencode. The config stores the intent; either spelling is
-# accepted here, and orch-lane.sh start emits the right one.
+# Reasoning effort is a claude flag. opencode's interactive entry has none
+# (--variant is `opencode run` only) and ignores unknown flags silently, so a
+# profile may only declare effort on claude — enforced at write time too.
 if [[ -n "$WANT_EFFORT" ]]; then
   [[ -n "$EFFORT" ]] || deny "profile '$PROFILE' is declared at effort '$WANT_EFFORT'; this spawn names none.
-Use ${CLAUDE_PLUGIN_ROOT:-<plugin>}/scripts/orch-lane.sh start, which emits the right flag for the harness."
+Use ${CLAUDE_PLUGIN_ROOT:-<plugin>}/scripts/orch-lane.sh start, which emits it for you."
   [[ "$EFFORT" == "$WANT_EFFORT" ]] || deny "profile '$PROFILE' is declared at effort '$WANT_EFFORT', but this spawn says '$EFFORT'."
 fi
 

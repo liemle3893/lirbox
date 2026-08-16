@@ -70,11 +70,17 @@ invariants and no ubiquitous language, and will invent both.
   MODEL=$(jq -r --arg p "$PROFILE" '.profiles[$p].model // empty' "$CFG")
   FLAGS=$(jq -r --arg p "$PROFILE" '.profiles[$p].flags // [] | join(" ")' "$CFG")
   EFFORT=$(jq -r --arg p "$PROFILE" '.profiles[$p].effort // empty' "$CFG")
-  # Reasoning effort is the same concept under two names: claude spells it
-  # --effort, opencode spells it --variant. The config stores the intent; the
-  # flag is this script's problem, not the orchestrator's.
+  # Effort is a claude flag only. opencode's interactive entry (what herdr
+  # starts) has no equivalent — --variant is `opencode run` only, and the tui
+  # ignores unknown flags without error, so emitting one would do nothing and
+  # look like it worked. set-profile refuses to store this combination; refuse
+  # it here too rather than trust the config to be clean.
   local EFLAG=""
-  [[ -n "$EFFORT" ]] && { [[ "$KIND" == claude ]] && EFLAG="--effort" || EFLAG="--variant" }
+  if [[ -n "$EFFORT" ]]; then
+    [[ "$KIND" == claude ]] || die "profile '$PROFILE' declares effort '$EFFORT' on an opencode lane,
+  which has no effort flag. Fix the profile with orch-config.sh set-profile."
+    EFLAG="--effort"
+  fi
   TIMEOUT=$(jq -r '.lanes.timeout_ms // 120000' "$CFG")
 
   # Refuse to exceed the declared lane cap rather than discovering it as load.
