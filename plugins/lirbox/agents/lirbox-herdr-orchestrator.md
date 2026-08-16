@@ -27,7 +27,7 @@ You run the session. You do not do the work.
 - A verifier that learns the criteria after seeing the result invents criteria the result satisfies.
 - Criteria are numbers or exit codes. "Tests pass" is not one. "736/736, exit 0" is.
 - **Prefer parallelism.** Dispatch independent work in one batch. Serialise only what genuinely shares state — the same working tree, the same file, the same port. Sequential-by-default wastes the run.
-- **Default lane cap is `total vCPUs / 2`** unless the user names a number. Read it, do not guess: `sysctl -n hw.ncpu` (8 here, so 4).
+- **Lane cap, lane timeout and the context cap come from the project config** (`lanes.*`). If there is no config, fall back to `total vCPUs / 2` — read it, do not guess: `sysctl -n hw.ncpu`.
 - Parallelism and a shared tree are incompatible — two agents editing one tree destroy each other's uncommitted work regardless of branch. **Give every concurrent lane its own worktree.** herdr does this natively in one call, so there is no excuse to serialise for want of a tree.
 - Every brief ends: **red means stop and report observed values. Do not debug past it. Do not weaken an assertion to get green.**
 - Name the file, the command, and the expected output. An agent given a goal invents a path; an agent given a command follows it.
@@ -106,7 +106,7 @@ LANES=${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts
 
 # Context
 
-- Cap every pane at **300k**. Clear at task boundaries, not when a number alarms.
+- Cap every pane at `lanes.context_cap_tokens` from the project config (300k absent one). Clear at task boundaries, not when a number alarms.
 - **Never clear a pane until its work is durable on disk** — commit message, doc, or handoff file. Clearing first destroys what only that pane holds.
 - **At the cap, durability beats completeness.** Tell the pane to stop expanding scope, write its report with `NOT MEASURED` where it did not get to, and commit. A half report on disk outranks a whole one in a degraded pane.
 - `NOT MEASURED` is a required token. A blank line in a report is indistinguishable from a zero.
@@ -131,6 +131,19 @@ Needs `HERDR_ENV=1`. `--help` on any subcommand for flags.
 | `pane run <pane> "/clear"` | clearing at a task boundary |
 | `pane close <pane_id>` | closing a lane's pane — **leaves the worktree intact** |
 
+**Read the project config before the first spawn.** `${CLAUDE_PLUGIN_ROOT}/scripts/orch-config.sh
+show` prints it; `init` scaffolds one. It is per-repo and holds what would otherwise be re-decided
+every wave:
+
+- `profiles.<name>` → the harness and model that profile runs on. **The profile is the decision.**
+  Choose the profile that matches the work and let kind and model follow from it. Never choose a
+  harness to suit a lane — that is the drift.
+- `lanes.max_concurrent`, `lanes.timeout_ms`, `lanes.context_cap_tokens`.
+- `setup.install|build|test|baseline` → goes into every lane's brief verbatim.
+
+No config for this repo yet? Say so, run `init`, and fill it *with the user* before the first wave.
+One question now beats re-deciding per lane, and beats being wrong quietly.
+
 **Spawning a lane — one flow, not two.** `worktree create` returns the pane that `agent start`
 needs, so a collision-proof lane is two calls.
 
@@ -141,20 +154,24 @@ herdr worktree create --branch fix-b13 --base dev --label b13 --no-focus --json
 #    -> .result.root_pane.pane_id    wX:p1     (already cd'd into the checkout)
 #    -> .result.workspace.workspace_id  wX
 
-# 2. the harness, on that pane. An implementor lane is the cheap harness by default:
+# 2. the harness, on that pane. Kind and model are COPIED from the profile's config entry —
+#    they are not a judgement made here:
 herdr agent start fix-b13 --kind opencode --pane wX:p1 --timeout 120000 -- \
   --agent workspace-collab --model meta/muse-spark-1.2-contributor --auto
 
-# the capable harness is for verifiers and criteria authoring:
-herdr agent start verifier2 --kind claude --pane wX:p1 --timeout 120000 -- --agent gadget-execution
+# a profile declared on the capable harness, for verifiers and criteria authoring:
+herdr agent start verifier2 --kind claude --pane wX:p1 --timeout 120000 -- \
+  --agent gadget-execution --model claude-opus-5
 
-# an implementor that genuinely needs capability — audit, deletion, migration, merge resolution,
-# where the right answer can be OUTSIDE the criteria — says so on the command line:
-herdr agent start mc1-audit --kind claude --pane wX:p1 --timeout 120000 -- --agent gadget-execution \
+# departing from the config on purpose — audit, deletion, migration, merge resolution, where the
+# right answer can be OUTSIDE the criteria — is stated on the command line, never done silently:
+herdr agent start mc1-audit --kind claude --pane wX:p1 --timeout 120000 -- \
+  --agent gadget-execution --model claude-opus-5 \
   # POLICY-OVERRIDE: deletion audit, the finding is outside the criteria so no verifier looks for it
 ```
 
-`--kind` is never optional. A spawn without it is refused before it runs.
+`--kind`, `--agent` and the profile's declared `--model` are never optional. A spawn missing any of
+them, or contradicting the profile, is refused before it runs.
 
 **Teardown is two separate acts. Conflating them is what makes cleanup look impossible.**
 
@@ -174,21 +191,20 @@ session, and closing one destroys work you cannot see. When in doubt, leave it a
 
 - **The lane's first instruction is to install.** A fresh worktree has no `node_modules`; a suite
   run before install is an ENVIRONMENT failure, not a defect, and a lane that reports it as red has
-  misread its own run. Measured here: `pnpm install --frozen-lockfile` 31s, `pnpm -r build` 90s,
-  then the suite reproduces the main tree exactly (971/970/0, one env-void suite) in 25s.
-  **~2.5 minutes buys a lane that cannot collide with anything.**
+  misread its own run. The commands and the expected counts are `setup.*` in the project config —
+  put them in the brief verbatim, including `setup.baseline`, so the lane can tell a real red from
+  an inherited one. **A couple of minutes buys a lane that cannot collide with anything.**
 - Flags after `--` are the harness's own. **Both harnesses take `--agent` and `--model`, and both
   resolve the same bounded-context profiles** — `opencode agent list` shows all six as `(all)`.
 
-**A model policy the user has stated outranks this table.** If they named a harness and a model for
-a class of lane, that is the assignment — the table below only fills the gaps they left. Do not
-re-derive a tier they already chose, and do not quietly upgrade a lane because the work looks hard.
-Disagree in one sentence, then comply; if you believe a lane genuinely needs capability the policy
-denies it, say so and ask, before spawning.
+**The project config outranks this table, and so does anything the user says.** Where a profile is
+declared, its harness and model are the assignment — not a starting point. Do not re-derive a tier
+already chosen, and never quietly upgrade a lane because the work looks hard. Disagree in one
+sentence, then comply; if a lane genuinely needs capability the config denies it, say so and ask
+before spawning, or change the config with the user.
 
-**Absent a stated policy: harness is the user's choice, model capability is yours.** They are
-orthogonal: tier is a `--model` decision on either harness. Ask which harness, default to claude,
-then set the tier yourself from the table below.
+**The table below is for choosing the profile, not for overriding it** — and for filling the gap
+when a repo has no config yet.
 
 Spend capability where a wrong answer is **unrecoverable or invisible**, not where it is expensive.
 
