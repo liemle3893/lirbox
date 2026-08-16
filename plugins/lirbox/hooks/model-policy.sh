@@ -39,13 +39,16 @@ done
 (( s )) || exit 0
 
 LANE="${TOK[s+3]}"
-local KIND="" MODEL="" PROFILE=""
+local KIND="" MODEL="" PROFILE="" EFFORT=""
 for (( i = s; i <= $#TOK; i++ )); do
   case "${TOK[i]}" in
     --kind)     KIND="${TOK[i+1]}" ;;
     --kind=*)   KIND="${TOK[i]#--kind=}" ;;
     --model)    MODEL="${TOK[i+1]}" ;;
     --model=*)  MODEL="${TOK[i]#--model=}" ;;
+    --effort|--variant)   EFFORT="${TOK[i+1]}" ;;
+    --effort=*) EFFORT="${TOK[i]#--effort=}" ;;
+    --variant=*) EFFORT="${TOK[i]#--variant=}" ;;
     --agent)    PROFILE="${TOK[i+1]}" ;;
     --agent=*)  PROFILE="${TOK[i]#--agent=}" ;;
   esac
@@ -69,14 +72,14 @@ if [[ ! -r "$CFG" ]]; then
   # nobody ever ran init. Only a deny is heard, so the first spawn is the deny.
   deny "this project has no orchestration config, so no lane can be decided rather than guessed.
 
-  ${CLAUDE_PLUGIN_ROOT:-<plugin>}/scripts/orch-config.sh init
+  ${CLAUDE_PLUGIN_ROOT:-<plugin>}/skills/lane-config/scripts/orch-config.sh init
 
 Then fill it WITH THE USER — profiles they want, and which harness and model each
 one runs on — before starting any lane. One conversation now replaces a decision
 per lane, and a wrong guess here is invisible until it has cost a wave."
 fi
 
-WANT=$(jq -r --arg p "$PROFILE" '.profiles[$p] // empty | "\(.kind)\t\(.model // "")"' "$CFG" 2>/dev/null)
+WANT=$(jq -r --arg p "$PROFILE" '.profiles[$p] // empty | "\(.kind)\t\(.model // "")\t\(.effort // "")"' "$CFG" 2>/dev/null)
 if [[ -z "$WANT" ]]; then
   KNOWN=$(jq -r '.profiles | keys | join(", ")' "$CFG" 2>/dev/null)
   deny "profile '$PROFILE' is not declared for this project.
@@ -84,8 +87,9 @@ Declared: $KNOWN
 Add it to $CFG, or use one that is there. Do not pick a harness to suit the lane."
 fi
 
-WANT_KIND="${WANT%%$'\t'*}"
-WANT_MODEL="${WANT#*$'\t'}"
+WANT_KIND=$(print -r -- "$WANT" | cut -f1)
+WANT_MODEL=$(print -r -- "$WANT" | cut -f2)
+WANT_EFFORT=$(print -r -- "$WANT" | cut -f3)
 
 [[ "$KIND" == "$WANT_KIND" ]] || deny "profile '$PROFILE' is declared --kind $WANT_KIND, but this spawn says --kind $KIND.
 Change the command, or change the profile in $CFG. Not both, and not neither."
@@ -96,6 +100,15 @@ fi
 if [[ -n "$WANT_MODEL" && -z "$MODEL" ]]; then
   deny "profile '$PROFILE' is declared --model $WANT_MODEL; this spawn names no model.
 Pass it explicitly — an unnamed model is the harness default, which is not a decision."
+fi
+
+# Reasoning effort is one concept with two spellings: --effort on claude,
+# --variant on opencode. The config stores the intent; either spelling is
+# accepted here, and orch-lane.sh start emits the right one.
+if [[ -n "$WANT_EFFORT" ]]; then
+  [[ -n "$EFFORT" ]] || deny "profile '$PROFILE' is declared at effort '$WANT_EFFORT'; this spawn names none.
+Use ${CLAUDE_PLUGIN_ROOT:-<plugin>}/scripts/orch-lane.sh start, which emits the right flag for the harness."
+  [[ "$EFFORT" == "$WANT_EFFORT" ]] || deny "profile '$PROFILE' is declared at effort '$WANT_EFFORT', but this spawn says '$EFFORT'."
 fi
 
 exit 0

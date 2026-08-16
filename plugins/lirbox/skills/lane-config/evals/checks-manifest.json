@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Expectation manifest for lane-config's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern). MUST exit 0 or 1.",
+    "",
+    "A check file missing from this manifest FAILS the gate.",
+    "LOCKED (evals/**): improvement loops may never edit this file."
+  ],
+  "checks": {
+    "config-refuses-unusable": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "shipping a default profile from init is the whole regression: the orchestrator gets a harness assignment nobody chose, and every later spawn validates against a guess",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "    profiles: {},",
+          "replace": "    profiles: { \"workspace-collab\": { \"kind\": \"opencode\", \"model\": \"some/model\" } },"
+        },
+        {
+          "why": "blessing a config with zero profiles lets a run start with nothing declared, so every lane falls back to whatever the spawn command happened to say",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "  (( n > 0 )) || problems+=(\"no profiles declared — every spawn will be denied\")",
+          "replace": "  true"
+        },
+        {
+          "why": "accepting a profile with no model means the harness default silently becomes the decision — the drift that started this work",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "  [[ -n \"$MODEL\" ]] || die \"set-profile needs --model. An unnamed model is the harness default, not a decision.\"",
+          "replace": "  true"
+        },
+        {
+          "why": "an empty setup.baseline passing validate leaves every lane unable to distinguish its own red from an inherited one, which cost the 2026-08 run several cycles",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "  [[ \"$(jq -r '.setup.baseline // \"\"' \"$CFG\")\" != \"\" ]] || problems+=(\"setup.baseline is empty — a lane cannot tell a real red from an inherited one\")",
+          "replace": "  true"
+        }
+      ]
+    }
+  }
+}

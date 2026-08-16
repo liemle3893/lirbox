@@ -55,20 +55,26 @@ start)
     esac
   done
   [[ -r "$CFG" ]] || die "no config for this repo.
-  Run: ${0:h}/orch-config.sh init
+  Run: ${0:h}/../skills/lane-config/scripts/orch-config.sh init
   Then fill it with the user before starting any lane."
   [[ -n "$PROFILE" ]] || die "start needs --profile. A lane without a bounded-context profile has no
 invariants and no ubiquitous language, and will invent both.
   declared: $(jq -r '.profiles | keys | join(", ")' "$CFG")"
   [[ -n "$BRANCH" ]] || BRANCH="$NAME"
 
-  local KIND MODEL FLAGS TIMEOUT
+  local KIND MODEL FLAGS TIMEOUT EFFORT
   KIND=$(jq -r --arg p "$PROFILE" '.profiles[$p].kind // empty' "$CFG")
   [[ -n "$KIND" ]] || die "profile '$PROFILE' is not declared for this project.
   declared: $(jq -r '.profiles | keys | join(", ")' "$CFG")
   Add it to $CFG deliberately; do not pick a harness to suit the lane."
   MODEL=$(jq -r --arg p "$PROFILE" '.profiles[$p].model // empty' "$CFG")
   FLAGS=$(jq -r --arg p "$PROFILE" '.profiles[$p].flags // [] | join(" ")' "$CFG")
+  EFFORT=$(jq -r --arg p "$PROFILE" '.profiles[$p].effort // empty' "$CFG")
+  # Reasoning effort is the same concept under two names: claude spells it
+  # --effort, opencode spells it --variant. The config stores the intent; the
+  # flag is this script's problem, not the orchestrator's.
+  local EFLAG=""
+  [[ -n "$EFFORT" ]] && { [[ "$KIND" == claude ]] && EFLAG="--effort" || EFLAG="--variant" }
   TIMEOUT=$(jq -r '.lanes.timeout_ms // 120000' "$CFG")
 
   # Refuse to exceed the declared lane cap rather than discovering it as load.
@@ -88,6 +94,7 @@ invariants and no ubiquitous language, and will invent both.
     local -a DA
     DA=(agent start "$NAME" --kind "$KIND" --pane '<pane>' --timeout "$TIMEOUT" -- --agent "$PROFILE")
     [[ -n "$MODEL" ]] && DA+=(--model "$MODEL")
+    [[ -n "$EFLAG" ]] && DA+=($EFLAG "$EFFORT")
     [[ -n "$FLAGS" ]] && DA+=(${=FLAGS})
     print -r -- "herdr worktree create --branch $BRANCH --base $BASE --label $NAME --no-focus --json"
     print -r -- "herdr $DA"
@@ -105,6 +112,7 @@ invariants and no ubiquitous language, and will invent both.
   local -a ARGS
   ARGS=(agent start "$NAME" --kind "$KIND" --pane "$PANE" --timeout "$TIMEOUT" -- --agent "$PROFILE")
   [[ -n "$MODEL" ]] && ARGS+=(--model "$MODEL")
+  [[ -n "$EFLAG" ]] && ARGS+=($EFLAG "$EFFORT")
   [[ -n "$FLAGS" ]] && ARGS+=(${=FLAGS})
   h $ARGS >/dev/null || die "agent start failed for $NAME on $PANE"
 
@@ -112,9 +120,9 @@ invariants and no ubiquitous language, and will invent both.
     local D=".orchestration/$RUN/dispatch"
     mkdir -p "$D"
     jq -n --arg n "$NAME" --arg p "$PANE" --arg w "$WS" --arg pr "$PROFILE" \
-          --arg k "$KIND" --arg m "$MODEL" --arg b "$BRANCH" \
+          --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" --arg b "$BRANCH" \
           --arg sha "$(git rev-parse HEAD 2>/dev/null)" \
-      '{agent_name:$n,pane_id:$p,workspace_id:$w,profile:$pr,kind:$k,model:$m,branch:$b,sha_at_dispatch:$sha,state:"dispatched"}' \
+      '{agent_name:$n,pane_id:$p,workspace_id:$w,profile:$pr,kind:$k,model:$m,effort:$e,branch:$b,sha_at_dispatch:$sha,state:"dispatched"}' \
       > "$D/$NAME.json"
   fi
 

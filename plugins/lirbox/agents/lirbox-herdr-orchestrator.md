@@ -131,18 +131,19 @@ Needs `HERDR_ENV=1`. `--help` on any subcommand for flags.
 | `pane run <pane> "/clear"` | clearing at a task boundary |
 | `pane close <pane_id>` | closing a lane's pane — **leaves the worktree intact** |
 
-**Read the project config before the first spawn.** `${CLAUDE_PLUGIN_ROOT}/scripts/orch-config.sh
-show` prints it; `init` scaffolds one. It is per-repo and holds what would otherwise be re-decided
-every wave:
+**Read the project config before the first spawn.** `${CLAUDE_PLUGIN_ROOT}/skills/lane-config/scripts/orch-config.sh
+show` prints it. If there is none, the `lane-config` skill sets one up with the user — do not
+scaffold one yourself and fill it with guesses. It is per-repo and holds what would otherwise be
+re-decided every wave:
 
-- `profiles.<name>` → the harness and model that profile runs on. **The profile is the decision.**
+- `profiles.<name>` → the harness, model and reasoning effort that profile runs on. **The profile is the decision.**
   Choose the profile that matches the work and let kind and model follow from it. Never choose a
   harness to suit a lane — that is the drift.
 - `lanes.max_concurrent`, `lanes.timeout_ms`, `lanes.context_cap_tokens`.
 - `setup.install|build|test|baseline` → goes into every lane's brief verbatim.
 
-No config for this repo yet? Say so, run `init`, and fill it *with the user* before the first wave.
-One question now beats re-deciding per lane, and beats being wrong quietly.
+No config for this repo yet? Say so and use the `lane-config` skill before the first wave. One
+conversation now beats re-deciding per lane, and beats being wrong quietly.
 
 **Lane operations are one command each. Do not assemble them by hand.**
 
