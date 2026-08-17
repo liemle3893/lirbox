@@ -10,6 +10,32 @@
     "LOCKED (evals/**): improvement loops may never edit this file."
   ],
   "checks": {
+    "stopped-is-not-wedged": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the stopped row's move goes back to ctrl+c: the state is detected and the lane still cannot be freed, because SIGINT is not delivered to a process the kernel will not schedule",
+          "env": "LANES_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "`kill -CONT <pid>` — `ctrl+c` cannot land on a stopped process",
+          "replace": "`ctrl+c` via `pane send-keys`"
+        },
+        {
+          "why": "the probe stops testing for the stopped state, so flat tokens and flat cost collapse back into one state and a stop is again indistinguishable from a wedge",
+          "env": "LANES_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "awk '$2 ~ /T/'",
+          "replace": "awk '$2 ~ /Z/'"
+        },
+        {
+          "why": "the probe stops asking ps for process state at all — the one signal herdr cannot supply, and the only thing that separates a stopped lane from a wedged one",
+          "env": "LANES_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "ps -o pid=,stat=,command= -A",
+          "replace": "ps -o pid=,command= -A"
+        }
+      ]
+    },
     "ledger-never-loses": {
       "expect": "green",
       "mutations": [

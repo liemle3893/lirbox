@@ -153,15 +153,16 @@ Run it before every publish and after every orchestrator handover.
 | symptom | state | move |
 |---|---|---|
 | pane alive, context and cost still climbing | working | leave it |
-| tokens and cost both flat across two reads ~30s apart | `wedged` | `ctrl+c` via `pane send-keys`, then `wedged → dispatched` |
+| counters flat, process state `T` | stopped (records as `wedged`) | `kill -CONT <pid>` — `ctrl+c` cannot land on a stopped process |
+| counters flat, process state `R`/`S` | `wedged` | `ctrl+c` via `pane send-keys`, then `wedged → dispatched` |
 | no `agent_status` at all | `dead` | new process, same `agent_name`, then `dead → dispatched` |
 | orchestrator died, panes alive | — | reload the store, match on `agent_name`, keep going |
 
-`agent_status: working` is not liveness — it reads `working` throughout a wedge.
+`agent_status: working` is not liveness — it reads `working` throughout a wedge, and throughout a stop.
 
 **Sample the pane twice, ~30s apart. The discriminating pair is tokens and cost.**
 
-| signal | alive | wedged |
+| signal | alive | wedged or stopped |
 |---|---|---|
 | `↓ Nk tokens` | advancing | flat |
 | `$N.NN` | advancing | flat |
@@ -170,12 +171,30 @@ Run it before every publish and after every orchestrator handover.
 Measured: a healthy lane moved `21.4k → 23.3k` tokens and `$2.11 → $2.26` in 25 seconds; both
 opencode wedges in this repo held both flat for ~10 minutes.
 
-**Rejected: "no subprocess".** It reads well and cannot be run — there is no mapping from a herdr
-pane id to a PID, so `pgrep` has nothing to take. It was in this skill's own contract and survived
-into the first draft. Do not put it back.
+**Flat counters are two states, not one. Read the process state before you send anything.** `T` is
+stopped: alive, holding all its memory, but never scheduled, and freed by SIGCONT alone. SIGINT is
+not delivered until it is — so `ctrl+c` on a stopped lane does nothing, forever, and the lane gets
+written off as `dead` with its worktree and its work intact.
 
-**Confirm both counters are flat before `ctrl+c`.** A lane mid-suite is indistinguishable on elapsed
-alone, and killing it there destroys the run.
+```
+ps -o pid=,stat=,command= -A | grep "[o]pencode --agent" | awk '$2 ~ /T/'
+```
+
+Any row is a stopped harness; `kill -CONT <pid>` frees it, and `| wc -l` makes it a monitor arm.
+Which lane: `ps` has no cwd on macOS, so `lsof -a -p <pid> -d cwd -Fn | grep '^n' | cut -c2-` — that
+path is the lane's worktree, and `dispatch/<lane>.json` holds the same one.
+
+The shell says which signal stopped it. `suspended (signal)` is SIGSTOP/SIGTSTP from outside and
+nothing in the lane's setup prevents it; `suspended (tty output|input)` is SIGTTOU/SIGTTIN, and only
+there is `stty -tostop` the fix. Measured here: `suspended (signal)`.
+
+**Corrected: "no subprocess".** There is still no pane-id → PID mapping — `herdr api snapshot`
+carries `pane_id`, `terminal_id`, `cwd`, `foreground_cwd`, no pid — so `pgrep <pane_id>` has nothing
+to take. The earlier note stopped there and banned the state check along with the mapping. Go the
+other way: read process state globally, map back to a lane by cwd.
+
+**Confirm both counters are flat and the state is not `T` before `ctrl+c`.** A lane mid-suite is
+indistinguishable on elapsed alone, and killing it there destroys the run.
 
 ### 6b. Recover a DEAD lane — three options, only one is always safe
 
