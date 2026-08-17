@@ -42,3 +42,25 @@ if (!TABLE.durable.includes('published'))
   throw new Error('TABLE lost durable -> published; nothing can publish');
 if (!/[Vv]erify before you commit/.test(skill))
   throw new Error('SKILL.md no longer pins the verify-before-commit order');
+
+// The Stop gate is the third party to this wiring, and the one that outranks both:
+// it exits 2. Nothing at runtime fails when a hook stops being registered — the
+// command simply never runs and every turn looks fine — so this is the check that
+// notices. `stop-gate-routes-a-stop-to-cont` proves the gate BEHAVES; this proves
+// it is still plugged in at all.
+const hooksJson = join(here, '..', '..', '..', '..', 'hooks', 'hooks.json');
+let hooks;
+try { hooks = JSON.parse(readFileSync(hooksJson, 'utf8')); }
+catch { throw new Error(`the plugin hook manifest is gone or unparseable: ${hooksJson}`); }
+
+const stopCommands = (hooks.hooks?.Stop ?? []).flatMap((g) => (g.hooks ?? []).map((h) => h.command ?? ''));
+if (!stopCommands.some((c) => c.includes('lane-gate.sh'))) {
+  throw new Error('lane-gate.sh is no longer registered on Stop — the turn can end on a live or stopped lane and nothing objects');
+}
+
+const gate = readFileSync(join(here, '..', '..', '..', '..', 'hooks', 'lane-gate.sh'), 'utf8');
+// The gate and the skill have to agree about the stopped state. The skill can be
+// re-read and argued with; the gate cannot, so a gate that answered a stop with
+// "arm a Monitor" would quietly overrule the contract on every turn.
+if (!/kill -CONT/.test(gate))
+  throw new Error('lane-gate.sh dropped the kill -CONT remedy — a stopped lane gets told to arm a Monitor and wait on a process the kernel will never schedule');

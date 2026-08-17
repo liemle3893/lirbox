@@ -10,6 +10,35 @@
     "LOCKED (evals/**): improvement loops may never edit this file."
   ],
   "checks": {
+    "stop-gate-routes-a-stop-to-cont": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the gate stops scanning for the stopped state, so a T lane falls through to the LIVE branch and the turn is held open on a process the kernel will never schedule",
+          "env": "LANE_GATE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/lane-gate.sh",
+          "find": "awk '$2 ~ /^T/ {print $1}'",
+          "replace": "awk '$2 ~ /^Q/ {print $1}'"
+        },
+        {
+          "why": "the gate detects the stop and answers it with ctrl+c — a signal that is not delivered until SIGCONT is, so the block names a remedy that frees nothing",
+          "env": "LANE_GATE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/lane-gate.sh",
+          "find": "  kill -CONT <pid>",
+          "replace": "  ctrl+c via pane send-keys"
+        },
+        {
+          "why": "the stopped process is never matched back to a lane's checkout, so the gate knows something is stopped and cannot say which lane — which is indistinguishable from not noticing",
+          "env": "LANE_GATE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/lane-gate.sh",
+          "find": "[[ \"$ecwd\" == \"$pcwd\" || \"$ecwd\" == \"$pcwd\"/* ]]",
+          "replace": "[[ 1 == 2 ]]"
+        }
+      ]
+    },
     "stopped-is-not-wedged": {
       "expect": "green",
       "mutations": [

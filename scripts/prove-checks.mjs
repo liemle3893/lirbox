@@ -44,7 +44,7 @@
 //         --strict  exit 1 if any declared mutation fails to produce RED (for CI)
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { basename, join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -76,8 +76,15 @@ for (const [name, entry] of Object.entries(checks)) {
     const copy = join(tmp, 'skill');
     try {
       cpSync(SKILL_DIR, copy, { recursive: true });
-      const target = join(copy, m.file);
-      const before = readFileSync(target, 'utf8');
+      // A check may guard an invariant that lives OUTSIDE its skill dir — a plugin
+      // hook is the case that forced this. `root: "repo"` reads that one
+      // repo-relative file and writes the mutated version into the scratch dir
+      // instead: the real file is never touched, and the check finds it through
+      // `env` exactly like a mutated file inside the copy.
+      const fromRepo = m.root === 'repo';
+      const source = fromRepo ? join(REPO, m.file) : join(copy, m.file);
+      const target = fromRepo ? join(tmp, basename(m.file)) : source;
+      const before = readFileSync(source, 'utf8');
       const hits = before.split(m.find).length - 1;
       if (hits !== 1) {
         console.log(`ROT   ${name} — mutation "${m.why}" matched ${hits}x (need exactly 1); it is stale`);
