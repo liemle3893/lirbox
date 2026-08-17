@@ -10,6 +10,61 @@
     "LOCKED (evals/**): improvement loops may never edit this file."
   ],
   "checks": {
+    "stop-gate-routes-a-stop-to-cont": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the gate stops scanning for the stopped state, so a T lane falls through to the LIVE branch and the turn is held open on a process the kernel will never schedule",
+          "env": "LANE_GATE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/lane-gate.sh",
+          "find": "awk '$2 ~ /^T/ {print $1}'",
+          "replace": "awk '$2 ~ /^Q/ {print $1}'"
+        },
+        {
+          "why": "the gate detects the stop and answers it with ctrl+c — a signal that is not delivered until SIGCONT is, so the block names a remedy that frees nothing",
+          "env": "LANE_GATE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/lane-gate.sh",
+          "find": "  kill -CONT <pid>",
+          "replace": "  ctrl+c via pane send-keys"
+        },
+        {
+          "why": "the stopped process is never matched back to a lane's checkout, so the gate knows something is stopped and cannot say which lane — which is indistinguishable from not noticing",
+          "env": "LANE_GATE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/lane-gate.sh",
+          "find": "[[ \"$ecwd\" == \"$pcwd\" || \"$ecwd\" == \"$pcwd\"/* ]]",
+          "replace": "[[ 1 == 2 ]]"
+        }
+      ]
+    },
+    "stopped-is-not-wedged": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the stopped row's move goes back to ctrl+c: the state is detected and the lane still cannot be freed, because SIGINT is not delivered to a process the kernel will not schedule",
+          "env": "LANES_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "`kill -CONT <pid>` — `ctrl+c` cannot land on a stopped process",
+          "replace": "`ctrl+c` via `pane send-keys`"
+        },
+        {
+          "why": "the probe stops testing for the stopped state, so flat tokens and flat cost collapse back into one state and a stop is again indistinguishable from a wedge",
+          "env": "LANES_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "awk '$2 ~ /T/'",
+          "replace": "awk '$2 ~ /Z/'"
+        },
+        {
+          "why": "the probe stops asking ps for process state at all — the one signal herdr cannot supply, and the only thing that separates a stopped lane from a wedged one",
+          "env": "LANES_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "ps -o pid=,stat=,command= -A",
+          "replace": "ps -o pid=,command= -A"
+        }
+      ]
+    },
     "ledger-never-loses": {
       "expect": "green",
       "mutations": [

@@ -42,6 +42,61 @@ OWNED=$(print -r -- "$LIST" | jq -r --rawfile led "$LEDGER" '
 
 [[ -n "$OWNED" ]] || exit 0
 
+# A STOPPED lane reads exactly like a working one here. `T` is alive, holding all
+# its memory, and never scheduled; it is freed by SIGCONT and nothing else. The
+# LIVE branch below would answer it with "arm a Monitor and keep the turn open" —
+# waiting on a process the kernel will never run again. No value of agent_status
+# can distinguish it, because process state is not in that table. Read it.
+#
+# Cheap by construction: T is rare, so on almost every Stop this ends at the awk.
+STOPPED_PIDS=$(ps -A -o pid=,stat= 2>/dev/null | awk '$2 ~ /^T/ {print $1}')
+if [[ -n "$STOPPED_PIDS" ]]; then
+  typeset -a STOPPED_AT
+  local p c
+  for p in ${(f)STOPPED_PIDS}; do
+    # ps carries no cwd on macOS; lsof is the only mapping from a pid to the
+    # checkout it is sitting in, and the checkout is what identifies the lane.
+    c=$(lsof -a -p "$p" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+    [[ -n "$c" ]] && STOPPED_AT+=("$p"$'\t'"$c")
+  done
+
+  if (( $#STOPPED_AT )); then
+    PANES=$(HERDR_ENV=1 herdr pane list 2>/dev/null)
+    typeset -a FROZEN
+    local line name pane pcwd entry epid ecwd
+    for line in ${(f)OWNED}; do
+      name=${${(z)line}[1]}; pane=${${(z)line}[2]}
+      pcwd=$(print -r -- "$PANES" | jq -r --arg p "$pane" \
+        '.result.panes[]? | select(.pane_id == $p) | .cwd' 2>/dev/null | head -1)
+      [[ -n "$pcwd" ]] || continue
+      for entry in $STOPPED_AT; do
+        epid=${entry%%$'\t'*}; ecwd=${entry#*$'\t'}
+        # Prefix, not equality: a lane's own subprocess sits in a subdirectory of
+        # the checkout, and stopping it stops the lane just the same.
+        [[ "$ecwd" == "$pcwd" || "$ecwd" == "$pcwd"/* ]] \
+          && FROZEN+=("  $name  $pane  pid $epid  STOPPED (T)  $ecwd")
+      done
+    done
+
+    if (( $#FROZEN )); then
+      print -u2 -r -- "GATE: these lanes are STOPPED, not working.
+
+${(F)FROZEN}
+
+A T process is alive and holding all its memory, but the kernel will not schedule
+it. It resumes on SIGCONT alone — ctrl+c cannot be delivered until it does, so
+sending one frees nothing and waiting on a Monitor waits forever.
+
+  kill -CONT <pid>
+
+Then confirm tokens and cost start advancing again before you treat the lane as
+working. Do not close the pane and do not redispatch: the checkout and the work
+are intact, and this is recoverable."
+      exit 2
+    fi
+  fi
+fi
+
 LIVE=$(print -r -- "$OWNED" | grep -E '(working|blocked)$')
 if [[ -n "$LIVE" ]]; then
   print -u2 -r -- "GATE: your lanes are still running and no Monitor is armed.

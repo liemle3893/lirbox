@@ -312,7 +312,8 @@ herdr agent start fix-b13 --kind opencode --pane wX:p1 --timeout 120000 -- \
 - Prompt text is classifier-scanned — a dispatch is denied for what it *contains*, even though the pane would run it. Name the script path, not `kubectl set image`.
 - One narrow monitor on the pane you await, not a broad one — broad fires on your own clears and burns a turn each time.
 - **Narrow is not the same as incomplete.** Every lane monitor needs arms for `blocked`, dead, and over-cap, not just the artifact you want. `blocked` is neither `idle` nor `done`: a monitor branching on those two lets a lane sit on a real question indefinitely while it looks like work in progress. The `blocked` arm dumps the pane so the question is visible.
-- opencode wedges: flat context + flat cost + no subprocess for ~10 min. `ctrl+c` via `pane send-keys` is the only thing that frees it; herdr stop, escape and `/exit` all fail. Budget for this when cheap lanes are the majority.
+- opencode wedges: flat context + flat cost for ~10 min. `ctrl+c` via `pane send-keys` is the only thing that frees it; herdr stop, escape and `/exit` all fail. Budget for this when cheap lanes are the majority.
+- **Flat counters are also what a STOPPED pane looks like, and `ctrl+c` cannot free that one** — a `T` process resumes on SIGCONT alone. Check the state before you send: `ps -o pid=,stat=,command= -A | grep "[o]pencode --agent" | awk '$2 ~ /T/'`, then `kill -CONT <pid>`. Treating a stop as a wedge writes off a lane whose work was intact.
 - `herdr worktree list --json` and `git worktree list` disagree about leftovers — lanes abandon worktrees in their scratchpads. `worktree list` also reports `workspace_id: None` while `pane list` reports the real IDs. Trust `pane list`.
 
 # Tone
