@@ -337,6 +337,43 @@
         }
       ]
     },
+    "first-lane-costs-a-baseline": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the precondition is skipped entirely, so the first lane of a run starts with nothing written down and lane availability is once again the only thing ordering the work",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  if (( ! $#PRIOR )); then\n    local PLAN=",
+          "replace": "  if false; then\n    local PLAN="
+        },
+        {
+          "why": "the gate stops reading items.md and accepts a goal restated in prose, so nothing says which item blocks which and there is still nothing to order the work by",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    (( HAS_ITEM )) || gate \"$PLAN has no numbered items.",
+          "replace": "    (( 1 )) || gate \"$PLAN has no numbered items."
+        },
+        {
+          "why": "a baseline stating an intention rather than an observed exit code is accepted, so every later 'it is green now' is measured against a number nobody took",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    [[ \"$MEASURED_BODY\" =~ 'exit[[:space:]]*[:=][[:space:]]*[0-9]+' ]] \\",
+          "replace": "    [[ -n \"$MEASURED_BODY\" ]] \\"
+        },
+        {
+          "why": "the gate stops being scoped to the first start and fires on every spawn, which is noise \u2014 and noise is answered with a stub file, which is how a gate becomes a ritual",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  PRIOR=(\"$ROOT/.orchestration/$RUN/dispatch\"/*.json(N))",
+          "replace": "  PRIOR=()"
+        }
+      ]
+    },
     "base-branch-defaults-to-main": {
       "expect": "green",
       "mutations": [

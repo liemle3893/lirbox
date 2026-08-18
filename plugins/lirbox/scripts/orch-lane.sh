@@ -19,6 +19,16 @@ setopt no_nomatch pipefail
 die() { print -u2 -r -- "orch-lane: $1"; exit 1 }
 h()   { HERDR_ENV=1 herdr "$@" }
 
+# A refusal that a rehearsal reports instead of enforcing. `--dry-run` issues
+# nothing, so gating it blocks inspection for no gain — but a rehearsal that
+# stayed silent would report a start the real one refuses. zsh locals are
+# dynamically scoped, so $DRY is the caller's.
+gate() {
+  (( ${DRY:-0} )) || die "$1"
+  print -u2 -r -- "orch-lane: NOTE — a real start refuses here:
+$1"
+}
+
 SUB="${1:-}"; shift 2>/dev/null || true
 [[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|restart|brief|close] ..."
 
@@ -116,6 +126,76 @@ invariants and no ubiquitous language, and will invent both.
   # that could only be recovered by hand.
   [[ -n "$RUN" ]] || die "start needs --run <slug>: it names the run whose
   .orchestration/<slug>/dispatch/ record makes this lane findable again."
+
+  # The FIRST lane of a run costs a decomposition and a measured baseline.
+  #
+  # Nothing here used to decide what to work on first, so the ordering predicate
+  # was lane AVAILABILITY: "both lanes are free, so I'm putting one on." The
+  # 2026-08 run never ran the three-minute suite it had itself declared expired
+  # three times, quoted a failure count from a tree that had moved twenty
+  # commits, and only converged when the human decomposed the goal by hand — the
+  # 10-of-219-test-files partition that reframed the whole day arrived at hour
+  # five, from the human, as a question.
+  #
+  # Both files are cheap and neither is a plan document. items.md is the lane
+  # split — numbered items, and which blocks which. baseline.txt is the one
+  # measurement that has to exist before anything is attributed to a change: the
+  # test command and the exit code it ACTUALLY returned, today, on this tree.
+  #
+  # Only the first start. Once a lane is dispatched this run has a shape, and
+  # re-asking every spawn would be noise that gets satisfied by a stub file.
+  local -a PRIOR
+  PRIOR=("$ROOT/.orchestration/$RUN/dispatch"/*.json(N))
+  if (( ! $#PRIOR )); then
+    local PLAN="$ROOT/.orchestration/$RUN/items.md"
+    local MEASURED="$ROOT/.orchestration/$RUN/baseline.txt"
+    local -a MISSING
+    [[ -s "$PLAN" ]]     || MISSING+=("items.md — the lane split: numbered items, and which blocks which")
+    [[ -s "$MEASURED" ]] || MISSING+=("baseline.txt — the setup.test command and the exit code it returned")
+    if (( $#MISSING )); then
+      gate "the first lane of run '$RUN' needs the run written down first. Missing in
+  $ROOT/.orchestration/$RUN/:
+
+$(print -l -- "${MISSING[@]/#/    }")
+
+  Neither is a design doc. Without them the only thing left to order the work by
+  is which lane happens to be free, which is how a run spends five hours on the
+  hardest coupled thing and never runs the three-minute suite that would have
+  partitioned it."
+    fi
+
+    # Teeth, but only on files that are there: a rehearsal continues past the
+    # refusal above, and reading a file that does not exist would answer with
+    # shell noise instead of the point.
+    #
+    # A gate satisfied by two empty files is a check that cannot fail —
+    # the defect class this skill names as its dominant one.
+    if (( ! $#MISSING )); then
+    #
+    # grep is a shell function in some contexts on this machine and ugrep in
+    # others, and an interpolated ERE through a pipeline can return EMPTY rather
+    # than erroring — which would make these two tests silently pass. Both are
+    # done with zsh's own matching for that reason.
+    # `=~`, not a glob: the `#` in `[[:space:]]#` needs EXTENDED_GLOB, which is
+    # not set here, so as a glob it matches a literal '#' and every numbered
+    # item reads as prose. Silent, and it fails toward refusing good input.
+    local line HAS_ITEM=0
+    for line in ${(f)"$(<"$PLAN")"}; do
+      [[ "$line" =~ '^[[:space:]]*[0-9]+[.)]' ]] && { HAS_ITEM=1; break }
+    done
+    (( HAS_ITEM )) || gate "$PLAN has no numbered items.
+  A goal restated in prose is not a decomposition. One numbered line per item,
+  and name what blocks what — concurrency falls out of that, and so does order."
+
+    local MEASURED_BODY=${(L)"$(<"$MEASURED")"}
+    [[ "$MEASURED_BODY" =~ 'exit[[:space:]]*[:=][[:space:]]*[0-9]+' ]] \
+      || gate "$MEASURED records no observed exit code.
+  Write the command and what it returned, e.g. 'pnpm test  exit: 1  (25 failed)'.
+  An exit code is the one line that cannot be written without running the thing.
+  Every later 'it is green now' is measured against this number, and a baseline
+  taken after the change is not a baseline."
+    fi
+  fi
 
   local KIND MODEL FLAGS READY_MS EFFORT
   KIND=$(jq -r --arg p "$PROFILE" '.profiles[$p].kind // empty' "$CFG")

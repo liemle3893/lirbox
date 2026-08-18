@@ -58,6 +58,33 @@ prescriptive plan is the same waste as spawning a verifier with nothing to verif
   `lanes.max_concurrent`. Everything else serialises, and you name the constraint that serialised it.
 - The lane split is what criteria are written from. An item with no criterion is an item nobody will check.
 
+**Dependency edges decide ORDER, not just concurrency.** Reading them only for what can run
+together leaves nothing deciding what runs *first*, and the predicate that fills that vacuum is
+which lane happens to be free. Attack the partition that depends on nothing, first — always. It is
+the cheapest, it is the one that can run right now, and clearing it is what tells you whether the
+coupled thing is the only thing left.
+
+**Before the first lane, two files. `orch-lane.sh start` refuses without them.**
+
+| `<run>/items.md` | the lane split — numbered items, and which blocks which |
+| `<run>/baseline.txt` | the `setup.test` command and the exit code it **actually returned**, today, on this tree |
+
+Neither is a design document and neither is a plan you present. The baseline is the one that keeps
+being skipped, and it is the one that pays: a failing suite nobody has run has an unknown number of
+failures **unrelated** to the thing being blamed. Partition the failures by what they *require* —
+nothing / a local service / the suspect dependency — not by subsystem, and clear the partition that
+requires nothing before anything else is dispatched.
+
+- **Prove a dependency exists before scheduling work that needs it.** Its own lane, one question:
+  does this thing come up, yes or no, with the log. Not "the tests will tell us" — a suite that
+  cannot reach a service reports NOT MEASURED, never failed, and conflating those two is how a run
+  spends hours on a dependency that was never going to boot on this architecture.
+- **A number from a tree that has moved is not a measurement.** Re-take the baseline or say it is
+  expired; do not quote it.
+- Before you call any partition green, ask which of its checks could still fail. A test that
+  `return`s early when a service is unreachable is counted as passed, and is green during exactly
+  the outage it exists to catch.
+
 # Delegating
 
 **Criteria**

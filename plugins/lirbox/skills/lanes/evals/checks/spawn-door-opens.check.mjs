@@ -73,6 +73,17 @@ const writeCfg = (lanes) => writeFileSync(cfgPath, JSON.stringify({
 }, null, 2));
 writeCfg({ ready_timeout_ms: 1800000, context_cap_tokens: 300000 });
 
+// FIXTURE ONLY — no assertion below depends on these. `start` gained a
+// first-lane precondition (see first-lane-costs-a-baseline): the first lane of
+// a run needs its split written down and its baseline measured. This check is
+// about herdr's contract, not about run preconditions, so it satisfies the new
+// one in setup rather than testing it. Every arm below is unchanged.
+mkdirSync(join(repo, '.orchestration', 't1'), { recursive: true });
+writeFileSync(join(repo, '.orchestration', 't1', 'items.md'),
+  '1. the only item — blocks: none\n');
+writeFileSync(join(repo, '.orchestration', 't1', 'baseline.txt'),
+  'true   exit: 0\n');
+
 // -- a herdr that answers the way the real one does --------------------------
 writeFileSync(join(bin, 'herdr'), `#!/bin/sh
 LOG="${tmp}/calls.log"; N="${tmp}/n"; READY="${tmp}/ready"; EARLY="${tmp}/early"

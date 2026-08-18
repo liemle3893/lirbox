@@ -30,6 +30,15 @@ if (!/self-report can never become verified/i.test(agent))
 if (!/durable\b[^.\n]*\bnot verified|committed, not verified/i.test(agent))
   throw new Error('agent dropped "durable is not verified" — the trap that puts red commits on a remote');
 
+// orch-lane.sh REFUSES the first start of a run without these two files. If the agent stops naming
+// them, the run meets a hard refusal it has no context for — and the doctrine the refusal exists to
+// enforce (order by what depends on nothing; measure before attributing) goes with it.
+for (const [what, re] of [
+  ['items.md (the lane split the first start is gated on)', /items\.md/],
+  ['baseline.txt (the measurement the first start is gated on)', /baseline\.txt/],
+]) if (!re.test(agent)) throw new Error(
+  `agent no longer names ${what} — orch-lane.sh still refuses without it, so the run hits a wall it cannot read`);
+
 // The skill must point back, or the agent is undiscoverable from it.
 if (!/lirbox-herdr-orchestrator/.test(skill))
   throw new Error('SKILL.md no longer names the lirbox-herdr-orchestrator agent');

@@ -69,6 +69,16 @@ writeFileSync(join(home, '.claude', 'lirbox-orchestrator', `${slug}.json`),
     setup: { install: 'true', test: 'true' },
   }, null, 2));
 
+// FIXTURE ONLY — no assertion below depends on these. `start` refuses the first
+// lane of a run without them (see first-lane-costs-a-baseline). This check is
+// about WHERE the record lands and WHAT it carries, not about run preconditions,
+// so it satisfies that gate in setup rather than re-testing it.
+mkdirSync(join(repo, '.orchestration', 't1'), { recursive: true });
+writeFileSync(join(repo, '.orchestration', 't1', 'items.md'),
+  '1. the only item — blocks: none\n');
+writeFileSync(join(repo, '.orchestration', 't1', 'baseline.txt'),
+  'true   exit: 0\n');
+
 // The lane's real checkout. herdr would cut this; the stub hands back its path,
 // which is the value the dispatch record has to carry.
 const wtree = join(tmp, 'wt-probe');
