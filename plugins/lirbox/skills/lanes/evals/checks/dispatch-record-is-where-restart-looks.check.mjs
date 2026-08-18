@@ -151,6 +151,14 @@ if (!rec.worktree) {
 if (!statSync(rec.worktree).isDirectory()) {
   fail(`the record's worktree does not exist: ${rec.worktree}`);
 }
+// gate-guard joins a branch to a lane by this ONE key. Without it the gate
+// resolves nothing and silently allows every push — the hook's own comment
+// calls the record "a precondition of this gate and not a nicety", and this is
+// what makes that true.
+if (!rec.branch) {
+  fail('the dispatch record names no `branch`. gate-guard resolves the branch being pushed to a '
+     + 'lane through exactly this field; without it every push matches no record and is allowed.');
+}
 if (!rec.lane) {
   fail('the dispatch record names no `lane`. SKILL.md documents the record as '
      + 'carrying it, and it is the key everything else joins on.');

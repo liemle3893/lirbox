@@ -305,6 +305,14 @@
           "file": "plugins/lirbox/scripts/orch-lane.sh",
           "find": "      '{lane:$n,agent_name:$n,",
           "replace": "      '{agent_name:$n,"
+        },
+        {
+          "why": "the dispatch record loses `branch`, which is the ONLY key gate-guard joins a branch to a lane by \u2014 every push then matches no record and the whole gate silently allows",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "branch:$b,sha_at_dispatch:$sha",
+          "replace": "sha_at_dispatch:$sha"
         }
       ]
     },
@@ -431,12 +439,12 @@
           "replace": "  | if ($g | length) == 0 then \"PASS\""
         },
         {
-          "why": "gh pr create stops reading --head, so opening a lane's PR from the base branch resolves to the base, matches no dispatch record, and every PR goes through ungated",
+          "why": "--head/-H stops naming the branch, so opening a lane's PR from the base branch resolves to the base, matches no dispatch record, and every PR goes through",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
-          "find": "        [[ \"${TOK[j]}\" == \"--head\" ]] && { TARGET=\"${TOK[j+1]}\"; break }",
-          "replace": "        [[ \"${TOK[j]}\" == \"--nonesuch\" ]] && { TARGET=\"${TOK[j+1]}\"; break }"
+          "find": "      [[ \"${TOK[k]}\" == (--head|-H) ]] && OPERANDS+=(\"${TOK[k+1]}\")",
+          "replace": "      :"
         },
         {
           "why": "a merge that lands ON the base branch stops being treated as outward, so the one merge this guard exists for is the one it ignores",
@@ -447,12 +455,12 @@
           "replace": "  exit 0"
         },
         {
-          "why": "a frozen definition of done is no longer required to have passed, so a run declares a DoD and publishes without meeting it",
+          "why": "any dod_gate artifact satisfies the frozen definition of done, pass or fail \u2014 so a run publishes with criteria it did not meet",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
-          "find": "if [[ -f \"$RUNDIR/dod.json\" ]]; then",
-          "replace": "if false; then"
+          "find": "      elif (($d | last).all_passed == true) then \"OK\"",
+          "replace": "      elif (($d | last) != null) then \"OK\""
         },
         {
           "why": "the store no longer has to know the lane is committed, so a reviewed lane the run never recorded is pushed \u2014 the dark store that let transitions.jsonl stop two days before the session ended",
@@ -501,6 +509,46 @@
           "file": "plugins/lirbox/hooks/gate-guard.sh",
           "find": "      | if ($v.gated_sha == null or $v.gated_sha == \"\") then \"UNBOUND\"",
           "replace": "      | if (false) then \"UNBOUND\""
+        },
+        {
+          "why": "only the FIRST operand is considered, which is the positional read the rewrite removed: `git push -u origin lane-kb` resolves to 'origin', matches no record, and an ungated lane leaves on the ordinary first push",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "for o in $OPERANDS; do",
+          "replace": "for o in ${OPERANDS[1]}; do"
+        },
+        {
+          "why": "global options are no longer skipped, so `git -C <worktree> push` is not recognised as a push at all \u2014 and lanes RUN in worktrees, so that is the normal spelling",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "  j=$(skip_globals $(( i + 1 )))",
+          "replace": "  j=$(( i + 1 ))"
+        },
+        {
+          "why": "a refspec is no longer split, so `git push origin HEAD:lane-kb` and `lane-kb:main` name no lane and walk through",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "    for part in ${(s.:.)o}; do CANDIDATES+=(\"${part##*/}\"); done",
+          "replace": "    CANDIDATES+=(\"${o##*/}\")"
+        },
+        {
+          "why": "gh pr merge stops being a gated verb, so the gate blocks opening a PR and not merging one \u2014 it gates the announcement, not the act",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "      merge)  VERB=\"gh pr merge\"  ;;",
+          "replace": "      merge)  continue ;;"
+        },
+        {
+          "why": "a PR number no longer fails closed, so `gh pr merge 12 --admin` merges an ungated lane the hook could not resolve",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "if [[ -z \"$LANE\" && \"$VERB\" == \"gh pr merge\" ]]; then",
+          "replace": "if false; then"
         }
       ]
     },

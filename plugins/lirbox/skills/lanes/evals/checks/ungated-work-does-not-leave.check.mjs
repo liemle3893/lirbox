@@ -25,7 +25,7 @@
 //
 // GATE_GUARD_OVERRIDE points at the hook under test (set by prove-checks).
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -34,6 +34,20 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const hook = process.env.GATE_GUARD_OVERRIDE
   || join(here, '..', '..', '..', '..', 'hooks', 'gate-guard.sh');
+
+// A hook that is not executable never runs: hooks.json invokes it as a bare
+// path, the shell answers 126, and only exit 2 denies. This check invokes it as
+// `zsh <file>`, which READS the file and bypasses the mode entirely — so the
+// mode is invisible to every other arm here and to every declared mutation,
+// because the mutation space is the script's text and this defect is its bits.
+// Stat the REAL hook, never the override: the override points at prove-checks'
+// temp mutant, whose mode says nothing about what ships.
+const shippedHook = join(here, '..', '..', '..', '..', 'hooks', 'gate-guard.sh');
+if (!(statSync(shippedHook).mode & 0o111)) {
+  throw new Error(`${shippedHook} is not executable. hooks.json runs it as a bare path, so the `
+    + 'shell returns 126 and the gate never denies anything. Every other arm below passes '
+    + 'regardless, because they invoke it through `zsh <file>`. chmod +x and commit the mode.');
+}
 
 const tmp  = mkdtempSync(join(tmpdir(), 'gate-guard-'));
 const repo = join(tmp, 'repo');
@@ -157,6 +171,44 @@ if (!/build_exit=1/.test(r.msg)) {
      + `build_exit=1, so the cross-check may not be firing: ${r.msg.trim()}`);
 }
 
+// -- 3c. the command parser, not just the verdict ---------------------------
+// The first cut matched the ADJACENT pair `git push` and read the operand from
+// a fixed slot. Every spelling below reached a lane with 2 Criticals and a red
+// build. They are here because the check tested exactly the two spellings its
+// author happened to write.
+setGate({ lane: 'kb', kind: 'code_gate', produced_by: 'gate-kb',
+  gate_passed: false, critical: 2, high: 1, build_cmd: 'make', build_exit: 1 });
+for (const cmd of [
+  'git push -u origin lane-kb',                      // a flag before the remote
+  'git push --force-with-lease origin lane-kb',
+  'git push origin HEAD:lane-kb',                    // a refspec
+  'git push origin lane-kb:main',                    // lane written onto base
+  `git -C ${repo} push origin lane-kb`,              // a git global option
+  'gh pr create -H lane-kb --fill',                  // the short flag
+  'gh pr merge lane-kb --squash',                    // no case arm at all
+  'gh pr merge 12 --admin',                          // a PR number: fail closed
+  'git merge --no-ff lane-kb',
+  'git merge --squash lane-kb',
+]) {
+  if (verdict(cmd).code !== 2) {
+    fail(`\`${cmd}\` was ALLOWED against a lane with 2 Criticals and a red build. `
+       + 'The parser must resolve the ref structurally — skipping flags and global options, '
+       + 'splitting refspecs — and FAIL CLOSED when it cannot, because an unparseable command '
+       + 'becoming "not a lane" is an allow.');
+  }
+}
+
+// -- 3d. and it must not over-block ----------------------------------------
+// A guard that blocks ordinary work gets turned off, and then it guards nothing.
+git('checkout', '-q', '-b', 'not-a-lane');
+for (const cmd of ['git status', 'git log --oneline -5', 'git fetch origin', 'herdr agent list']) {
+  if (verdict(cmd).code !== 0) fail(`\`${cmd}\` was denied — it moves nothing outward`);
+}
+git('checkout', '-q', 'main');
+if (verdict('git push origin not-a-lane').code !== 0) {
+  fail('a branch no dispatch record claims was gated; that is not this hook\'s business');
+}
+
 // -- 4. unresolved findings do not pass ------------------------------------
 setGate({ kind: 'code_gate', lane: 'kb', produced_by: 'gate-kb',
   gate_passed: false, critical: 2, high: 1, build_cmd: 'make', build_exit: 0 });
@@ -260,6 +312,18 @@ writeFileSync(join(runDir, 'dod.json'), JSON.stringify({ criteria: [] }));
 if (verdict('gh pr create --base main --head lane-kb --title x --body y').code !== 2) {
   fail('a run that froze a definition of done published with no dod_gate artifact');
 }
+// A FAILING DoD was never tested: both arms (artifact absent / all_passed true)
+// are satisfied by a hook that only asks whether the artifact EXISTS. The
+// declared mutation for this rule reported PROVEN by dying on the absent-arm.
+writeFileSync(join(evid, 'd-dod_gate.json'),
+  JSON.stringify({ kind: 'dod_gate', all_passed: false, failed: ['criterion-2'] }));
+r = verdict('gh pr create --base main --head lane-kb --title x --body y');
+if (r.code !== 2) fail('a frozen DoD reporting all_passed:false was published anyway');
+if (!/dod_gate\s+FAIL/.test(r.msg)) {
+  fail(`refused, but not for the DoD — the denial does not report the DoD as FAIL, so the `
+     + `all_passed predicate may not be firing: ${r.msg.trim()}`);
+}
+
 writeFileSync(join(evid, 'd-dod_gate.json'),
   JSON.stringify({ kind: 'dod_gate', all_passed: true }));
 if (verdict('gh pr create --base main --head lane-kb --title x --body y').code !== 0) {

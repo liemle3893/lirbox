@@ -52,47 +52,100 @@ typeset -a TOK
 TOK=(${(z)CMD})
 
 # ---------------------------------------------------------------------------
-# Which outward verb, and which branch it moves.
+# Which outward verb, and which ref it moves.
 #
-#   git push [remote] [branch]        -> that branch, else HEAD
-#   git merge <ref>                   -> <ref>, only when merging INTO a base
-#   gh pr create ...                  -> HEAD
+# Parsed structurally, not positionally. The first cut matched on the ADJACENT
+# pair `git push` and read the operand from a fixed slot, and every one of these
+# walked through a lane with two Criticals and a red build:
+#
+#   git push -u origin lane-kb          a flag before the remote
+#   git push origin HEAD:lane-kb        a refspec
+#   git -C <worktree> push origin ...   a git global option — and lanes RUN in
+#                                       worktrees, so this is the normal spelling
+#   gh pr create -H lane-kb             the short flag
+#   gh pr merge lane-kb --squash        no case arm at all
+#   git merge --no-ff lane-kb           a flag before the ref
+#
+# The failure direction was the dangerous one: an unparseable command became
+# "this is not a lane" (allow) rather than "I cannot tell" (deny).
 # ---------------------------------------------------------------------------
-local VERB="" TARGET=""
-integer i
+local VERB=""
+typeset -a OPERANDS
+integer i j
+
+# Global options come before the subcommand. `-C` and `-c` take a value; for gh
+# so do `--repo`/`-R`. Skipping them is what makes `git -C <path> push` parse.
+skip_globals() {
+  local -i k=$1
+  while (( k <= $#TOK )); do
+    case "${TOK[k]}" in
+      -C|-c|--repo|-R|--git-dir|--work-tree|--namespace|--exec-path) (( k += 2 )) ;;
+      -*) (( k += 1 )) ;;
+      *) break ;;
+    esac
+  done
+  print -r -- $k
+}
+
+# Operands are the non-flag tokens after the subcommand. Flags that take a value
+# would otherwise donate their argument as a ref.
+collect_operands() {
+  local -i k=$1
+  while (( k <= $#TOK )); do
+    case "${TOK[k]}" in
+      --repo|-R|-o|--base|-B|--head|-H|--title|-t|--body|-b|--reviewer|-r|--assignee|-a|--label|-l|--milestone|-m|--project|-p|--subject|--strategy)
+        # --head/-H names the branch outright; the rest donate nothing.
+        [[ "${TOK[k]}" == (--head|-H) ]] && OPERANDS+=("${TOK[k+1]}")
+        (( k += 2 )) ;;
+      --head=*|-H=*)  OPERANDS+=("${TOK[k]#*=}"); (( k += 1 )) ;;
+      --) (( k += 1 )) ;;
+      -*) (( k += 1 )) ;;
+      *) OPERANDS+=("${TOK[k]}"); (( k += 1 )) ;;
+    esac
+  done
+}
+
 for (( i = 1; i <= $#TOK; i++ )); do
-  case "${TOK[i]} ${TOK[i+1]}" in
-    "git push")
-      VERB="git push"
-      # `git push origin lane-x` names it; a bare push moves HEAD.
-      local a="${TOK[i+2]}" b="${TOK[i+3]}"
-      [[ -n "$b" && "$b" != -* ]] && TARGET="$b"
-      [[ -z "$TARGET" && -n "$a" && "$a" != -* ]] && TARGET=""
-      break ;;
-    "git merge")
-      VERB="git merge"; TARGET="${TOK[i+2]}"
-      [[ "$TARGET" == -* ]] && TARGET=""
-      break ;;
-    "gh pr")
-      [[ "${TOK[i+2]}" == create ]] || continue
-      VERB="gh pr create"
-      # `--head <branch>` names the lane from anywhere, and opening a lane's PR
-      # while standing on the base branch is the normal way to do it. Falling
-      # through to HEAD there would resolve to the base branch, match no
-      # dispatch record, and let every PR through.
-      integer j
-      for (( j = i + 3; j <= $#TOK; j++ )); do
-        [[ "${TOK[j]}" == "--head" ]] && { TARGET="${TOK[j+1]}"; break }
-        [[ "${TOK[j]}" == --head=* ]] && { TARGET="${TOK[j]#--head=}"; break }
-      done
-      break ;;
-  esac
+  [[ "${TOK[i]}" == (git|*/git|gh|*/gh) ]] || continue
+  local IS_GH=0
+  [[ "${TOK[i]}" == (gh|*/gh) ]] && IS_GH=1
+  j=$(skip_globals $(( i + 1 )))
+
+  if (( IS_GH )); then
+    [[ "${TOK[j]}" == pr ]] || continue
+    j=$(skip_globals $(( j + 1 )))
+    case "${TOK[j]}" in
+      create) VERB="gh pr create" ;;
+      merge)  VERB="gh pr merge"  ;;
+      *) continue ;;
+    esac
+  else
+    case "${TOK[j]}" in
+      push)  VERB="git push"  ;;
+      merge) VERB="git merge" ;;
+      *) continue ;;
+    esac
+  fi
+  collect_operands $(( j + 1 ))
+  break
 done
 [[ -n "$VERB" ]] || exit 0
 
-[[ -n "$TARGET" ]] || TARGET=$(git -C "$CWD" rev-parse --abbrev-ref HEAD 2>/dev/null)
-[[ -n "$TARGET" && "$TARGET" != "HEAD" ]] || exit 0
-TARGET="${TARGET##*/}"
+# A push names a remote then a refspec; a refspec names src:dst and BOTH sides
+# can be a lane — `lane-kb:main` writes a lane onto the base branch.
+typeset -a CANDIDATES
+local o part
+for o in $OPERANDS; do
+  if [[ "$o" == *:* ]]; then
+    for part in ${(s.:.)o}; do CANDIDATES+=("${part##*/}"); done
+  else
+    CANDIDATES+=("${o##*/}")
+  fi
+done
+# `git push origin` / `gh pr create` with nothing named move the current branch.
+local HEADREF
+HEADREF=$(git -C "$CWD" rev-parse --abbrev-ref HEAD 2>/dev/null)
+[[ -n "$HEADREF" && "$HEADREF" != "HEAD" ]] && CANDIDATES+=("${HEADREF##*/}")
 
 # A merge is only an outward act when it lands on the branch everything is cut
 # from. Merging base INTO a lane is routine and is not gated.
@@ -110,13 +163,32 @@ fi
 # ---------------------------------------------------------------------------
 # The branch names the lane; the lane names the gate that must exist.
 # ---------------------------------------------------------------------------
-local REC LANE="" RUNDIR=""
-for REC in $RECORDS; do
-  [[ "$(jq -r '.branch // empty' "$REC" 2>/dev/null)" == "$TARGET" ]] || continue
-  LANE=$(jq -r '.lane // .agent_name // empty' "$REC" 2>/dev/null)
-  RUNDIR="${REC:h:h}"
-  break
+local REC LANE="" RUNDIR="" TARGET="" cand recbranch
+for cand in $CANDIDATES; do
+  for REC in $RECORDS; do
+    recbranch=$(jq -r '.branch // empty' "$REC" 2>/dev/null)
+    [[ -n "$recbranch" && "$recbranch" == "$cand" ]] || continue
+    LANE=$(jq -r '.lane // .agent_name // empty' "$REC" 2>/dev/null)
+    RUNDIR="${REC:h:h}"
+    TARGET="$cand"
+    break 2
+  done
 done
+
+# FAIL CLOSED on `gh pr merge <number>`. A PR number cannot be resolved to a
+# lane without the network, and merging a PR is unambiguously an outward act —
+# so it is refused rather than waved through. POLICY-OVERRIDE is the escape.
+if [[ -z "$LANE" && "$VERB" == "gh pr merge" ]]; then
+  for cand in $CANDIDATES; do
+    [[ "$cand" == <-> ]] || continue
+    print -u2 -r -- "DENIED: \`$VERB $cand\` — a PR number names no branch, so this hook cannot
+tell which lane it merges or whether that lane is gated.
+
+Merge by branch so the gate can resolve it, or add POLICY-OVERRIDE and the
+reason if you have checked the gate yourself."
+    exit 2
+  done
+fi
 # A branch no dispatch record claims is not a lane — the orchestrator's own
 # docs branch, a human's. Not this hook's business. This is also the hole: a
 # lane whose start never wrote a record is invisible here, which is why the
