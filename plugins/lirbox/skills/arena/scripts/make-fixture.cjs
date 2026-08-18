@@ -25,6 +25,15 @@ const { execFileSync } = require('child_process');
 
 function arg(name, def) { const i = process.argv.indexOf('--' + name); return i > -1 ? process.argv[i + 1] : def; }
 const task = arg('task');
+// A name keys a path. It arrives on a command line the model assembles from a goal, a
+// ticket or a file, so `..` and `/` in it read and write outside the run directory.
+// One shape for every entry point — see docs/security/untrusted-input.md.
+if (task && task !== true) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(task)) {
+    console.error(`ERROR: --task must be a plain name (letters, digits, . _ -), got ${JSON.stringify(task)}`);
+    process.exit(2);
+  }
+}
 const dir = arg('dir');
 const fixture = arg('fixture', 'notes-app');
 if (!task || !dir) { console.error('usage: make-fixture.cjs --task <id> --dir <workroot> [--bundle <path>] [--fixture <name>]'); process.exit(1); }

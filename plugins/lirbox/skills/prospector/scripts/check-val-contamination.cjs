@@ -247,6 +247,13 @@ if (require.main === module) {
     console.error('usage: check-val-contamination.cjs <name> [--project-dir <dir>] [--json]');
     process.exit(1);
   }
+  // A name keys a path. It arrives on a command line the model assembles from a goal, a
+  // ticket or a file, so `..` and `/` in it read and write outside the run directory.
+  // One shape for every entry point — see docs/security/untrusted-input.md.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
+    console.error(`ERROR: <name> must be a plain name (letters, digits, . _ -), got ${JSON.stringify(name)}`);
+    process.exit(2);
+  }
   const di = process.argv.indexOf('--project-dir');
   const projDir = di > -1 ? process.argv[di + 1]
     : path.join(os.homedir(), '.claude', 'projects', process.cwd().replace(/\//g, '-'));

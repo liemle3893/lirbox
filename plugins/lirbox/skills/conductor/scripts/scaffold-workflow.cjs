@@ -112,6 +112,19 @@ if (!name || name === true) { console.error('ERROR: --name <slug> is required �
 if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a kebab slug (a-z0-9-)'); process.exit(1); }
 
 const phases = String(arg('phases', 'Work')).split(',').map((s) => s.trim()).filter(Boolean);
+// A phase title is emitted into the generated conductor inside SINGLE-quoted JS
+// strings — `label: '<p>'`, `phase: '<p>'`, `log('<p>: ...')` — in a dozen
+// places. escTpl() protects the template-literal sites; nothing protected these.
+// A title carrying an apostrophe closes the string, and everything after it is
+// code in a file the Workflow tool runs. Titles are human stage names, so the
+// allowed set is letters, digits, space and - _ / & . , ( ) and nothing else.
+for (const p of phases) {
+  if (p.length > 64 || !/^[A-Za-z0-9][A-Za-z0-9 ._\-/&,()]*$/.test(p)) {
+    console.error(`ERROR: --phases title ${JSON.stringify(p)} is not usable — letters, digits, space and . _ - / & , ( ) only, 64 chars max.`);
+    console.error('       A title becomes an identifier and a quoted string in the generated conductor.');
+    process.exit(1);
+  }
+}
 // --independent is GONE (hard error). It asked the CALLER to declare the work items and their
 // edges at scaffold time — a guess made before anything had read the repo — and a mis-declared
 // edge failed SILENTLY: every declared item branched off the SAME base and never saw another

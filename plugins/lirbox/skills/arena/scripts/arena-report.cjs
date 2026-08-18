@@ -85,6 +85,13 @@ module.exports = { renderLeaderboard };
 if (require.main === module) {
   const name = process.argv[2];
   if (!name) { console.error('usage: arena-report.cjs <name>'); process.exit(1); }
+  // A name keys a path. It arrives on a command line the model assembles from a goal, a
+  // ticket or a file, so `..` and `/` in it read and write outside the run directory.
+  // One shape for every entry point — see docs/security/untrusted-input.md.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
+    console.error(`ERROR: <name> must be a plain name (letters, digits, . _ -), got ${JSON.stringify(name)}`);
+    process.exit(2);
+  }
   const state = JSON.parse(fs.readFileSync(path.join('.arena', 'state', name + '.json'), 'utf8'));
   const { html, md } = renderLeaderboard(state);
   const dir = path.join('docs', 'arena', name);

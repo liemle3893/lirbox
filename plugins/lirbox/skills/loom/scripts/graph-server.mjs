@@ -30,6 +30,12 @@ const NAME = arg('name', '');
 const ROOT = arg('root', process.cwd());
 const PORT = Number(arg('port', 0));
 if (!NAME || NAME === true) { console.error('ERROR: --name is required'); process.exit(1); }
+// NAME keys three paths under .loom/. It comes from a command line the model
+// assembles, so `..` or `/` in it reads and writes outside the run directory.
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(NAME)) {
+  console.error(`ERROR: --name must be a plain name (letters, digits, . _ -), got ${JSON.stringify(NAME)}`);
+  process.exit(1);
+}
 
 const graphPath = path.join(ROOT, '.loom', `${NAME}.graph.json`);
 const statePath = path.join(ROOT, '.loom', 'state', `${NAME}.json`);
@@ -82,10 +88,43 @@ function serveStatic(res, rel) {
   fs.createReadStream(file).pipe(res);
 }
 
+// ---------------------------------------------------------------------------
+// Binding to loopback keeps this off the network. It does NOT keep it away from
+// a browser: any page the user has open can reach 127.0.0.1, and POST /action
+// writes the file the skill polls to APPROVE a plan. editor.js already guards
+// the in-page version of this (see its note on `<img onerror>`); this is the
+// cross-origin version, which no amount of escaping in the page can stop.
+//
+// Three checks, and each one has to be there:
+//   * Host — a name that resolves to 127.0.0.1 (DNS rebinding) arrives with the
+//     attacker's hostname in Host, not ours.
+//   * Origin — a cross-origin fetch always sends one; a same-origin fetch from
+//     the editor sends exactly this server's own.
+//   * content-type — application/json is not a CORS "simple" content type, so a
+//     cross-origin POST must preflight, and this server answers no preflight.
+// Any one alone is bypassable; the three together are the standard local-server
+// posture. Do not relax one for convenience.
+let SELF_ORIGINS = new Set();
+let SELF_HOSTS = new Set();
+const originOk = (v) => !v || SELF_ORIGINS.has(v);
+const hostOk = (v) => !!v && SELF_HOSTS.has(v);
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
   try {
+    if (!hostOk(req.headers.host)) {
+      return send(res, 403, { error: 'forbidden host', hint: 'reach this server as 127.0.0.1 or localhost' });
+    }
+    if (!originOk(req.headers.origin)) {
+      return send(res, 403, { error: 'forbidden origin', origin: req.headers.origin });
+    }
+    if (req.method === 'POST') {
+      const ct = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (ct !== 'application/json') {
+        return send(res, 415, { error: 'POST requires content-type: application/json' });
+      }
+    }
     if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
       return serveStatic(res, '/index.html');
     }
@@ -174,5 +213,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  process.stdout.write(`LOOM_SERVER_PORT=${server.address().port}\n`);
+  const { port } = server.address();
+  SELF_HOSTS = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
+  SELF_ORIGINS = new Set([...SELF_HOSTS].map((h) => `http://${h}`));
+  process.stdout.write(`LOOM_SERVER_PORT=${port}\n`);
 });

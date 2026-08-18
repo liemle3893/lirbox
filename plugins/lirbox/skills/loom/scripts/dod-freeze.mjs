@@ -18,6 +18,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
+// A criterion id names a FILE that is written executable, and a checkFile names
+// a file that is read back. Both arrive inside a dod.json a worker wrote, so
+// neither is a name this script chose. `../` in an id writes a 0755 file
+// wherever it points. See docs/security/untrusted-input.md.
+const ID_OK = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+function inside(root, p) {
+  const abs = path.resolve(root, p);
+  return abs === root || abs.startsWith(root + path.sep);
+}
+
 export function sha256File(p) {
   return 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 }
@@ -28,6 +38,10 @@ export function verifyChecks(dod, root) {
   const out = [];
   for (const c of dod.criteria || []) {
     if (c.tier !== 'checkable') continue;
+    if (typeof c.checkFile !== 'string' || !inside(path.resolve(root), c.checkFile)) {
+      out.push({ id: c.id, ok: false, reason: `checkFile is not inside the DoD's own directory: ${JSON.stringify(c.checkFile)}` });
+      continue;
+    }
     const p = path.resolve(root, c.checkFile);
     if (!fs.existsSync(p)) { out.push({ id: c.id, ok: false, reason: 'check file missing: ' + c.checkFile }); continue; }
     const actual = sha256File(p);
@@ -63,7 +77,16 @@ function main() {
       console.error(`ERROR: checkable criterion '${c.id}' has no "script" to freeze`);
       process.exit(1);
     }
+    if (typeof c.id !== 'string' || !ID_OK.test(c.id)) {
+      console.error(`ERROR: criterion id ${JSON.stringify(c.id)} is not usable — it becomes the filename of an`);
+      console.error('       executable check. Letters, digits and . _ - only, 128 chars max.');
+      process.exit(1);
+    }
     const file = path.join(checksDir, `${c.id}.sh`);
+    if (!inside(path.resolve(checksDir), file)) {
+      console.error(`ERROR: criterion '${c.id}' would write outside --checks-dir`);
+      process.exit(1);
+    }
     fs.writeFileSync(file, c.script.endsWith('\n') ? c.script : c.script + '\n', { mode: 0o755 });
     fs.chmodSync(file, 0o755);
     c.checkFile = path.relative(root, file);

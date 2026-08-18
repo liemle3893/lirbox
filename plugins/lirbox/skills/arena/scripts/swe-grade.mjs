@@ -38,6 +38,13 @@ function die(msg, code = 2) { console.error('swe-grade: ' + msg); process.exit(c
 
 const task = arg('task');
 if (!task || task === true) die('usage: swe-grade.mjs --task <id> [--diff <path> | --repo <dir> --ref <branch> | --validate]');
+// A name keys a path. It arrives on a command line the model assembles from a goal, a
+// ticket or a file, so `..` and `/` in it read and write outside the run directory.
+// One shape for every entry point — see docs/security/untrusted-input.md.
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(task)) {
+  console.error(`ERROR: --task must be a plain name (letters, digits, . _ -), got ${JSON.stringify(task)}`);
+  process.exit(2);
+}
 const taskDir = join(TASKS_DIR, task);
 if (!existsSync(taskDir)) die(`unknown task "${task}" (no ${taskDir})`);
 const ref = JSON.parse(readFileSync(join(taskDir, 'repo.ref'), 'utf8'));

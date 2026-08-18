@@ -32,14 +32,27 @@ Four practices drive it:
 | 6 | `evals/checks-manifest.json` `mutations[]` | `scripts/prove-checks.mjs` | a file write and a child process env | path containment, `env` name allowlist + loader denylist, per-key type check |
 | 7 | `--catalog <dir>` | `scripts/harbor-prep.mjs` | a recursive delete | refuses `/`, `$HOME`, anything containing or inside the repo, and any non-empty directory without its own marker |
 | 8 | Repo lockfiles | `orch-config.sh detect` | a setup command | the repo picks *which* preset; it never supplies the string |
-| 9 | A check command | `whetstone/scripts/check-baseline.cjs` | `execSync` **through a shell** | none — it is an operator argument, by design (see below) |
-| 10 | `evals/**` and `scripts/test-*.cjs` | `scripts/evals-all.mjs` | `node <file>` | none — running the repo's own test code is the point (see below) |
-| 11 | Arena fixture bundles + graders | `arena/scripts/swe-*.mjs` | cloned repos, `npm`, graders | fixed binaries with array args (no shell); fixtures are in-repo and sha-pinned |
+| 9 | `--name` / `<name>` / `--task` / `--skill` | 11 report, list and grading entry points | a path that is read or written | one name guard at every one of them (below) |
+| 10 | `--name` | `arena/scripts/scaffold-arena.cjs` | **JS source** in the generated conductor | kebab-slug check, as its three siblings already had |
+| 11 | `--phases` titles | `conductor/scripts/scaffold-workflow.cjs` | **JS source** (single-quoted strings) | title charset check; `escTpl()` already covered the template-literal sites |
+| 12 | `dod.json` `criteria[].id` / `.checkFile` | `loom/scripts/dod-freeze.mjs` | the name of a file written **0755** | identifier check + containment against `--checks-dir` |
+| 13 | An HTTP request | `loom/scripts/graph-server.mjs` | writes the plan-**approval** file | Host + Origin + `content-type` (below) |
+| 14 | A PR number / `--repo` | `pr-writeup/scripts/fetch_pr.sh` | an output path and `gh` argv | digits-only / `owner/name` |
+| 15 | A PR diff's paths | `pr-writeup/scripts/fetch_pr.sh` | what lands in the write-up | dot-component filter, now matching at any depth |
+| 16 | A check command | `whetstone/scripts/check-baseline.cjs` | `execSync` **through a shell** | none — it is an operator argument, by design (see below) |
+| 17 | `evals/**` and `scripts/test-*.cjs` | `scripts/evals-all.mjs` | `node <file>` | none — running the repo's own test code is the point (see below) |
+| 18 | Arena fixture bundles + graders | `arena/scripts/swe-run.mjs` | cloned repos, `npm`, graders | fixed binaries with array args (no shell); fixtures are in-repo and sha-pinned |
 
-Diagram artifact validators (`flowchart`, `sequence-diagram`, `component-diagram`,
-`plan-check`, `plan-deck` — `assets/validate.mjs`) read an HTML file, parse it and
-report. They never execute what they read, and nothing on that path constructs a
-command.
+Checked and found clean, so nothing was changed: every other child process in the
+repo goes through `execFileSync`/`spawnSync` with a fixed binary and an array of
+arguments — `check-baseline.cjs` (row 16) is the only `execSync` anywhere, and
+there is no `shell: true`, no `eval`, and no dynamic `import()`/`require()` of a
+path built from external data. `list-workflows`, `list-runs`, `list-arena`,
+`list-optimizations` and `list-improvements` read a fixed directory and take no
+name at all. The diagram validators (`flowchart`, `sequence-diagram`,
+`component-diagram`, `plan-check`, `plan-deck` — `assets/validate.mjs`) parse an
+HTML file and report; they never execute what they read. `arena-report.cjs`
+escapes into HTML through `esc()`; the other report generators emit Markdown.
 
 ---
 
@@ -149,7 +162,86 @@ that quietly does not run reads exactly like one that passed.
 
 ---
 
-## 9 and 10 — accepted, and why
+## 9 — the same name, in fifteen places
+
+Four scaffolds validated `--name` as a kebab slug before writing
+`.workflows/<name>.js`. Eleven other entry points took a name from the same kind
+of command line, joined it onto a path, and read or wrote there with nothing
+checking it: every report generator, `harvest-feedback`, `check-val-contamination`,
+`swe-grade`, `swe-score`, `arena-report`, `graph-server`, `scaffold-arena`.
+
+Which is the point about coverage. The traversal was identical in all fifteen;
+only whether anyone had written the check differed — and the four that had it
+were the four that happened to be forked from one file. `arena-report.cjs
+../../../../etc/x` exited non-zero on the way in, which looks like a refusal and
+is not one: it stopped at "no such state file", so it stopped nothing the moment
+the traversal named a file that exists.
+
+They all carry the same guard now — `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`, which
+excludes `/` and `\` outright, so traversal is not a thing the name can express.
+The suite asserts the refusal **names** the problem, so an incidental non-zero
+exit cannot pass for a check.
+
+## 10 and 11 — a name that becomes code
+
+`scaffold-arena.cjs` emitted its `--name` into the conductor it generates as a
+raw single-quoted string: `name: '<name>'`. Not escaped, not validated, and the
+Workflow tool runs that file. `--name "x'; …; '"` closed the string and the rest
+was code. The same name was also `path.join`'d into the output path, so
+`--name ../../../../tmp/pwn` wrote the conductor outside `.arena/` — the baseline
+run of the suite left a 14 KB `/tmp/pwn.js` behind to prove it.
+
+`scaffold-workflow.cjs` was careful about this in one direction and not the
+other. Prompt bodies go through `escTpl()` (backslash, backtick, `${`) because
+they land in template literals. A `--phases` title lands in **single-quoted**
+strings — `label: '<p>'`, `phase: '<p>'`, `log('<p>: …')`, a dozen sites — and
+nothing escaped those. An apostrophe was enough.
+
+Both now validate. The conductor's golden-snapshot net still passes byte-for-byte,
+which is the evidence that the check changed nothing about ordinary generation.
+
+## 12 — a JSON field that names an executable
+
+`dod-freeze.mjs` writes one file per checkable criterion, `mode 0o755`, named
+`${c.id}.sh` — where `c.id` comes out of a `dod.json` a worker agent wrote. An id
+of `../../…` wrote an executable file wherever it pointed. `verifyChecks` had the
+mirror of it: `checkFile` from the same JSON, resolved and read with no
+containment. Both are checked now, and the loom net's `verifyChecks catches a
+deleted check` still passes.
+
+## 13 — loopback is not a boundary
+
+`graph-server.mjs` binds 127.0.0.1 and says so in a comment: "no authentication
+because it is never reachable off the loopback interface". That is true of the
+network and false of the browser. Any page the user has open can POST to
+127.0.0.1, and `POST /action` writes the file loom polls to **approve a plan**.
+`editor.js` already carries a note about the in-page version of this
+(`<img src=x onerror="fetch('/action', …)">`); no amount of escaping inside the
+page reaches the cross-origin version.
+
+Three checks, and each is load-bearing:
+
+- **Host** must be `127.0.0.1:<port>` / `localhost:<port>`. This is what stops DNS
+  rebinding, where the attacker's hostname resolves to 127.0.0.1 so the socket
+  and the Origin both look local.
+- **Origin**, when present, must be this server's own. A cross-origin `fetch`
+  always sends one.
+- **content-type** must be `application/json`, which is *not* a CORS "simple"
+  content type — so a cross-origin POST has to preflight, and this server answers
+  no preflight. Without this, `text/plain` sends the same JSON body with no
+  preflight at all and an Origin check on its own is decoration.
+
+The editor already sent `application/json`, so nothing on its side changed.
+
+## 15 — a filter that only worked at the top level
+
+`fetch_pr.sh` strips hidden-directory sections out of the diff it hands the
+write-up. The test was `/[ab]\/\./` against the whole line, which matches
+`a/.claude/x` and does **not** match `a/src/.env`. A dotfile one directory down
+went into the write-up with its contents. Now each path has its `a/`/`b/` prefix
+stripped and is checked for a dot-leading component at any depth.
+
+## 16 and 17 — accepted, and why
 
 **`check-baseline.cjs <command>` runs its argument through a shell.** That is the
 tool: it takes an acceptance-check command and reports whether it fails on the
@@ -171,11 +263,21 @@ secrets to this workflow, and do not switch it to `pull_request_target`.
 
 Two automated suites, both required to be RED before the fix and GREEN after:
 
-- **`node scripts/test-hostile-input.mjs`** — builds a hostile
+- **`node scripts/test-hostile-input.mjs`** — 38 cases. A hostile
   `checks-manifest.json` (traversal, absolute path, `NODE_OPTIONS` as `env`,
-  non-string fields, unknown keys) in a throwaway tree and requires the refusal;
-  points `harbor-prep.mjs --catalog` at a directory full of work and requires it
-  to survive. Runs in CI **before** the step that trusts the manifest.
+  non-string fields, unknown keys); `harbor-prep.mjs --catalog` pointed at a
+  directory full of work; a traversing name at all eleven entry points in row 9;
+  a quote-carrying name and phase title at the two generators; a `..` criterion
+  id at `dod-freeze`; and a live `graph-server` driven cross-origin, with a
+  `text/plain` body, and with a rebound `Host`. Every one of these was RED on the
+  commit before the fix. Runs in CI **before** the step that trusts the manifest.
+
+  Two details in it are load-bearing, both learned the hard way. The child-process
+  timeout: `graph-server.mjs` with an unchecked `--name` does not fail, it
+  *starts*, so without a cap the suite hangs instead of reporting. And the `Host`
+  case goes through `node:http` rather than `fetch`, because `Host` is a forbidden
+  header name for fetch — it gets dropped silently, and the case then passes while
+  testing nothing.
 - **`plugins/lirbox/skills/lane-config/evals/checks/hostile-config-refused.check.mjs`**
   — drives the hostile flag end to end and requires a refusal at write time, at
   read time (`validate`), at spawn time and at command time. Frozen, registered

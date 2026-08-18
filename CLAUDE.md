@@ -53,8 +53,14 @@ maps every place a string here becomes a path, an argv token or a child process,
   build valid JSON changes nothing — `set-lanes --max oops` used to truncate the config and exit 0.
 - `evals/checks-manifest.json` is PR-controlled input to `scripts/prove-checks.mjs`; its `file`,
   `env` and `root` are checked before use, and an off-shape manifest is a hard exit 2.
-- The hostile cases are tests, not prose: `node scripts/test-hostile-input.mjs` (in CI) and
-  lane-config's frozen `hostile-config-refused` check. Extend one when you add a reader.
+- **A `--name`/`--task`/`<name>` that keys a path is checked at EVERY entry point**, not just the
+  four scaffolds that had it — same guard, same message. A name that reaches generated JS
+  (`scaffold-arena`, conductor's `--phases`) or an executable filename (`dod-freeze` criterion ids)
+  is checked harder, because there it is source, not a path segment.
+- `loom`'s `graph-server.mjs` binds loopback, which is not a boundary against a browser: it checks
+  Host, Origin and `content-type` so a page the user is visiting cannot approve a plan.
+- The hostile cases are tests, not prose: `node scripts/test-hostile-input.mjs` (38 cases, in CI)
+  and lane-config's frozen `hostile-config-refused` check. Extend one when you add a reader.
 
 ## Validate
 

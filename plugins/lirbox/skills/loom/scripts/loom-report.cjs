@@ -12,6 +12,13 @@ const path = require('path');
 
 const name = process.argv[2];
 if (!name) { console.error('usage: loom-report.cjs <name>'); process.exit(1); }
+// A name keys a path. It arrives on a command line the model assembles from a goal, a
+// ticket or a file, so `..` and `/` in it read and write outside the run directory.
+// One shape for every entry point — see docs/security/untrusted-input.md.
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
+  console.error(`ERROR: <name> must be a plain name (letters, digits, . _ -), got ${JSON.stringify(name)}`);
+  process.exit(2);
+}
 
 const p = path.join(process.cwd(), '.loom', 'state', `${name}.json`);
 if (!fs.existsSync(p)) { console.error(`no such run: ${p}`); process.exit(1); }

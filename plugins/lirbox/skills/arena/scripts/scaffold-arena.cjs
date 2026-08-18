@@ -337,6 +337,12 @@ module.exports = { configHash, planCells, pickPairSamples, resolveForfeit, tally
 if (require.main === module) {
   const name = arg('name');
   if (!name || name === true) { console.error('usage: scaffold-arena.cjs --name <slug> [--out <path>] [--force]'); process.exit(1); }
+  // The three sibling scaffolds check this and this one did not, which is the
+  // whole of the bug: `name` is BOTH joined into the output path and emitted
+  // into the generated conductor inside single quotes (`name: '<name>'`). So a
+  // name carrying a quote closes the string and the rest is code in a file the
+  // Workflow tool then runs, and a name carrying `../` writes it somewhere else.
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.error('ERROR: --name must be a kebab slug (a-z0-9-)'); process.exit(1); }
   const out = arg('out', path.join('.arena', name + '.js'));
   if (fs.existsSync(out) && process.argv.indexOf('--force') === -1) { console.error(`refusing to overwrite ${out} (use --force)`); process.exit(1); }
   fs.mkdirSync(path.dirname(out), { recursive: true });

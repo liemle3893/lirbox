@@ -208,6 +208,13 @@ if (isMain) {
   } else {
     const dir = arg('cells'); const name = arg('name'); const filter = arg('filter', null);
     if (!dir || dir === true || !name || name === true) { console.error('usage: swe-score.mjs --cells <dir> --name <label> --config <json> [--filter <substr>] | --index | --fingerprint'); process.exit(2); }
+    // A name keys a path. It arrives on a command line the model assembles from a goal, a
+    // ticket or a file, so `..` and `/` in it read and write outside the run directory.
+    // One shape for every entry point — see docs/security/untrusted-input.md.
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(name))) {
+      console.error(`ERROR: --name must be a plain name (letters, digits, . _ -), got ${JSON.stringify(String(name))}`);
+      process.exit(2);
+    }
     const config = JSON.parse(arg('config', '{}') === true ? '{}' : arg('config', '{}'));
     const cells = loadCells(resolve(String(dir)), filter === true ? null : filter);
     if (!cells.length) { console.error('no .grade cells matched'); process.exit(2); }

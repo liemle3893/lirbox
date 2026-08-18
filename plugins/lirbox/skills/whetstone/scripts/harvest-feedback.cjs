@@ -36,6 +36,13 @@ function arg(name, def) {
 
 const skill = process.argv[2];
 if (!skill || skill.startsWith('--')) { console.error('usage: harvest-feedback.cjs <skill> [--skill-path <dir>] [--split train] [--dry-run]'); process.exit(1); }
+// A name keys a path. It arrives on a command line the model assembles from a goal, a
+// ticket or a file, so `..` and `/` in it read and write outside the run directory.
+// One shape for every entry point — see docs/security/untrusted-input.md.
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(skill)) {
+  console.error(`ERROR: <skill> must be a plain name (letters, digits, . _ -), got ${JSON.stringify(skill)}`);
+  process.exit(2);
+}
 const skillPath = arg('skill-path', path.join('plugins', 'lirbox', 'skills', skill));
 const split = arg('split', 'train');
 const dryRun = arg('dry-run', false) === true;
