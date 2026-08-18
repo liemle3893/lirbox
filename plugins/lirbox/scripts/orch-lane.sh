@@ -201,12 +201,23 @@ invariants and no ubiquitous language, and will invent both.
   h $ARGS >/dev/null || die "agent start failed for $NAME on $PANE"
 
   if [[ -n "$RUN" ]]; then
-    local D=".orchestration/$RUN/dispatch"
+    # $ROOT, not PWD. `restart` resolves this path from the repo root, so a
+    # start issued from a subdirectory used to file the record where restart
+    # would never look — and its refusal reads "no dispatch record … start a
+    # fresh lane instead", which turns every wedged pane into a second checkout.
+    local D="$ROOT/.orchestration/$RUN/dispatch"
     mkdir -p "$D"
+    # `lane` and `worktree` are not decoration: restart reads `.worktree` to
+    # find the checkout, to fire the "this tree is gone" guard, and to measure
+    # sha_at_restart. Omitted, that read returned empty and restart silently
+    # measured the MAIN repo instead of the lane's tree — the comparison against
+    # sha_at_dispatch that is supposed to separate a lane that died after
+    # committing from one that never started.
     jq -n --arg n "$NAME" --arg p "$PANE" --arg w "$WS" --arg pr "$PROFILE" \
           --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" --arg b "$BRANCH" \
-          --arg sha "$(git rev-parse HEAD 2>/dev/null)" \
-      '{agent_name:$n,pane_id:$p,workspace_id:$w,profile:$pr,kind:$k,model:$m,effort:$e,branch:$b,sha_at_dispatch:$sha,state:"dispatched"}' \
+          --arg wt "$(print -r -- "$WT" | jq -r '.result.worktree.path // empty')" \
+          --arg sha "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" \
+      '{lane:$n,agent_name:$n,pane_id:$p,workspace_id:$w,worktree:$wt,profile:$pr,kind:$k,model:$m,effort:$e,branch:$b,sha_at_dispatch:$sha,state:"dispatched"}' \
       > "$D/$NAME.json"
   fi
 
@@ -354,6 +365,26 @@ close)
   PANE=$(print -r -- "$ROW" | jq -r '.pane_id')
   ST=$(print -r -- "$ROW"   | jq -r '.agent_status')
 
+  # Uncommitted work in the lane's checkout is work only that pane knew about.
+  # PRINT IT FIRST, unconditionally.
+  #
+  # This used to sit below the working/blocked refusal and behind the same
+  # `! FORCE` guard. But --force is the ONLY way past that refusal, so for a
+  # WORKING lane — the single case where closing abandons anything — the listing
+  # could never be reached. The guard existed and was unreachable in the
+  # situation it was written for. A verifier lane killed mid-task in the 2026-08
+  # run left an unrestored red-arm mutant in its tree with nothing pointing at
+  # it; it surfaced hours later, and only because a disk audit walked that path.
+  local WT DIRTY
+  WT=$(print -r -- "$ROW" | jq -r '.cwd // empty')
+  if [[ -n "$WT" && -d "$WT" ]]; then
+    DIRTY=$(git -C "$WT" status --short 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$DIRTY" != 0 ]]; then
+      print -u2 -r -- "lane '$NAME' has $DIRTY uncommitted change(s) in $WT:
+$(git -C "$WT" status --short 2>/dev/null | sed 's/^/  /')"
+    fi
+  fi
+
   # Closing a pane kills the agent in it. Doing that to a lane still mid-task
   # destroys whatever only that pane holds — the md's rule is that a pane is
   # cleared once its work is durable, never before.
@@ -362,17 +393,11 @@ close)
   Wait for it to land, or pass --force if you have confirmed its work is durable."
   fi
 
-  # Even when idle/done: uncommitted work in its checkout is work only that pane
-  # knew about. Say so rather than discovering it later.
-  local WT DIRTY
-  WT=$(print -r -- "$ROW" | jq -r '.cwd // empty')
-  if [[ -n "$WT" && -d "$WT" ]]; then
-    DIRTY=$(git -C "$WT" status --short 2>/dev/null | wc -l | tr -d ' ')
-    if [[ "$DIRTY" != 0 ]] && (( ! FORCE )); then
-      die "lane '$NAME' is $ST but its checkout has $DIRTY uncommitted change(s):
+  # The listing above is information; this is still a veto. Only --force passes.
+  if [[ -n "$DIRTY" && "$DIRTY" != 0 ]] && (( ! FORCE )); then
+    die "lane '$NAME' is $ST but its checkout has $DIRTY uncommitted change(s):
   $WT
   Get them committed, or pass --force to close anyway."
-    fi
   fi
 
   h pane close "$PANE" >/dev/null || die "pane close failed for $PANE"

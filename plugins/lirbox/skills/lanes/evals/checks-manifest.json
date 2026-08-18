@@ -250,6 +250,93 @@
         }
       ]
     },
+    "split-claims-no-workspace": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "a split's workspace_id is recorded again, so a workspace this run never created lands in the file that grants destruction rights — the row that authorized removing the workspace the session itself runs in",
+          "env": "LANE_LEDGER_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/lane-ledger.sh",
+          "find": "elif [[ \"$CMD\" == *pane*split* ]]; then\n  grab 'pane_id'",
+          "replace": "elif [[ \"$CMD\" == *pane*split* ]]; then\n  grab 'pane_id|workspace_id'"
+        },
+        {
+          "why": "worktree create stops owning the workspace it genuinely created, so every legitimate teardown of this run's own lanes is denied as a pane it did not create",
+          "env": "LANE_LEDGER_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/lane-ledger.sh",
+          "find": "if [[ \"$CMD\" == *worktree*create* ]]; then\n  grab 'pane_id|workspace_id'",
+          "replace": "if [[ \"$CMD\" == *worktree*create* ]]; then\n  grab 'pane_id'"
+        },
+        {
+          "why": "the guard stops treating worktree remove as a write, so destroying a workspace needs no ownership at all and the ledger's contents become irrelevant to the one command that deletes checkouts",
+          "env": "PANE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/pane-guard.sh",
+          "find": "      [[ \"$verb\" == remove ]] || continue",
+          "replace": "      continue"
+        }
+      ]
+    },
+    "dispatch-record-is-where-restart-looks": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the record goes back to a PWD-relative path, so a start issued from a subdirectory files it where restart never looks and the lane's recovery path becomes cutting a second checkout",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    local D=\"$ROOT/.orchestration/$RUN/dispatch\"",
+          "replace": "    local D=\".orchestration/$RUN/dispatch\""
+        },
+        {
+          "why": "the worktree field is dropped again, so restart's `.worktree` read returns empty: the gone-checkout guard cannot fire and sha_at_restart is measured against the main repo instead of the lane's tree",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "          --arg wt \"$(print -r -- \"$WT\" | jq -r '.result.worktree.path // empty')\" \\\n",
+          "replace": "          --arg wt \"\" \\\n"
+        },
+        {
+          "why": "the record stops naming the lane, so the key every other artifact joins on is missing from the one file that is supposed to make the lane findable",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "      '{lane:$n,agent_name:$n,",
+          "replace": "      '{agent_name:$n,"
+        }
+      ]
+    },
+    "close-says-what-it-abandons": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the dirty listing goes back below the force guard, where --force silences it — and --force is the only way to close a working lane, so the listing is unreachable in the one case where closing abandons work",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    if [[ \"$DIRTY\" != 0 ]]; then\n      print -u2 -r -- \"lane '$NAME' has $DIRTY uncommitted change(s) in $WT:",
+          "replace": "    if [[ \"$DIRTY\" != 0 ]] && (( ! FORCE )); then\n      print -u2 -r -- \"lane '$NAME' has $DIRTY uncommitted change(s) in $WT:"
+        },
+        {
+          "why": "the listing names a count but never the files, so the operator is told work exists and not which work — after the pane is closed nothing else points at it",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "$(git -C \"$WT\" status --short 2>/dev/null | sed 's/^/  /')\"",
+          "replace": "\""
+        },
+        {
+          "why": "the dirty veto is dropped along with the hoist, trading 'stop before abandoning work' for 'abandon it and mention the files'",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  if [[ -n \"$DIRTY\" && \"$DIRTY\" != 0 ]] && (( ! FORCE )); then",
+          "replace": "  if false; then"
+        }
+      ]
+    },
     "base-branch-defaults-to-main": {
       "expect": "green",
       "mutations": [
