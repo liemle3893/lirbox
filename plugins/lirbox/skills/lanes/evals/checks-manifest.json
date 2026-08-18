@@ -22,7 +22,7 @@
           "replace": "awk '$2 ~ /^Q/ {print $1}'"
         },
         {
-          "why": "the gate detects the stop and answers it with ctrl+c — a signal that is not delivered until SIGCONT is, so the block names a remedy that frees nothing",
+          "why": "the gate detects the stop and answers it with ctrl+c \u2014 a signal that is not delivered until SIGCONT is, so the block names a remedy that frees nothing",
           "env": "LANE_GATE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/lane-gate.sh",
@@ -30,7 +30,7 @@
           "replace": "  ctrl+c via pane send-keys"
         },
         {
-          "why": "the stopped process is never matched back to a lane's checkout, so the gate knows something is stopped and cannot say which lane — which is indistinguishable from not noticing",
+          "why": "the stopped process is never matched back to a lane's checkout, so the gate knows something is stopped and cannot say which lane \u2014 which is indistinguishable from not noticing",
           "env": "LANE_GATE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/lane-gate.sh",
@@ -46,7 +46,7 @@
           "why": "the stopped row's move goes back to ctrl+c: the state is detected and the lane still cannot be freed, because SIGINT is not delivered to a process the kernel will not schedule",
           "env": "LANES_SKILL_OVERRIDE",
           "file": "SKILL.md",
-          "find": "`kill -CONT <pid>` — `ctrl+c` cannot land on a stopped process",
+          "find": "`kill -CONT <pid>` \u2014 `ctrl+c` cannot land on a stopped process",
           "replace": "`ctrl+c` via `pane send-keys`"
         },
         {
@@ -57,7 +57,7 @@
           "replace": "awk '$2 ~ /Z/'"
         },
         {
-          "why": "the probe stops asking ps for process state at all — the one signal herdr cannot supply, and the only thing that separates a stopped lane from a wedged one",
+          "why": "the probe stops asking ps for process state at all \u2014 the one signal herdr cannot supply, and the only thing that separates a stopped lane from a wedged one",
           "env": "LANES_SKILL_OVERRIDE",
           "file": "SKILL.md",
           "find": "ps -o pid=,stat=,command= -A",
@@ -76,7 +76,7 @@
           "replace": "  const notes = entries.filter((e) => !['lane', 'ack', 'answer'].includes(e.type) && !superseded.has(e.id)).map((e) => ({"
         },
         {
-          "why": "accepting a finding with neither a command nor an explicit unproven marker puts an inference into the record in the same register as a measurement — the exact way a wrong fact becomes durable",
+          "why": "accepting a finding with neither a command nor an explicit unproven marker puts an inference into the record in the same register as a measurement \u2014 the exact way a wrong fact becomes durable",
           "env": "NOTES_OVERRIDE",
           "file": "scripts/notes.mjs",
           "find": "  if (type === 'finding' && !flags.cmd && !flags.unproven) {",
@@ -90,7 +90,7 @@
           "replace": "  if (false) {"
         },
         {
-          "why": "a blocked lane with no reason shows a block in the Now table with no question attached, which is indistinguishable from work in progress — the failure that let a lane sit idle for an hour",
+          "why": "a blocked lane with no reason shows a block in the Now table with no question attached, which is indistinguishable from work in progress \u2014 the failure that let a lane sit idle for an hour",
           "env": "NOTES_OVERRIDE",
           "file": "scripts/notes.mjs",
           "find": "  if (status === 'blocked' && !flags['blocked-on']) {",
@@ -100,7 +100,7 @@
           "why": "letting anything be acked collapses the one distinction the band rests on: a decision is something the orchestrator resolved for you and you may still overturn, and acking is the user's act alone",
           "env": "NOTES_OVERRIDE",
           "file": "scripts/notes.mjs",
-          "find": "  if (target.type !== 'decision') die(`${id} is a ${target.type} — only decisions are acked`);",
+          "find": "  if (target.type !== 'decision') die(`${id} is a ${target.type} \u2014 only decisions are acked`);",
           "replace": "  if (false) die('unreachable');"
         },
         {
@@ -109,6 +109,173 @@
           "file": "scripts/notes.mjs",
           "find": "  if (entry.type === 'decision') writeStoreDecision(entry);\n  return entry;\n}\n\nfunction cmdAck",
           "replace": "  return entry;\n}\n\nfunction cmdAck"
+        }
+      ]
+    },
+    "spawn-door-opens": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the readiness timeout stops being clamped, so a config carrying a lane-runtime number reaches herdr's --timeout and every start dies on invalid_agent_timeout \u2014 the defect that produced 0 clean starts in 26",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  (( READY_MS > 300000 )) && READY_MS=300000\n  (( READY_MS < 3001 ))   && READY_MS=3001\n\n  # Refuse to exceed the declared lane cap",
+          "replace": "\n  # Refuse to exceed the declared lane cap"
+        },
+        {
+          "why": "worktree create stops pinning the source repo, so herdr cuts the checkout from whatever the human last focused \u2014 three checkouts landed in another session's repo this way",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "h worktree create --cwd \"$ROOT\"",
+          "replace": "h worktree create"
+        },
+        {
+          "why": "the agent is started without waiting for the pane to reach a shell prompt \u2014 the race that answered agent_pane_busy on 8 of 26 starts",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  wait_shell \"$PANE\" $(( READY_MS / 1000 )) || die \"pane $PANE never reached a shell prompt.",
+          "replace": "  false && die \"pane $PANE never reached a shell prompt."
+        },
+        {
+          "why": "the readiness predicate stops requiring the foreground process group to BE the shell, so a pane running something else reads as ready",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "      | (.shell_pid != null) and (.foreground_process_group_id == .shell_pid)'",
+          "replace": "      | (.shell_pid != null)'"
+        },
+        {
+          "why": "a flag the profile owns goes back to answering \"unknown flag\", which reads as a typo rather than as a rule",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "      --kind|--model|--effort|--agent)\n        die \"$1 comes from the profile, not the command line.\n  Change it with orch-config.sh set-profile, or start with a different --profile.\" ;;",
+          "replace": "      --nonesuch) ;;"
+        },
+        {
+          "why": "a lane name omitted from the name slot is blamed on the following argument again, sending the operator to the wrong line",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  [[ \"$NAME\" == --* ]] && die \"the lane name comes first, before any flag:",
+          "replace": "  [[ \"$NAME\" == --NEVER* ]] && die \"the lane name comes first, before any flag:"
+        },
+        {
+          "why": "start stops requiring --run, so the dispatch record is skipped again and the lane cannot be found \u2014 or restarted \u2014 after this turn",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  [[ -n \"$RUN\" ]] || die \"start needs --run <slug>: it names the run whose",
+          "replace": "  [[ -n \"$RUN\" || 1 ]] || die \"start needs --run <slug>: it names the run whose"
+        },
+        {
+          "why": "the base branch goes back to a hardcoded default, so every repo that does not use it fails at spawn with 'not a valid object name'",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  [[ -n \"$BASE\" ]] || BASE=$(jq -r '.lanes.base_branch // empty' \"$CFG\")",
+          "replace": "  [[ -n \"$BASE\" ]] || BASE=dev"
+        },
+        {
+          "why": "an unresolvable base branch is accepted, moving the failure from config time to spawn time where it reads as a broken orchestrator",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  git rev-parse --verify -q \"$BASE\" >/dev/null 2>&1 \\\n    || die \"base",
+          "replace": "  true \\\n    || die \"base"
+        },
+        {
+          "why": "restart cuts a fresh worktree instead of re-arming the recorded pane, which is start's job and doubles the lane's checkouts",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\" -- --agent \"$PROFILE\")\n  [[ -n \"$MODEL\" ]] && ARGS+=(--model \"$MODEL\")\n  [[ -n \"$EFLAG\" ]] && ARGS+=($EFLAG \"$EFFORT\")\n  [[ -n \"$FLAGS\" ]] && ARGS+=(${=FLAGS})\n  h $ARGS >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved",
+          "replace": "  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\")\n  h worktree create --cwd \"$ROOT\" --branch \"$NAME-again\" --no-focus --json >/dev/null\n  h $ARGS >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved"
+        },
+        {
+          "why": "restart drops the profile from the spawn, which is exactly what a herdr /clear does \u2014 the defect that ran a whole miniapp track on a default agent with no invariants",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\" -- --agent \"$PROFILE\")\n  [[ -n \"$MODEL\" ]] && ARGS+=(--model \"$MODEL\")\n  [[ -n \"$EFLAG\" ]] && ARGS+=($EFLAG \"$EFFORT\")\n  [[ -n \"$FLAGS\" ]] && ARGS+=(${=FLAGS})\n  h $ARGS >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved",
+          "replace": "  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\")\n  h $ARGS >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved"
+        },
+        {
+          "why": "restart accepts a lane with no dispatch record, so it re-arms a pane it cannot know belongs to that lane",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  [[ -r \"$REC\" ]] || die \"no dispatch record at $REC.",
+          "replace": "  [[ -r \"$REC\" || 1 ]] || die \"no dispatch record at $REC."
+        }
+      ]
+    },
+    "spawn-is-the-only-door": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the raw spawn verbs are no longer denied, so every lane operation can go around the one command that pins the repo, waits for the shell, and records the dispatch",
+          "env": "PANE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/pane-guard.sh",
+          "find": "    if [[ \"$n2 $v2\" == \"agent start\" || \"$n2 $v2\" == \"worktree create\" ]]; then",
+          "replace": "    if [[ \"$n2 $v2\" == \"agent nonesuch\" ]]; then"
+        },
+        {
+          "why": "only agent start is caught and worktree create walks through, which is the call that cut three checkouts into another session's repo",
+          "env": "PANE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/pane-guard.sh",
+          "find": "|| \"$n2 $v2\" == \"worktree create\" ]]; then",
+          "replace": "]]; then"
+        },
+        {
+          "why": "the denial stops naming restart, so a lane recovering from a /clear or a wedge is pushed to start, which cuts a second worktree",
+          "env": "PANE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/pane-guard.sh",
+          "find": "  \\$LANE restart <name> --run <slug>                 # re-arm on the lane's existing pane",
+          "replace": ""
+        },
+        {
+          "why": "the escape hatch is removed, so a genuine raw spawn has no way to be recorded as a decision and gets worked around silently instead",
+          "env": "PANE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/pane-guard.sh",
+          "find": "if [[ \"$CMD\" != *POLICY-OVERRIDE* ]]; then",
+          "replace": "if true; then"
+        }
+      ]
+    },
+    "base-branch-defaults-to-main": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the blind candidate list goes back to dev-first, which is the original hardcode moved one level up: a repo holding both main and dev is told to cut every worktree from dev",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/skills/lane-config/scripts/orch-config.sh",
+          "find": "    for c in main master dev develop; do\n      git -C \"$REPO\" rev-parse --verify -q \"$c\" >/dev/null 2>&1 && { base=\"$c\"; break }",
+          "replace": "    for c in dev develop main master; do\n      git -C \"$REPO\" rev-parse --verify -q \"$c\" >/dev/null 2>&1 && { base=\"$c\"; break }"
+        },
+        {
+          "why": "a checked-out integration branch stops counting as evidence, so cloudflare-os \u2014 on dev, origin/HEAD main \u2014 is handed main and every lane is cut from the wrong branch",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/skills/lane-config/scripts/orch-config.sh",
+          "find": "  for c in main master dev develop; do\n    [[ \"$cur\" == \"$c\" ]] && { base=\"$cur\"; break }\n  done",
+          "replace": "  : "
+        },
+        {
+          "why": "init writes the detected guess into the config instead of leaving it null, turning a heuristic into a decision nobody made",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/skills/lane-config/scripts/orch-config.sh",
+          "find": "             context_cap_tokens: 300000, base_branch: null },",
+          "replace": "             context_cap_tokens: 300000, base_branch: $d.suggested_base_branch },"
         }
       ]
     }

@@ -24,7 +24,7 @@ $CFG show    [repo]      current config, or absent
 $CFG init    [repo]      skeleton from detect — deliberately NO profiles
 $CFG validate [repo]     exit 1 listing exactly what is unusable
 $CFG set-profile <name> --kind claude|opencode --model <m> [--effort <e>] [--flags "--auto"] [repo]
-$CFG set-lanes  [--max N] [--timeout MS] [--context N] [repo]
+$CFG set-lanes  [--max N] [--timeout MS] [--context N] [repo]   # --timeout = herdr readiness wait, 3001..300000
 $CFG set-setup  [--install C] [--build C] [--test C] [--baseline S] [repo]
 ```
 </scripts>

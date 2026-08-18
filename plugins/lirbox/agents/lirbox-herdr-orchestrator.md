@@ -226,6 +226,7 @@ node $NOTES supersede <id> --title S
 # Context
 
 - Cap every pane at `lanes.context_cap_tokens` from the project config (300k absent one). Clear at task boundaries, not when a number alarms.
+- **A `/clear` drops the pane's `--agent` profile back to the harness default**, and the only place that shows is the pane footer — no status API carries it. Prefer `orch-lane.sh restart`, which re-applies the profile, over `pane run "/clear"`, which does not.
 - **Never clear a pane until its work is durable on disk** — commit message, doc, or handoff file. Clearing first destroys what only that pane holds.
 - **At the cap, durability beats completeness.** Tell the pane to stop expanding scope, write its report with `NOT MEASURED` where it did not get to, and commit. A half report on disk outranks a whole one in a degraded pane.
 - `NOT MEASURED` is a required token. A blank line in a report is indistinguishable from a zero.
@@ -252,7 +253,7 @@ Needs `HERDR_ENV=1`. `--help` on any subcommand for flags.
 
 **Read the project config before the first spawn.**
 `${CLAUDE_PLUGIN_ROOT}/skills/lane-config/scripts/orch-config.sh show` prints it. It is per-repo and
-holds `profiles.<name>` (harness, model, effort), `lanes.max_concurrent|timeout_ms|context_cap_tokens`,
+holds `profiles.<name>` (harness, model, effort), `lanes.max_concurrent|ready_timeout_ms|context_cap_tokens`,
 and `setup.install|build|test|baseline`. No config yet? Say so and use the `lane-config` skill before
 the first wave — do not scaffold one yourself and fill it with guesses.
 
@@ -261,25 +262,37 @@ the first wave — do not scaffold one yourself and fill it with guesses.
 ```
 LANE=${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh
 
-$LANE start <name> --profile <profile> --branch <b> [--base dev] [--run <slug>] [--dry-run]
-$LANE brief <name> <brief-file>
-$LANE close <name> [--force]
+$LANE start   <name> --profile <p> --run <slug> [--branch <b>] [--base <ref>] [--dry-run]
+$LANE restart <name> --run <slug> [--profile <p>] [--force]
+$LANE brief   <name> <brief-file>
+$LANE close   <name> [--force]
 ```
 
-`start` reads the config, creates the worktree, starts the harness with the profile's kind, model
-and flags, refuses to exceed `lanes.max_concurrent`, records ownership, writes the dispatch record,
-and prints `setup.*` for the lane's first instruction. `--dry-run` shows the commands without
-running them. `brief` submits and **confirms it submitted** — a lane left `idle` has not been
-briefed. `close` refuses a lane still `working`/`blocked`, or one with uncommitted work in its
-checkout, unless you pass `--force` having confirmed the work is durable.
+`start` reads the config, cuts the worktree from `lanes.base_branch`, waits for the pane to reach a
+shell prompt, starts the harness with the profile's kind, model and flags, refuses to exceed
+`lanes.max_concurrent`, records ownership, writes the dispatch record, and prints `setup.*` for the
+lane's first instruction. `--run` is required: a lane with no dispatch record cannot be found again.
+`--dry-run` shows the commands without running them.
+
+**`restart` is the other half of spawning, and it is not `start`.** Re-arming a lane after a
+`/clear`, a wedge, or a death happens on the pane and checkout it already has — `start` would cut a
+second worktree. It reads the dispatch record for the pane, re-applies the **profile** (a herdr
+`/clear` drops `--agent` back to the harness default, which once ran a whole track with no
+invariants), and refuses while the old agent still reports `working`/`blocked`. Roughly half of all
+spawns are this.
+
+`brief` submits and **confirms it submitted** — a lane left `idle` has not been briefed. `close`
+refuses a lane still `working`/`blocked`, or one with uncommitted work in its checkout, unless you
+pass `--force` having confirmed the work is durable.
 
 Each of those was a failure in the record: kind and model re-decided per spawn, a lane started with
 no profile, a brief pasted but never submitted, a pane closed on work only that pane held.
 
-The raw calls are the fallback when the script cannot cover a case — and what it does on your behalf.
-`--kind`, `--agent` and the profile's declared `--model` are never optional; a spawn missing any of
-them, or contradicting the profile, is refused before it runs. Flags after `--` are the harness's
-own, and **both harnesses take `--agent` and `--model`, resolving the same bounded-context profiles.**
+**Raw `herdr agent start` and `herdr worktree create` are DENIED by a hook.** Not discouraged —
+refused, because the script erroring once was enough to lose every guarantee it carries for the rest
+of a 72-hour run. The denial names the verb to use instead. A genuine exception is a decision to
+state out loud: add `POLICY-OVERRIDE` and the reason to the command. The calls below are what the
+script does on your behalf, not an alternative to it.
 
 ```
 # 1. tree + workspace + pane, in one call
