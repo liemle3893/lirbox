@@ -453,6 +453,38 @@
           "file": "plugins/lirbox/hooks/gate-guard.sh",
           "find": "if [[ -f \"$RUNDIR/dod.json\" ]]; then",
           "replace": "if false; then"
+        },
+        {
+          "why": "the store no longer has to know the lane is committed, so a reviewed lane the run never recorded is pushed \u2014 the dark store that let transitions.jsonl stop two days before the session ended",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "[[ \"$VERDICT\" == \"PASS\" && \"$DOD\" == \"OK\" && \"$RECORDED\" == \"OK\" ]] && exit 0",
+          "replace": "[[ \"$VERDICT\" == \"PASS\" && \"$DOD\" == \"OK\" ]] && exit 0"
+        },
+        {
+          "why": "the durable requirement drops to any recorded row at all, so a lane still at 'reported' passes \u2014 and a push claims committed, not reported",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "any(.[]; .lane == $lane and .to == \"durable\")",
+          "replace": "any(.[]; .lane == $lane)"
+        },
+        {
+          "why": "the transition scan stops filtering by lane, so any other lane's durable row satisfies this one and the predicate stops being about the branch being pushed",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "any(.[]; .lane == $lane and .to == \"durable\")",
+          "replace": "any(.[]; .to == \"durable\")"
+        },
+        {
+          "why": "a missing transitions.jsonl reads as recorded, so the emptiest possible store \u2014 no file at all \u2014 is the one case that passes",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "    RECORDED=\"NO-TRANSITIONS\"",
+          "replace": "    RECORDED=\"OK\""
         }
       ]
     }

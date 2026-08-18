@@ -93,6 +93,18 @@ writeFileSync(join(runDir, 'dispatch', 'kb.json'), JSON.stringify({
   lane: 'kb', agent_name: 'kb', branch: 'lane-kb', pane_id: 'wZ:p1', state: 'dispatched',
 }));
 
+const setTransitions = (rows) => writeFileSync(join(runDir, 'transitions.jsonl'),
+  rows.map((x) => JSON.stringify(x)).join('\n') + '\n');
+const DURABLE = [
+  { lane: 'kb', from: 'dispatched', to: 'reported', reason: 'r', at: '2026-08-19T00:00:00Z' },
+  { lane: 'kb', from: 'reported', to: 'durable', reason: 'committed', at: '2026-08-19T00:02:00Z' },
+];
+// Recorded from the start, so every arm below isolates ONE reason to deny.
+// Without this the store arm masks them: a check that goes red for the wrong
+// reason passes while the rule it names is gone. (prove-checks caught exactly
+// that here, twice.)
+setTransitions(DURABLE);
+
 // -- 1. no gate artifact: nothing leaves ------------------------------------
 for (const cmd of [
   'git push origin lane-kb',
@@ -133,6 +145,12 @@ if (r.code !== 2) {
      + 'honour system; conductor cross-checks a numeric build exit for exactly '
      + 'this reason, and so must this.');
 }
+// Anchor on the reason: denied-for-something-else would pass this arm while the
+// build cross-check was gone.
+if (!/build_exit=1/.test(r.msg)) {
+  fail(`the red build was not what refused it — the denial does not report `
+     + `build_exit=1, so the cross-check may not be firing: ${r.msg.trim()}`);
+}
 
 // -- 4. unresolved findings do not pass ------------------------------------
 setGate({ kind: 'code_gate', lane: 'kb', produced_by: 'gate-kb',
@@ -141,14 +159,55 @@ if (verdict('git push origin lane-kb').code !== 2) {
   fail('a failing gate (2 Critical, 1 High) was pushed past');
 }
 
-// -- 5. a real pass goes through -------------------------------------------
+// -- 5. the gate can pass and the STORE still not know ----------------------
+// The store in the 2026-08 run was not wrong, it was EMPTY: transitions.jsonl
+// stopped two days before the session ended. Nothing arriving as context fixes
+// empty — only a door does. A reviewed, build-green lane the run never recorded
+// is a lane the board cannot show and a successor would find still open.
 setGate({ kind: 'code_gate', lane: 'kb', produced_by: 'gate-kb',
   gate_passed: true, critical: 0, high: 0, build_cmd: 'make', build_exit: 0 });
+
+// The emptiest possible store: no transitions file at all.
+rmSync(join(runDir, 'transitions.jsonl'));
+r = verdict('git push origin lane-kb');
+if (r.code !== 2) {
+  fail('a lane whose gate passed but which the store never recorded was pushed. '
+     + 'transitions.jsonl does not exist at all here.');
+}
+if (!/transition\.mjs/.test(r.msg)) {
+  fail(`the denial does not name the command that records it: ${r.msg.trim()}`);
+}
+
+// Reaching `reported` is not reaching `durable`. Committed is the claim a push
+// makes, so that is the row required.
+setTransitions([
+  { lane: 'kb', from: 'dispatched', to: 'reported', reason: 'r', at: '2026-08-19T00:00:00Z' },
+]);
+if (verdict('git push origin lane-kb').code !== 2) {
+  fail('a lane recorded only as `reported` was pushed. durable is committed, and '
+     + 'a push claims committed.');
+}
+
+// Bounded: ANOTHER lane's durable row must not satisfy this one. The predicate
+// asks one question about the one branch being pushed — that boundedness is
+// what keeps it from becoming the blocks-forever rule that inverting the Stop
+// gate would have been.
+setTransitions([
+  { lane: 'kb', from: 'dispatched', to: 'reported', reason: 'r', at: '2026-08-19T00:00:00Z' },
+  { lane: 'other', from: 'reported', to: 'durable', reason: 'r', at: '2026-08-19T00:01:00Z' },
+]);
+if (verdict('git push origin lane-kb').code !== 2) {
+  fail("another lane's durable row satisfied this lane's requirement — the "
+     + 'predicate is not scoped to the branch being pushed');
+}
+
+// -- 5b. recorded, gated, green: it goes through ---------------------------
+setTransitions(DURABLE);
 r = verdict('git push origin lane-kb');
 if (r.code !== 0) {
-  fail(`a lane with an independent, passing, build-green gate was still blocked. `
-     + `A gate that blocks its own sanctioned path is the reason the last one got `
-     + `routed around: ${r.msg.trim()}`);
+  fail(`a lane with an independent, passing, build-green gate AND a durable row `
+     + `was still blocked. A gate that blocks its own sanctioned path is the `
+     + `reason the last one got routed around: ${r.msg.trim()}`);
 }
 
 // -- 6. a frozen DoD is held to, and only when the run declared one ----------

@@ -228,8 +228,15 @@ the producer may not be the implementor, for the same reason `reported → verif
 self-report.
 
 `gate-guard.sh` binds it. `git push`, `gh pr create`, and a `git merge` that lands **on the base
-branch** are refused (exit 2) for a branch whose dispatch record names a lane with no passing gate.
-`POLICY-OVERRIDE` plus a reason is the stated escape.
+branch** are refused (exit 2) for a branch whose dispatch record names a lane with no passing gate —
+**and for a lane the store never recorded as `durable`.** The gate proves the code was reviewed; the
+`durable` row proves the run knows it. In the 2026-08 run the store was not wrong, it was *empty*:
+`transitions.jsonl` stopped two days before the session ended. Nothing that arrives as context fixes
+empty — only a door does.
+
+The predicate is deliberately bounded to the one lane whose branch is being pushed. Gating on
+anything wider — "the ledger is clean" — blocks every turn end forever, because that ledger is
+append-only with no removal path. `POLICY-OVERRIDE` plus a reason is the stated escape.
 
 Why a hook and not `transition.mjs`: a clause in the door enforces nothing when nobody opens the
 door, and in the 2026-08 run `transitions.jsonl` stopped two days before the session ended. A

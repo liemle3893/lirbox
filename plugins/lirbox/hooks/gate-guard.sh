@@ -151,13 +151,36 @@ if [[ -f "$RUNDIR/dod.json" ]]; then
   [[ -n "$DOD" ]] || DOD="MISSING"
 fi
 
-[[ "$VERDICT" == "PASS" && "$DOD" == "OK" ]] && exit 0
+# The store has to know this lane is committed.
+#
+# The gate above proves the code was reviewed; this proves the run recorded it.
+# In the 2026-08 run transitions.jsonl stopped two days before the session ended
+# and twelve lanes never got a dispatch record — the store was not wrong, it was
+# EMPTY, and nothing that arrives as context fixes empty. Only a door does.
+#
+# Deliberately bounded, because the neighbouring idea is a trap: gating on "the
+# ledger is clean" would block every turn end forever, since that ledger is
+# append-only with no removal path. This asks one question about ONE lane — the
+# one whose branch is being pushed — and a single command answers it.
+local RECORDED="OK"
+if [[ "$VERDICT" == "PASS" ]]; then
+  local TF="$RUNDIR/transitions.jsonl"
+  if [[ -s "$TF" ]]; then
+    jq -e -s --arg lane "$LANE" 'any(.[]; .lane == $lane and .to == "durable")' \
+      "$TF" >/dev/null 2>&1 || RECORDED="NO-DURABLE"
+  else
+    RECORDED="NO-TRANSITIONS"
+  fi
+fi
+
+[[ "$VERDICT" == "PASS" && "$DOD" == "OK" && "$RECORDED" == "OK" ]] && exit 0
 
 local LANECMD='${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh'
 print -u2 -r -- "DENIED: \`$VERB\` — branch '$TARGET' is lane '$LANE' and it is not gated.
 
   code_gate   $VERDICT
   dod_gate    $DOD
+  recorded    $RECORDED
 
 $(case "$VERDICT" in
   MISSING) print -r -- "  No code_gate artifact for this lane. Run the gate:
@@ -173,6 +196,16 @@ $([[ "$DOD" != "OK" ]] && print -r -- "
   This run froze a definition of done and it is $DOD. Every checkable criterion
   has to pass, against the sha256-locked check files — a weakened check is
   detected, not rewarded.")
+$([[ "$RECORDED" != "OK" ]] && print -r -- "
+  The gate passed and the store does not know it. '$LANE' has no 'durable' row
+  in $RUNDIR/transitions.jsonl, so the board cannot show what you are about to
+  push, and a replacement orchestrator would find this lane still open.
+
+    node \${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/transition.mjs \\\\
+      --root $RUNDIR --lane $LANE --to durable --reason \"...\"
+
+  That command refuses an illegal move rather than recording a false one, so it
+  is also the cheapest check that this lane is where you think it is.")
 
 Nothing here is a veto on your judgement. If this genuinely has to go out
 ungated, add POLICY-OVERRIDE and the reason to the command, and it passes."
