@@ -254,7 +254,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "a split's workspace_id is recorded again, so a workspace this run never created lands in the file that grants destruction rights — the row that authorized removing the workspace the session itself runs in",
+          "why": "a split's workspace_id is recorded again, so a workspace this run never created lands in the file that grants destruction rights \u2014 the row that authorized removing the workspace the session itself runs in",
           "env": "LANE_LEDGER_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/lane-ledger.sh",
@@ -312,7 +312,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "the dirty listing goes back below the force guard, where --force silences it — and --force is the only way to close a working lane, so the listing is unreachable in the one case where closing abandons work",
+          "why": "the dirty listing goes back below the force guard, where --force silences it \u2014 and --force is the only way to close a working lane, so the listing is unreachable in the one case where closing abandons work",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -320,7 +320,7 @@
           "replace": "    if [[ \"$DIRTY\" != 0 ]] && (( ! FORCE )); then\n      print -u2 -r -- \"lane '$NAME' has $DIRTY uncommitted change(s) in $WT:"
         },
         {
-          "why": "the listing names a count but never the files, so the operator is told work exists and not which work — after the pane is closed nothing else points at it",
+          "why": "the listing names a count but never the files, so the operator is told work exists and not which work \u2014 after the pane is closed nothing else points at it",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -353,8 +353,8 @@
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
-          "find": "    (( HAS_ITEM )) || gate \"$PLAN has no numbered items.",
-          "replace": "    (( 1 )) || gate \"$PLAN has no numbered items."
+          "find": "    (( HAS_ITEM )) || refuse \"$PLAN has no numbered items.",
+          "replace": "    (( 1 )) || refuse \"$PLAN has no numbered items."
         },
         {
           "why": "a baseline stating an intention rather than an observed exit code is accepted, so every later 'it is green now' is measured against a number nobody took",
@@ -400,6 +400,59 @@
           "file": "plugins/lirbox/skills/lane-config/scripts/orch-config.sh",
           "find": "             context_cap_tokens: 300000, base_branch: null },",
           "replace": "             context_cap_tokens: 300000, base_branch: $d.suggested_base_branch },"
+        }
+      ]
+    },
+    "ungated-work-does-not-leave": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the build exit stops being cross-checked, so gate_passed alone decides \u2014 the honour system conductor deliberately refuses, and a reviewer reporting success for a build it never ran walks straight through",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "if ($v.gate_passed == true and $v.build_exit == 0) then \"PASS\"",
+          "replace": "if ($v.gate_passed == true) then \"PASS\""
+        },
+        {
+          "why": "the producer is no longer required to differ from the implementor, so a lane gates its own diff \u2014 a self-report becoming a gate, which is the rule reported -> verified already refuses",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "elif ([ $g[] | select(.produced_by != $impl) ] | length) == 0 then \"SELF\"",
+          "replace": "elif false then \"SELF\""
+        },
+        {
+          "why": "a missing gate artifact reads as a pass, so a lane nobody reviewed leaves the machine and the guard's whole default inverts from deny to allow",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "  | if ($g | length) == 0 then \"MISSING\"",
+          "replace": "  | if ($g | length) == 0 then \"PASS\""
+        },
+        {
+          "why": "gh pr create stops reading --head, so opening a lane's PR from the base branch resolves to the base, matches no dispatch record, and every PR goes through ungated",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "        [[ \"${TOK[j]}\" == \"--head\" ]] && { TARGET=\"${TOK[j+1]}\"; break }",
+          "replace": "        [[ \"${TOK[j]}\" == \"--nonesuch\" ]] && { TARGET=\"${TOK[j+1]}\"; break }"
+        },
+        {
+          "why": "a merge that lands ON the base branch stops being treated as outward, so the one merge this guard exists for is the one it ignores",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "  [[ -n \"$BASE\" && \"$CUR\" == \"$BASE\" ]] || exit 0",
+          "replace": "  exit 0"
+        },
+        {
+          "why": "a frozen definition of done is no longer required to have passed, so a run declares a DoD and publishes without meeting it",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "if [[ -f \"$RUNDIR/dod.json\" ]]; then",
+          "replace": "if false; then"
         }
       ]
     }

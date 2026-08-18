@@ -4,6 +4,7 @@
 #
 #   orch-lane.sh start   <name> --profile <p> --run <slug> [--branch <b>] [--base <b>]
 #   orch-lane.sh restart <name> --run <slug> [--profile <p>]
+#   orch-lane.sh gate    <lane> --run <slug> [--profile <p>]
 #   orch-lane.sh brief   <name> <file>
 #   orch-lane.sh close   <name>
 #
@@ -19,18 +20,20 @@ setopt no_nomatch pipefail
 die() { print -u2 -r -- "orch-lane: $1"; exit 1 }
 h()   { HERDR_ENV=1 herdr "$@" }
 
-# A refusal that a rehearsal reports instead of enforcing. `--dry-run` issues
+# A refusal that a rehearsal reports instead of enforcing. Named refuse(), not
+# gate(): `gate` is a subcommand below, and this is the thing that SOFTENS a
+# refusal — one word meaning two opposite things is a 3am problem. `--dry-run` issues
 # nothing, so gating it blocks inspection for no gain — but a rehearsal that
 # stayed silent would report a start the real one refuses. zsh locals are
 # dynamically scoped, so $DRY is the caller's.
-gate() {
+refuse() {
   (( ${DRY:-0} )) || die "$1"
   print -u2 -r -- "orch-lane: NOTE — a real start refuses here:
 $1"
 }
 
 SUB="${1:-}"; shift 2>/dev/null || true
-[[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|restart|brief|close] ..."
+[[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|restart|gate|brief|close] ..."
 
 # Same key as the ledger and the config — see hooks/lane-ledger.sh.
 KEY=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
@@ -153,7 +156,7 @@ invariants and no ubiquitous language, and will invent both.
     [[ -s "$PLAN" ]]     || MISSING+=("items.md — the lane split: numbered items, and which blocks which")
     [[ -s "$MEASURED" ]] || MISSING+=("baseline.txt — the setup.test command and the exit code it returned")
     if (( $#MISSING )); then
-      gate "the first lane of run '$RUN' needs the run written down first. Missing in
+      refuse "the first lane of run '$RUN' needs the run written down first. Missing in
   $ROOT/.orchestration/$RUN/:
 
 $(print -l -- "${MISSING[@]/#/    }")
@@ -183,13 +186,13 @@ $(print -l -- "${MISSING[@]/#/    }")
     for line in ${(f)"$(<"$PLAN")"}; do
       [[ "$line" =~ '^[[:space:]]*[0-9]+[.)]' ]] && { HAS_ITEM=1; break }
     done
-    (( HAS_ITEM )) || gate "$PLAN has no numbered items.
+    (( HAS_ITEM )) || refuse "$PLAN has no numbered items.
   A goal restated in prose is not a decomposition. One numbered line per item,
   and name what blocks what — concurrency falls out of that, and so does order."
 
     local MEASURED_BODY=${(L)"$(<"$MEASURED")"}
     [[ "$MEASURED_BODY" =~ 'exit[[:space:]]*[:=][[:space:]]*[0-9]+' ]] \
-      || gate "$MEASURED records no observed exit code.
+      || refuse "$MEASURED records no observed exit code.
   Write the command and what it returned, e.g. 'pnpm test  exit: 1  (25 failed)'.
   An exit code is the one line that cannot be written without running the thing.
   Every later 'it is green now' is measured against this number, and a baseline
@@ -406,6 +409,96 @@ restart)
         --arg m "$MODEL" --arg w "${WTREE:-}" --arg s "$NOWSHA" \
         --argjson r "$(jq -r '.restarts // 1' "$REC")" \
     '{lane:$n,pane:$p,profile:$pr,kind:$k,model:$m,worktree:$w,sha_at_restart:$s,restarts:$r}'
+  ;;
+
+gate)
+  # Dispatch the code gate for a lane, as its OWN lane.
+  #
+  # A gate has to be a separate process for the same reason a verification does:
+  # a self-report can never be a gate. Producing it in the implementor's pane
+  # would satisfy the artifact and none of the point, so this cuts a fresh lane
+  # on the gate profile, checked out at the lane's branch.
+  #
+  # The verdict shape is conductor's, field for field — gate_passed, critical,
+  # high, build_cmd, build_exit — because its pass condition is the one that
+  # does not go green on the honour system: the flag is never trusted alone, a
+  # numeric build exit has to agree with it.
+  NAME="${1:-}"; shift 2>/dev/null || true
+  [[ -n "$NAME" ]] || die "gate needs the lane name to gate:
+  orch-lane.sh gate <lane> --run <slug> [--profile <p>]"
+  local RUN="" PROFILE=""
+  while (( $# )); do
+    case "$1" in
+      --run)     RUN="$2";     shift 2 ;;
+      --profile) PROFILE="$2"; shift 2 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  [[ -r "$CFG" ]] || die "no config for this repo; cannot resolve a gate profile."
+  [[ -n "$RUN" ]] || die "gate needs --run <slug> to find the lane's dispatch record."
+
+  local REC="$ROOT/.orchestration/$RUN/dispatch/$NAME.json"
+  [[ -r "$REC" ]] || die "cannot gate '$NAME': no dispatch record at $REC.
+  A lane with no record has no branch to gate and no implementor to be
+  independent of. Nothing to do here."
+
+  local BRANCH IMPL
+  BRANCH=$(jq -r '.branch // empty' "$REC")
+  IMPL=$(jq -r '.agent_name // .lane // empty' "$REC")
+  [[ -n "$BRANCH" ]] || die "the record for '$NAME' names no branch."
+
+  # The gate profile is a declared project decision like every other profile.
+  [[ -n "$PROFILE" ]] || PROFILE=$(jq -r '.lanes.gate_profile // empty' "$CFG")
+  [[ -n "$PROFILE" ]] || die "no lanes.gate_profile in $CFG, and no --profile given.
+  The gate runs on a reviewer profile — one that reviews AND fixes Critical/High
+  in a pass, then reports counts. Declare it once:
+    ${0:h}/../skills/lane-config/scripts/orch-config.sh set-lanes --gate-profile <p>"
+
+  local GLANE="gate-$NAME"
+  [[ "$IMPL" != "$GLANE" ]] || die "the gate lane and the implementor cannot be the same agent."
+
+  local EVID="$ROOT/.orchestration/$RUN/evidence"
+  mkdir -p "$EVID"
+
+  # Start it on the lane's own branch, not a fresh one: the gate reviews a diff
+  # that already exists.
+  "$0" start "$GLANE" --profile "$PROFILE" --run "$RUN" --branch "$BRANCH" --base "$BRANCH" \
+    || die "could not start the gate lane for '$NAME'."
+
+  local BRIEF="$EVID/$GLANE-brief.md"
+  cat > "$BRIEF" <<BRIEFEOF
+Gate the diff on branch \`$BRANCH\` (lane \`$NAME\`). You did not write this code.
+
+Review it, and FIX every Critical and High finding in the same pass. Then build.
+
+Write your verdict to $EVID/$GLANE-code_gate.json — exactly these fields:
+
+{
+  "kind": "code_gate",
+  "lane": "$NAME",
+  "produced_by": "$GLANE",
+  "gate_passed": <true only if every Critical and High is fixed, or skipped with
+                  an explicit reason recorded below, AND the build exits 0>,
+  "critical": <count still UNRESOLVED after your fixes; 0 when gate_passed>,
+  "high":     <count still UNRESOLVED after your fixes; 0 when gate_passed>,
+  "build_cmd":  "<the command you ran>",
+  "build_exit": <its ACTUAL numeric exit code>,
+  "skipped":  [ { "title": "...", "reason": "..." } ],
+  "summary":  "one line"
+}
+
+build_exit is read, not taken on trust: the gate cannot pass with a non-zero
+build no matter what gate_passed says. Report the exit code you observed — a
+gate that reports 0 for a build it did not run is the one failure this whole
+mechanism exists to stop.
+
+Red means stop and report observed values. Do not weaken an assertion, delete a
+test, or relax a check to reach green.
+BRIEFEOF
+
+  "$0" brief "$GLANE" "$BRIEF" || die "gate lane '$GLANE' started but the brief did not submit."
+  print -r -- "gate dispatched: $GLANE reviewing $BRANCH (lane $NAME)
+  verdict -> $EVID/$GLANE-code_gate.json"
   ;;
 
 brief)

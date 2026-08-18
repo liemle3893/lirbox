@@ -9,7 +9,7 @@
 #   orch-config.sh init     [repo]              write a skeleton (NO invented profiles)
 #   orch-config.sh validate [repo]              exit 1 with reasons if unusable
 #   orch-config.sh set-profile <name> --kind K --model M [--effort E] [--flags "a b"] [repo]
-#   orch-config.sh set-lanes [--max N] [--timeout MS] [--context N] [repo]
+#   orch-config.sh set-lanes [--max N] [--timeout MS] [--context N] [--gate-profile P] [repo]
 #   orch-config.sh set-setup [--install C] [--build C] [--test C] [--baseline S] [repo]
 #
 # Stored user-local, keyed by the repo's git common dir — the same key the lane
@@ -205,11 +205,11 @@ set-profile)
 
 set-lanes)
   need
-  local MAX="" TO="" CTX="" BASE=""
+  local MAX="" TO="" CTX="" BASE="" GATE=""
   while (( $# )); do
     case "$1" in
       --max) MAX="$2"; shift 2 ;; --timeout) TO="$2"; shift 2 ;; --context) CTX="$2"; shift 2 ;;
-      --base) BASE="$2"; shift 2 ;;
+      --base) BASE="$2"; shift 2 ;; --gate-profile) GATE="$2"; shift 2 ;;
       *) die "unknown flag: $1" ;;
     esac
   done
@@ -235,6 +235,18 @@ set-lanes)
   Every worktree is cut from it; a name that resolves nowhere fails at spawn,
   not here, and reads as a broken orchestrator."
     j=$(print -r -- "$j" | jq --arg v "$BASE" '.lanes.base_branch=$v')
+  fi
+  # The gate runs on a declared profile like everything else. It must be one the
+  # project actually declares, or `orch-lane.sh gate` fails at spawn with a
+  # profile lookup miss — which reads as a broken gate rather than a config gap,
+  # and a gate that looks broken is a gate that gets skipped.
+  if [[ -n "$GATE" ]]; then
+    print -r -- "$j" | jq -e --arg p "$GATE" '.profiles[$p]' >/dev/null 2>&1 \
+      || die "profile '$GATE' is not declared in this config.
+  declared: $(print -r -- "$j" | jq -r '.profiles | keys | join(", ")')
+  Add it with set-profile first — the gate reviews AND fixes, so give it a
+  profile capable of both."
+    j=$(print -r -- "$j" | jq --arg v "$GATE" '.lanes.gate_profile=$v')
   fi
   write "$j"; jq -c '.lanes' "$CFG" ;;
 
