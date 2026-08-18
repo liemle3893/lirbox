@@ -485,6 +485,96 @@
           "file": "plugins/lirbox/hooks/gate-guard.sh",
           "find": "    RECORDED=\"NO-TRANSITIONS\"",
           "replace": "    RECORDED=\"OK\""
+        },
+        {
+          "why": "the gate stops being bound to the sha it reviewed, so a lane can pass, loop back through implementation, commit more, and still present the old PASS \u2014 the failure a reshapeable flow makes reachable",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "        elif ($v.gated_sha != $head) then \"STALE gated=\\($v.gated_sha[0:8]) head=\\($head[0:8])\"",
+          "replace": "        elif (false) then \"STALE\""
+        },
+        {
+          "why": "a verdict naming no gated_sha is trusted instead of refused, which makes the binding optional and therefore absent for every artifact that omits it",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "      | if ($v.gated_sha == null or $v.gated_sha == \"\") then \"UNBOUND\"",
+          "replace": "      | if (false) then \"UNBOUND\""
+        }
+      ]
+    },
+    "a-loop-is-not-a-hard-problem": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the stall guard is skipped entirely, so a lane that has yielded nothing across restarts is restarted forever \u2014 the shape that ran for a day",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  if (( PRIOR_RESTARTS > 0 )) && (( ! FORCE )); then",
+          "replace": "  if false; then"
+        },
+        {
+          "why": "progress stops counting: fresh evidence no longer exempts a lane, turning a stall detector into a plain retry counter \u2014 the budget conductor deliberately does not use",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    if (( PRIOR_RESTARTS >= MAXR && FRESH == 0 )); then",
+          "replace": "    if (( PRIOR_RESTARTS >= MAXR )); then"
+        },
+        {
+          "why": "evidence is no longer filtered to this lane, so another lane's report reads as this lane's progress and the guard never fires",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "                 | select(.lane == $lane and ((.at // \"\") > $since)) ] | length'",
+          "replace": "                 | select((.at // \"\") > $since) ] | length'"
+        },
+        {
+          "why": "stale evidence written BEFORE the last restart counts as progress, so any lane with any history restarts forever",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "((.at // \"\") > $since)",
+          "replace": "((.at // \"\") >= \"\")"
+        }
+      ]
+    },
+    "agent-names-every-door": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "a subcommand is renamed and the prompt is not updated \u2014 the case the derivation exists to catch. A hardcoded list would stay green.",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "gate)\n  # Dispatch the code gate for a lane, as its OWN lane.",
+          "replace": "reap)\n  # Dispatch the code gate for a lane, as its OWN lane."
+        },
+        {
+          "why": "the agent prompt stops naming the gate verb, so the orchestrator meets gate-guard's refusal with no idea the command exists",
+          "env": "AGENT_MD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/agents/lirbox-herdr-orchestrator.md",
+          "find": "orch-lane.sh gate <lane> --run <slug>",
+          "replace": "orch-lane.sh NONESUCH <lane> --run <slug>"
+        },
+        {
+          "why": "a hook is named in the prompt but its refusal is never described, so a filename in a list stands in for a contract",
+          "env": "AGENT_MD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/agents/lirbox-herdr-orchestrator.md",
+          "find": "| `gate-guard.sh` | PreToolUse | `git push`, `gh pr create`, `git merge` **onto the base branch** for an ungated lane. See the gate below. |",
+          "replace": "| `gate-guard.sh` | PreToolUse | see elsewhere. |"
+        },
+        {
+          "why": "POLICY-OVERRIDE disappears from the prompt, so three hooks carry an escape the orchestrator does not know exists and routes around silently instead",
+          "env": "AGENT_MD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/agents/lirbox-herdr-orchestrator.md",
+          "find": "`POLICY-OVERRIDE` plus a reason on the command line is the stated escape",
+          "replace": "`POLICY-NONESUCH` plus a reason on the command line is the stated escape"
         }
       ]
     }

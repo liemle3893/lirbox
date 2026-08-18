@@ -75,9 +75,14 @@ const verdict = (command, cwd = root) => {
   } catch (e) { return { code: e.status ?? 1, msg: (e.stderr || '').toString() }; }
 };
 
+// Every gate verdict is bound to the sha it reviewed. Default to the branch's
+// real HEAD so each arm below isolates the thing it is actually testing; the
+// binding itself gets its own arms at the end.
+const laneSha = execFileSync('git', ['-C', repo, 'rev-parse', 'lane-kb'], { encoding: 'utf8' }).trim();
 const setGate = (o) => {
   mkdirSync(evid, { recursive: true });
-  writeFileSync(join(evid, 'g-code_gate.json'), JSON.stringify(o));
+  writeFileSync(join(evid, 'g-code_gate.json'),
+    JSON.stringify({ gated_sha: laneSha, ...o }));
 };
 
 // -- 0. no run store: the hook is invisible ---------------------------------
@@ -209,6 +214,46 @@ if (r.code !== 0) {
      + `was still blocked. A gate that blocks its own sanctioned path is the `
      + `reason the last one got routed around: ${r.msg.trim()}`);
 }
+
+// -- 5c. the gate is bound to the CODE it reviewed, not just to the lane ------
+// This is what a reshapeable flow costs. A fixed pipeline gates once at the
+// end; an orchestrator that can loop back through implementation can pass the
+// gate, commit more, and still present the old PASS. Only the sha notices.
+setGate({ lane: 'kb', kind: 'code_gate', produced_by: 'gate-kb',
+  gate_passed: true, critical: 0, high: 0, build_cmd: 'make', build_exit: 0,
+  gated_sha: '0000000000000000000000000000000000000000' });
+r = verdict('git push origin lane-kb');
+if (r.code !== 2) {
+  fail('a gate verdict for a DIFFERENT commit was accepted. Loop back through implementation, '
+     + 'commit, and the stale PASS ships — which is exactly the failure a dynamic flow makes '
+     + 'reachable and a fixed pipeline does not.');
+}
+if (!/STALE|moved since/i.test(r.msg)) {
+  fail(`refused, but not as STALE — the operator cannot tell a moved branch from a failed `
+     + `review: ${r.msg.trim()}`);
+}
+
+// A verdict naming no sha cannot be checked against anything, so it is refused
+// rather than trusted. Trusting it would reopen the hole for every old artifact.
+mkdirSync(evid, { recursive: true });
+writeFileSync(join(evid, 'g-code_gate.json'), JSON.stringify({
+  lane: 'kb', kind: 'code_gate', produced_by: 'gate-kb',
+  gate_passed: true, critical: 0, high: 0, build_cmd: 'make', build_exit: 0 }));
+r = verdict('git push origin lane-kb');
+if (r.code !== 2) {
+  fail('a gate verdict with no gated_sha was accepted. Nothing says which code it reviewed, so '
+     + 'it cannot be invalidated by a later commit — the binding becomes optional and therefore '
+     + 'absent.');
+}
+// Anchor on the reason. With the UNBOUND branch removed, a null gated_sha falls
+// through to the STALE comparison and is refused anyway — for the wrong reason,
+// leaving this arm green while the rule it names is gone.
+if (!/UNBOUND|names no gated_sha/i.test(r.msg)) {
+  fail(`refused, but not as UNBOUND — a verdict that names no sha is being reported as something `
+     + `else, so the missing-binding rule may not be firing at all: ${r.msg.trim()}`);
+}
+setGate({ lane: 'kb', kind: 'code_gate', produced_by: 'gate-kb',
+  gate_passed: true, critical: 0, high: 0, build_cmd: 'make', build_exit: 0 });
 
 // -- 6. a frozen DoD is held to, and only when the run declared one ----------
 writeFileSync(join(runDir, 'dod.json'), JSON.stringify({ criteria: [] }));

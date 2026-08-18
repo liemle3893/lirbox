@@ -358,6 +358,60 @@ restart)
     || die "the checkout this lane worked in is gone: $WTREE
   Its commits may still be on branch '$BRANCH'. Check before starting anything new."
 
+  # ---- stall: is this a loop, or a hard problem? ---------------------------
+  #
+  # Ported from conductor's DoDGate, which does not count money — it counts
+  # ROUNDS and then asks whether the unmet set CHANGED. Unchanged means the
+  # theory is wrong and further attempts are waste; shrinking means keep going.
+  # Its triage.cjs says the same out loud: "a bare relaunch hits the same wall",
+  # so a failure is CLASSIFIED (relaunch / ask / report) rather than retried.
+  #
+  # lanes' vocabulary for the same question: this lane has been restarted N
+  # times — has it produced any NEW evidence since the last one? A lane
+  # redispatched against the same state, having yielded nothing last time, is a
+  # loop. That is the shape that runs for a day.
+  integer PRIOR_RESTARTS
+  PRIOR_RESTARTS=$(jq -r '.restarts // 0' "$REC")
+  [[ "$PRIOR_RESTARTS" == <-> ]] || PRIOR_RESTARTS=0
+  if (( PRIOR_RESTARTS > 0 )) && (( ! FORCE )); then
+    integer MAXR FRESH=0
+    MAXR=$(jq -r '.lanes.max_restarts // 2' "$CFG")
+    [[ "$MAXR" == <-> ]] || MAXR=2
+
+    # Compare against the timestamp the last restart stamped, not a count, so
+    # evidence written BEFORE the restart cannot be read as a result of it.
+    local SINCE
+    SINCE=$(jq -r '.restarted_at // empty' "$REC")
+    if [[ -n "$SINCE" ]]; then
+      local -a EV
+      EV=("$ROOT/.orchestration/$RUN"/evidence/*.json(N))
+      if (( $#EV )); then
+        FRESH=$(jq -s -r --arg lane "$NAME" --arg since "$SINCE" \
+          '[ .[] | (if type == "array" then .[] else . end)
+                 | select(.lane == $lane and ((.at // "") > $since)) ] | length' \
+          $EV 2>/dev/null)
+        [[ "$FRESH" == <-> ]] || FRESH=0
+      fi
+    fi
+
+    if (( PRIOR_RESTARTS >= MAXR && FRESH == 0 )); then
+      die "lane '$NAME' has been restarted $PRIOR_RESTARTS time(s) and has produced NO new
+  evidence since the last one. That is a loop, not a hard problem.
+
+  Restarting again buys the same wall. Before you do:
+
+    1. Say what this lane has actually established, and what it has not.
+    2. Write the rival causes down, one command each, and run the cheapest.
+    3. If the cause is still a leading theory rather than a measurement, take it
+       to the user — do not spend another lane confirming what you assumed.
+
+  A lane that yields nothing twice is evidence about the THEORY, not the lane.
+  If this is genuinely slow rather than stuck, raise the ceiling deliberately:
+    ${0:h}/../skills/lane-config/scripts/orch-config.sh set-lanes --max-restarts <n>
+  or pass --force having said which of the three above you did."
+    fi
+  fi
+
   # A live agent is not something to restart around — that is how two processes
   # end up writing one tree.
   local ST
@@ -401,9 +455,10 @@ restart)
   local NOWSHA
   NOWSHA=$(git -C "${WTREE:-$ROOT}" rev-parse HEAD 2>/dev/null)
   local TMP="$REC.tmp"
-  jq --arg s "$NOWSHA" --arg p "$PROFILE" \
+  jq --arg s "$NOWSHA" --arg p "$PROFILE" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '.sha_at_restart=$s | .profile=$p | .state="dispatched"
-      | .restarts=((.restarts // 0) + 1)' "$REC" > "$TMP" && mv "$TMP" "$REC"
+      | .restarts=((.restarts // 0) + 1)
+      | .restarted_at=$now' "$REC" > "$TMP" && mv "$TMP" "$REC"
 
   jq -n --arg n "$NAME" --arg p "$PANE" --arg pr "$PROFILE" --arg k "$KIND" \
         --arg m "$MODEL" --arg w "${WTREE:-}" --arg s "$NOWSHA" \
@@ -477,6 +532,8 @@ Write your verdict to $EVID/$GLANE-code_gate.json — exactly these fields:
   "kind": "code_gate",
   "lane": "$NAME",
   "produced_by": "$GLANE",
+  "gated_sha": "<the FULL sha of $BRANCH you actually reviewed — git rev-parse HEAD
+                 in the checkout, read it, do not copy it from this brief>",
   "gate_passed": <true only if every Critical and High is fixed, or skipped with
                   an explicit reason recorded below, AND the build exits 0>,
   "critical": <count still UNRESOLVED after your fixes; 0 when gate_passed>,
@@ -486,6 +543,10 @@ Write your verdict to $EVID/$GLANE-code_gate.json — exactly these fields:
   "skipped":  [ { "title": "...", "reason": "..." } ],
   "summary":  "one line"
 }
+
+gated_sha binds this verdict to the code. If the branch moves after you write
+it, the gate is stale and the push is refused — that is deliberate, because a
+run that loops back through implementation must not present an old PASS.
 
 build_exit is read, not taken on trust: the gate cannot pass with a non-zero
 build no matter what gate_passed says. Report the exit code you observed — a

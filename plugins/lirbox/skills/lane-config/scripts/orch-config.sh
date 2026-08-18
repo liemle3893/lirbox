@@ -9,7 +9,8 @@
 #   orch-config.sh init     [repo]              write a skeleton (NO invented profiles)
 #   orch-config.sh validate [repo]              exit 1 with reasons if unusable
 #   orch-config.sh set-profile <name> --kind K --model M [--effort E] [--flags "a b"] [repo]
-#   orch-config.sh set-lanes [--max N] [--timeout MS] [--context N] [--gate-profile P] [repo]
+#   orch-config.sh set-lanes [--max N] [--timeout MS] [--context N] [--gate-profile P]
+#                            [--max-restarts N] [repo]
 #   orch-config.sh set-setup [--install C] [--build C] [--test C] [--baseline S] [repo]
 #
 # Stored user-local, keyed by the repo's git common dir — the same key the lane
@@ -205,11 +206,12 @@ set-profile)
 
 set-lanes)
   need
-  local MAX="" TO="" CTX="" BASE="" GATE=""
+  local MAX="" TO="" CTX="" BASE="" GATE="" MAXR=""
   while (( $# )); do
     case "$1" in
       --max) MAX="$2"; shift 2 ;; --timeout) TO="$2"; shift 2 ;; --context) CTX="$2"; shift 2 ;;
       --base) BASE="$2"; shift 2 ;; --gate-profile) GATE="$2"; shift 2 ;;
+      --max-restarts) MAXR="$2"; shift 2 ;;
       *) die "unknown flag: $1" ;;
     esac
   done
@@ -247,6 +249,14 @@ set-lanes)
   Add it with set-profile first — the gate reviews AND fixes, so give it a
   profile capable of both."
     j=$(print -r -- "$j" | jq --arg v "$GATE" '.lanes.gate_profile=$v')
+  fi
+  # How many times a lane may be restarted before a restart that yielded nothing
+  # is treated as a loop rather than a hard problem. Ported from conductor,
+  # which bounds ROUNDS and then asks whether the unmet set changed — never
+  # dollars, because a spend limit cannot tell a slow problem from a stuck one.
+  if [[ -n "$MAXR" ]]; then
+    [[ "$MAXR" == <-> ]] || die "--max-restarts takes a number, got '$MAXR'"
+    j=$(print -r -- "$j" | jq --argjson v "$MAXR" '.lanes.max_restarts=$v')
   fi
   write "$j"; jq -c '.lanes' "$CFG" ;;
 

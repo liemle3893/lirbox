@@ -128,13 +128,22 @@ done
 # can never be a gate, so the producer may not be the implementor.
 local IMPL VERDICT
 IMPL=$(jq -r '.agent_name // .lane // empty' "$REC" 2>/dev/null)
-VERDICT=$(jq -s -r --arg lane "$LANE" --arg impl "$IMPL" '
+# The gate is bound to the CODE it reviewed, not merely to the lane. Without
+# this, a lane can pass the gate, loop back through implementation — which is
+# the whole reason this orchestrator exists rather than a fixed pipeline — commit
+# more, and still present the old PASS. A verdict that does not name a sha
+# cannot be checked against anything, so it is refused rather than trusted.
+local HEADSHA
+HEADSHA=$(git -C "$CWD" rev-parse "$TARGET" 2>/dev/null)
+VERDICT=$(jq -s -r --arg lane "$LANE" --arg impl "$IMPL" --arg head "$HEADSHA" '
   [ .[] | (if type == "array" then .[] else . end)
         | select(.kind == "code_gate" and .lane == $lane) ] as $g
   | if ($g | length) == 0 then "MISSING"
     elif ([ $g[] | select(.produced_by != $impl) ] | length) == 0 then "SELF"
     else ([ $g[] | select(.produced_by != $impl) ] | last) as $v
-      | if ($v.gate_passed == true and $v.build_exit == 0) then "PASS"
+      | if ($v.gated_sha == null or $v.gated_sha == "") then "UNBOUND"
+        elif ($v.gated_sha != $head) then "STALE gated=\($v.gated_sha[0:8]) head=\($head[0:8])"
+        elif ($v.gate_passed == true and $v.build_exit == 0) then "PASS"
         else "FAIL c=\($v.critical // "?") h=\($v.high // "?") build_exit=\($v.build_exit // "?")"
         end
     end' "$RUNDIR"/evidence/*.json(N) 2>/dev/null)
@@ -189,6 +198,17 @@ $(case "$VERDICT" in
   SELF)    print -r -- "  The only code_gate for this lane was produced by the lane that wrote the
   code. A self-report can never be a gate — the same rule that stops
   reported -> verified. Dispatch the gate as its own lane." ;;
+  UNBOUND) print -r -- "  The gate verdict names no gated_sha, so nothing says WHICH code it
+  reviewed. A gate that cannot be tied to a commit cannot be trusted after the
+  branch moves. Re-run it:
+
+    $LANECMD gate $LANE --run ${RUNDIR:t}" ;;
+  STALE*)  print -r -- "  The gate passed — on a different commit. The branch has moved since it was
+  reviewed, so this verdict is about code that is no longer what you are
+  pushing. This is the cost of a reshapeable flow: looping back through
+  implementation invalidates the gate, and only the sha notices.
+
+    $LANECMD gate $LANE --run ${RUNDIR:t}" ;;
   *)       print -r -- "  The gate ran and did not pass. Unresolved Critical/High, or a build that
   did not exit 0. Fix them and re-run the gate; do not push past it." ;;
 esac)

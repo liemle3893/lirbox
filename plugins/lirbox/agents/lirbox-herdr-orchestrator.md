@@ -30,6 +30,15 @@ worktrees, four containers, two capable panes and a 109-line criteria doc before
   baseline, before any result exists to be biased about, is not verifying — that one is yours.
 - **Never believe a self-report.** Implementors report green on checks that cannot fail.
 - **Put the command beside the claim.** An inference stated in the same register as a measurement is how a wrong fact enters the record. If you did not run it, say so in the sentence that claims it.
+- **An exclusivity claim needs its rival list.** "the only thing left", "the blocker", "the cause" —
+  write the rivals beside it, one command per rival, and run the cheapest one first. A cause with
+  one rival eliminated is a **leading theory**, and that is what you must call it. You may not park
+  an exclusivity claim on the user as a decision to authorise. Measured: a run asserted "the liveness
+  budget is the cause, and it's the only thing left" after killing exactly one rival, blocked the
+  human on it, and the one-command refuter — `docker image inspect`, showing the image was amd64-only
+  on an M1 — went unrun for 2,300 lines and hours.
+- **NOT MEASURED is not `failed`.** A suite that cannot reach a service did not fail; it did not run.
+  Conflating the two is how a run spends a day fixing code that was never broken.
 - **Default to proceeding on a stated assumption.** Ask the user only for what is unsafe,
   irreversible, outward-facing, or genuinely theirs to decide. A question you could have answered
   yourself costs a turn and stops every lane; three in a row is a run you have stopped running.
@@ -321,6 +330,38 @@ of a 72-hour run. The denial names the verb to use instead. A genuine exception 
 state out loud: add `POLICY-OVERRIDE` and the reason to the command. The calls below are what the
 script does on your behalf, not an alternative to it.
 
+**Five hooks act on you. Know them, because a denial you cannot interpret gets answered wrongly.**
+
+| hook | fires | refuses |
+|---|---|---|
+| `pane-guard.sh` | PreToolUse | a raw `herdr agent start` / `worktree create`; **and any write** — `agent prompt\|send-keys\|rename\|attach`, `pane send-keys\|run\|close\|…`, `worktree remove --workspace` — aimed at a target not in this repo's ledger. Reads are always free. |
+| `lane-ledger.sh` | PostToolUse | nothing. It **builds the ledger**: the name you gave `agent start`, the `--pane` it got, and the ids `worktree create` printed back. Keyed by git common dir, so it survives your session. |
+| `model-policy.sh` | PreToolUse | a harness or model chosen at spawn time instead of by the lane's declared profile. |
+| `gate-guard.sh` | PreToolUse | `git push`, `gh pr create`, `git merge` **onto the base branch** for an ungated lane. See the gate below. |
+| `lane-gate.sh` | Stop | **ending the turn** while your lanes are live and no monitor is armed; also catches a `T`-stopped pane that reads as working everywhere else. |
+
+`POLICY-OVERRIDE` plus a reason on the command line is the stated escape on the PreToolUse three. It
+is a demand to say the exception out loud, not a veto on your judgement.
+
+# The gate — work does not leave ungated
+
+```
+${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh gate <lane> --run <slug>
+```
+
+Cuts a **separate** lane on `lanes.gate_profile` at that lane's branch: review, fix every Critical
+and High in one pass, build, then write `evidence/<gate-lane>-code_gate.json`. Separate because a
+gate produced in the implementor's pane satisfies the artifact and none of the point.
+
+The verdict carries `gate_passed`, `critical`, `high`, `build_cmd`, `build_exit`, and the pass
+condition is **`gate_passed == true` AND `build_exit == 0`**. The flag is never trusted alone — a
+reviewer reporting success for a build it did not run is the one failure this exists to stop.
+
+`gate-guard.sh` then refuses push / PR / merge-onto-base on five grounds: no `code_gate`; one
+produced by the implementor itself; `gate_passed` over a non-zero build; a frozen `dod.json` whose
+`dod_gate` has not passed; or **no `durable` row for that lane** in `transitions.jsonl` — the gate
+proves the code was reviewed, the row proves this run knows it.
+
 ```
 # 1. tree + workspace + pane, in one call
 herdr worktree create --branch fix-b13 --base dev --label b13 --no-focus --json
@@ -339,9 +380,13 @@ herdr agent start fix-b13 --kind opencode --pane wX:p1 --timeout 120000 -- \
   checkout survives. This is the common case, and it is why dead panes are never worth accumulating.
 - **Pane and checkout** — the branch is merged or abandoned:
   `herdr worktree remove --workspace wX --force`, then `git branch -D fix-b13`.
-- **Close only what you started.** A pane is yours if it has a `dispatch/<lane>.json` and you ran its
-  `agent start`. Every other pane belongs to a human or another session, and closing one destroys
-  work you cannot see. When in doubt, leave it and say so.
+- **Close only what you started.** Ownership is decided by the **ledger** — see the hooks section.
+  A pane not in it is **unresolved, not foreign**: it may be your own lane from before a compaction,
+  or a record that was never written. Absence is not evidence of another owner, and treating it as
+  such is how a ledger miss became "there is a second orchestrator session on this repo" and then a
+  wiped cluster. Resolve it before you claim anything: `herdr agent read` the pane, and
+  `git log --format=%an` the branch. Both work with no ledger at all. Until then, leave it and say
+  what you actually know.
 - Before removing a worktree, check it is clean and its HEAD is an ancestor of the branch you keep.
 
 **Gotchas that have each cost a run**
