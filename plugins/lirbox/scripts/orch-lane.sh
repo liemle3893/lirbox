@@ -18,6 +18,15 @@ setopt no_nomatch pipefail
 die() { print -u2 -r -- "orch-lane: $1"; exit 1 }
 h()   { HERDR_ENV=1 herdr "$@" }
 
+# Same policy orch-config.sh writes through and model-policy.sh reads. This is
+# the SPLICE site — the config array becomes argv here — so it re-derives the
+# answer rather than trusting that whatever wrote the file was this decade's
+# version of orch-config.sh. `validate` passing an hour ago is not a property of
+# the file now. Fail closed if the policy is missing.
+POLICY="${0:A:h}/lane-flag-policy.zsh"
+[[ -r "$POLICY" ]] || die "missing flag policy at $POLICY — refusing to spawn a lane unchecked."
+source "$POLICY"
+
 SUB="${1:-}"; shift 2>/dev/null || true
 [[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|brief|close] ..."
 
@@ -83,6 +92,30 @@ invariants and no ubiquitous language, and will invent both.
   fi
   TIMEOUT=$(jq -r '.lanes.timeout_ms // 120000' "$CFG")
 
+  # The config's `flags` array is the only profile field that reaches the harness
+  # without passing model-policy.sh, which compares --kind/--model/--effort and
+  # nothing else. Before this, a stored `--dangerously-skip-permissions` rode
+  # into every spawn in the repo, past the gate, in silence. The array is not
+  # user input at this instant — it is a file, and a file is whatever last wrote
+  # it, which may have been an agent that read a README.
+  typeset -a FLAG_TOK; FLAG_TOK=(${=FLAGS})
+  if (( $#FLAG_TOK )); then
+    local fprob; fprob=$(lane_flags_problem "${FLAG_TOK[@]}") || die "profile '$PROFILE' in $CFG carries a flag that may not be spawned:
+$fprob
+
+  Fix the profile: orch-config.sh set-profile $PROFILE ... --flags \"...\"
+  Refusing to start '$NAME' rather than hand the harness something nobody reviewed."
+  fi
+  [[ "$KIND" == (claude|opencode) ]] || die "profile '$PROFILE' declares kind '$KIND', which is not claude or opencode.
+  This config did not come from orch-config.sh. Run \`orch-config.sh validate\` and fix it."
+  if [[ -n "$MODEL" && "$MODEL" == *[^A-Za-z0-9._/:@+-]* ]]; then
+    die "profile '$PROFILE' declares model '$MODEL', which carries characters that cannot appear in an argv token.
+  Run \`orch-config.sh validate\` — this config was not written by set-profile."
+  fi
+  if [[ -n "$EFFORT" && "$EFFORT" != (low|medium|high|xhigh|max) ]]; then
+    die "profile '$PROFILE' declares effort '$EFFORT', which is not one of: low medium high xhigh max."
+  fi
+
   # Refuse to exceed the declared lane cap rather than discovering it as load.
   local CAP LIVE
   CAP=$(jq -r '.lanes.max_concurrent // empty' "$CFG")
@@ -101,7 +134,7 @@ invariants and no ubiquitous language, and will invent both.
     DA=(agent start "$NAME" --kind "$KIND" --pane '<pane>' --timeout "$TIMEOUT" -- --agent "$PROFILE")
     [[ -n "$MODEL" ]] && DA+=(--model "$MODEL")
     [[ -n "$EFLAG" ]] && DA+=($EFLAG "$EFFORT")
-    [[ -n "$FLAGS" ]] && DA+=(${=FLAGS})
+    (( $#FLAG_TOK )) && DA+=("${FLAG_TOK[@]}")
     print -r -- "herdr worktree create --branch $BRANCH --base $BASE --label $NAME --no-focus --json"
     print -r -- "herdr $DA"
     exit 0
@@ -119,7 +152,7 @@ invariants and no ubiquitous language, and will invent both.
   ARGS=(agent start "$NAME" --kind "$KIND" --pane "$PANE" --timeout "$TIMEOUT" -- --agent "$PROFILE")
   [[ -n "$MODEL" ]] && ARGS+=(--model "$MODEL")
   [[ -n "$EFLAG" ]] && ARGS+=($EFLAG "$EFFORT")
-  [[ -n "$FLAGS" ]] && ARGS+=(${=FLAGS})
+  (( $#FLAG_TOK )) && ARGS+=("${FLAG_TOK[@]}")
   h $ARGS >/dev/null || die "agent start failed for $NAME on $PANE"
 
   if [[ -n "$RUN" ]]; then

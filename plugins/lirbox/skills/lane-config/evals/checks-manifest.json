@@ -24,11 +24,11 @@
           "why": "blessing a config with zero profiles lets a run start with nothing declared, so every lane falls back to whatever the spawn command happened to say",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
-          "find": "  (( n > 0 )) || problems+=(\"no profiles declared — every spawn will be denied\")",
+          "find": "  (( n > 0 )) || problems+=(\"no profiles declared \u2014 every spawn will be denied\")",
           "replace": "  true"
         },
         {
-          "why": "accepting a profile with no model means the harness default silently becomes the decision — the drift that started this work",
+          "why": "accepting a profile with no model means the harness default silently becomes the decision \u2014 the drift that started this work",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
           "find": "  [[ -n \"$MODEL\" ]] || die \"set-profile needs --model. An unnamed model is the harness default, not a decision.\"",
@@ -38,8 +38,66 @@
           "why": "an empty setup.baseline passing validate leaves every lane unable to distinguish its own red from an inherited one, which cost the 2026-08 run several cycles",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
-          "find": "  [[ \"$(jq -r '.setup.baseline // \"\"' \"$CFG\")\" != \"\" ]] || problems+=(\"setup.baseline is empty — a lane cannot tell a real red from an inherited one\")",
+          "find": "  [[ \"$(jq -r '.setup.baseline // \"\"' \"$CFG\")\" != \"\" ]] || problems+=(\"setup.baseline is empty \u2014 a lane cannot tell a real red from an inherited one\")",
           "replace": "  true"
+        }
+      ]
+    },
+    "hostile-config-refused": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "set-profile must not store a capability flag: the write-time gate is the only one that stops it becoming permanent",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "    local problems; problems=$(lane_flags_problem \"${FLAG_TOK[@]}\") || die \"--flags refused:",
+          "replace": "    local problems; problems=\"\"; true || die \"--flags refused:"
+        },
+        {
+          "why": "a write whose jq failed must change nothing; the old body truncated the config to empty and exited 0",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "  print -r -- \"$1\" | jq -e . >/dev/null 2>&1 \\",
+          "replace": "  true \\"
+        },
+        {
+          "why": "validate must re-derive the flag policy from the file: a config can arrive by an editor, and 'never hand-edit the JSON' is a rule, not a mechanism",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "      fp=$(lane_flags_problem \"${pf[@]}\") \\",
+          "replace": "      fp=\"\"; true \\"
+        },
+        {
+          "why": "the splice site must re-check: validate passing an hour ago is not a property of the file at spawn time",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    local fprob; fprob=$(lane_flags_problem \"${FLAG_TOK[@]}\") || die \"profile '$PROFILE' in $CFG carries a flag that may not be spawned:",
+          "replace": "    local fprob; fprob=\"\"; true || die \"profile '$PROFILE' in $CFG carries a flag that may not be spawned:"
+        },
+        {
+          "why": "the hook must cover the path the config gate cannot see: a spawn command the model wrote by hand",
+          "env": "MODEL_POLICY_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/model-policy.sh",
+          "find": "  lane_flag_denied \"${TOK[i]}\" && BADFLAGS+=(\"${TOK[i]}\")",
+          "replace": "  true"
+        },
+        {
+          "why": "a flag whose own name says 'dangerously' must be refused by name, not by whether somebody remembered to list it",
+          "env": "FLAG_POLICY_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/lane-flag-policy.zsh",
+          "find": "  [[ \"$name\" == dangerously* ]] && return 0",
+          "replace": "  true"
+        },
+        {
+          "why": "the character allowlist is what makes a stored flag inert in consumers nobody has written yet",
+          "env": "FLAG_POLICY_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/lane-flag-policy.zsh",
+          "find": "    if [[ \"$tok\" == *[^A-Za-z0-9._/:@,=+-]* ]]; then",
+          "replace": "    if false; then"
         }
       ]
     }

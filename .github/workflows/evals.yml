@@ -43,6 +43,16 @@ jobs:
       - name: Regression gate
         run: node scripts/evals-all.mjs --fast
 
+      # Hostile-input test. The step below reads every skill's checks-manifest.json
+      # and turns strings out of it into paths and child processes — and on a
+      # pull request that file is written by whoever opened the PR. A traversing
+      # `file` used to write straight through the scratch copy into this runner,
+      # and the run still printed OK. This builds the hostile manifest and
+      # requires the refusal, so the fix cannot quietly come undone before the
+      # step that trusts it runs.
+      - name: Refuse hostile project input
+        run: node scripts/test-hostile-input.mjs
+
       # Mutation-proof the frozen checks. evals-all only proves a green check EXITS 0 — it cannot
       # tell "the behaviour is present" from "the check stopped looking". Both false-green and
       # false-red have shipped here (see scripts/prove-checks.mjs). This breaks the invariant each

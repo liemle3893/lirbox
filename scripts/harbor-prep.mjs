@@ -18,8 +18,9 @@
  *
  * Re-run after touching the skill. Cheap and idempotent: it wipes and re-copies.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -76,12 +77,42 @@ if (!argv.length) {
 
 // --catalog: a pruned copy of EVERY skill, for a behavioural run's `--skill` flag. Takes an explicit
 // path (use a temp dir) so this never grows a second tree inside the repo.
+const MARKER = '.lirbox-skill-catalog';
+
 if (argv[0] === '--catalog') {
   const out = argv[1];
   if (!out) { console.error('usage: harbor-prep.mjs --catalog <outdir>'); process.exit(2); }
   const dest = resolve(out);
-  rmSync(dest, { recursive: true, force: true });
+
+  // This path recursively deletes whatever it is pointed at. It used to do that
+  // to any argument at all — a typo, a shell variable that came back empty, a
+  // path copied out of a task file. Refuse anything that is not either fresh or
+  // demonstrably a catalog this script made.
+  const inside = (parent, child) => child === parent || child.startsWith(parent + sep);
+  if (dest === resolve(sep) || dest === resolve(homedir())) {
+    console.error(`REFUSING to wipe ${dest} — pass a scratch directory.`);
+    process.exit(2);
+  }
+  if (inside(dest, REPO)) {
+    console.error(`REFUSING to wipe ${dest} — it contains the repo at ${REPO}.`);
+    process.exit(2);
+  }
+  if (inside(REPO, dest)) {
+    console.error(`REFUSING to write a catalog inside the repo (${dest}).\nThe catalog is a derived tree; put it in a temp dir so it cannot be committed or scanned.`);
+    process.exit(2);
+  }
+  if (existsSync(dest)) {
+    if (!statSync(dest).isDirectory()) { console.error(`REFUSING: ${dest} is not a directory.`); process.exit(2); }
+    const entries = readdirSync(dest);
+    if (entries.length && !entries.includes(MARKER)) {
+      console.error(`REFUSING to wipe ${dest}: it holds ${entries.length} entr(y|ies) and no ${MARKER}, `
+        + `so it is not a catalog this script made.\nDelete it yourself if that is what you meant, or name an empty directory.`);
+      process.exit(2);
+    }
+    rmSync(dest, { recursive: true, force: true });
+  }
   mkdirSync(dest, { recursive: true });
+  writeFileSync(join(dest, MARKER), 'Derived by scripts/harbor-prep.mjs --catalog. Safe to delete.\n');
   for (const skill of readdirSync(SKILLS)) prunedCopy(join(SKILLS, skill), join(dest, skill));
   console.log(`pruned skill catalog → ${dest}\nPass it as:  --skill ${dest}`);
   process.exit(0);

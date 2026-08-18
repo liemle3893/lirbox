@@ -44,7 +44,7 @@
 //         --strict  exit 1 if any declared mutation fails to produce RED (for CI)
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
-import { basename, join, resolve, dirname } from 'node:path';
+import { basename, join, resolve, dirname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -53,6 +53,44 @@ const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf('--' + n); return i === -1 ? d : argv[i + 1]; };
 const STRICT = argv.includes('--strict');
 const SKILL = arg('skill', 'conductor');
+
+// ---------------------------------------------------------------------------
+// checks-manifest.json is a REPO FILE, and this script runs on every pull
+// request (.github/workflows/evals.yml loops every skill). So the manifest is
+// input from whoever opened the PR, and it drives a file write and a child
+// process — `file` was joined onto a path with nothing checking it, and a
+// `"file": "../../../../etc/whatever"` wrote through the scratch copy into the
+// runner. It reported "OK — every declared mutation produced a RED."
+//
+// Every field is now checked before it is used, and a manifest that is off-shape
+// is a hard exit 2 rather than a skipped entry: a mutation that quietly does not
+// run reads exactly like one that passed.
+const SLUG = /^[a-z0-9][a-z0-9-]*$/;
+
+// Names that change how the child process loads code, rather than telling a check
+// where to look. `env` is spliced into the child's environment by name.
+const ENV_DENY = new Set([
+  'PATH', 'NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE', 'NODE_EXTRA_CA_CERTS',
+  'LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH',
+  'HOME', 'SHELL', 'IFS', 'BASH_ENV', 'ENV', 'ZDOTDIR', 'TMPDIR', 'GIT_SSH_COMMAND',
+  'GIT_EXTERNAL_DIFF', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM',
+]);
+
+const bad = (msg) => { console.error(`MANIFEST REFUSED — ${msg}`); process.exit(2); };
+
+// Resolve `rel` under `root` and prove the result is still under `root`. The
+// prefix test is what catches `..`, an absolute path, and a symlink-shaped name;
+// the explicit `..` test is what makes the message say why.
+function contained(root, rel, where) {
+  if (typeof rel !== 'string' || !rel) bad(`${where}: file must be a non-empty string`);
+  if (rel.startsWith('/') || /^[A-Za-z]:/.test(rel)) bad(`${where}: file must be relative, got ${JSON.stringify(rel)}`);
+  if (rel.split(/[\\/]/).includes('..')) bad(`${where}: file may not contain '..', got ${JSON.stringify(rel)}`);
+  const abs = resolve(root, rel);
+  if (abs !== root && !abs.startsWith(root + sep)) bad(`${where}: file resolves outside ${root}: ${abs}`);
+  return abs;
+}
+
+if (!SLUG.test(String(SKILL))) bad(`--skill must be a plain skill name, got ${JSON.stringify(SKILL)}`);
 
 const SKILL_DIR = join(REPO, 'plugins/lirbox/skills', SKILL);
 const MANIFEST = join(SKILL_DIR, 'evals/checks-manifest.json');
@@ -72,6 +110,24 @@ for (const [name, entry] of Object.entries(checks)) {
   if (!existsSync(checkFile)) { console.log(`ROT   ${name} — no such check file`); rot++; continue; }
 
   for (const m of muts) {
+    // Validate the whole mutation before anything touches the filesystem.
+    const where = `${SKILL}/${name}`;
+    if (!m || typeof m !== 'object' || Array.isArray(m)) bad(`${where}: mutation is not an object`);
+    for (const k of Object.keys(m)) {
+      if (!['why', 'env', 'file', 'find', 'replace', 'root'].includes(k)) bad(`${where}: unknown mutation key ${JSON.stringify(k)}`);
+    }
+    for (const k of ['why', 'env', 'file', 'find', 'replace']) {
+      if (typeof m[k] !== 'string') bad(`${where}: mutation.${k} must be a string, got ${JSON.stringify(m[k])}`);
+    }
+    if (m.find === '') bad(`${where}: mutation.find is empty — it would match everywhere`);
+    if (m.root !== undefined && m.root !== 'repo' && m.root !== 'skill') {
+      bad(`${where}: mutation.root must be "repo" or "skill", got ${JSON.stringify(m.root)}`);
+    }
+    if (!/^[A-Z][A-Z0-9_]*$/.test(m.env)) bad(`${where}: mutation.env must be an UPPER_SNAKE variable name, got ${JSON.stringify(m.env)}`);
+    if (ENV_DENY.has(m.env)) {
+      bad(`${where}: mutation.env may not be ${m.env} — that names how the child loads code, not where its artifact is`);
+    }
+
     const tmp = mkdtempSync(join(tmpdir(), `prove-${name}-`));
     const copy = join(tmp, 'skill');
     try {
@@ -82,7 +138,11 @@ for (const [name, entry] of Object.entries(checks)) {
       // instead: the real file is never touched, and the check finds it through
       // `env` exactly like a mutated file inside the copy.
       const fromRepo = m.root === 'repo';
-      const source = fromRepo ? join(REPO, m.file) : join(copy, m.file);
+      // `root: "repo"` reads one repo-relative file and writes the mutated copy
+      // into the scratch dir; the default reads and writes inside the copy. Both
+      // are containment-checked against the root they claim, so neither can name
+      // a path that leaves it.
+      const source = fromRepo ? contained(REPO, m.file, where) : contained(copy, m.file, where);
       const target = fromRepo ? join(tmp, basename(m.file)) : source;
       const before = readFileSync(source, 'utf8');
       const hits = before.split(m.find).length - 1;

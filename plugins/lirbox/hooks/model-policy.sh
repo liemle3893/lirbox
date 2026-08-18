@@ -53,12 +53,37 @@ for (( i = s; i <= $#TOK; i++ )); do
   esac
 done
 
+deny() { print -u2 -r -- "DENIED: $1"; exit 2 }
+
+# The third enforcement point for the same policy (write time is
+# skills/lane-config/scripts/orch-config.sh, spawn time is scripts/orch-lane.sh).
+# This one covers the path neither of those can see: a command the model wrote
+# itself. Everything below compares --kind/--model/--effort against the profile
+# and never looked at what else the line carries, so
+# `herdr agent start x --kind claude --model m --agent p -- --dangerously-skip-permissions`
+# walked straight through the gate that exists to stop exactly that.
+POLICY="${0:A:h}/../scripts/lane-flag-policy.zsh"
+[[ -r "$POLICY" ]] || deny "the lane flag policy is missing at $POLICY, so this spawn cannot be checked.
+Reinstall the plugin. A gate that cannot read its own policy allows nothing."
+source "$POLICY"
+
+typeset -a BADFLAGS
+for (( i = s; i <= $#TOK; i++ )); do
+  lane_flag_denied "${TOK[i]}" && BADFLAGS+=("${TOK[i]}")
+done
+(( $#BADFLAGS )) && deny "\`herdr agent start $LANE\` carries ${(j:, :)BADFLAGS}.
+
+A flag that grants capability, loads config, rewrites the system prompt or
+re-picks the model is not something a lane inherits from the command line — it
+is a decision, and a decision belongs in the profile where somebody reviews it,
+or in a run you do by hand and explain.
+
+If you mean it, say so out loud: add POLICY-OVERRIDE and the reason to the command."
+
 CWD=$(print -r -- "$IN" | jq -r '.cwd // ""')
 KEY=$(git -C "$CWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 [[ -n "$KEY" ]] || KEY="$CWD"
 CFG="$HOME/.claude/lirbox-orchestrator/$(print -rn -- "$KEY" | shasum | cut -c1-12).json"
-
-deny() { print -u2 -r -- "DENIED: $1"; exit 2 }
 
 # Universal, config or not.
 [[ -n "$KIND" ]] || deny "\`herdr agent start $LANE\` names no --kind. Say which harness."

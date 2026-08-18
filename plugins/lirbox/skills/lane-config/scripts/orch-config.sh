@@ -39,7 +39,46 @@ KEY=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/nu
 DIR="$HOME/.claude/lirbox-orchestrator"
 CFG="$DIR/$(print -rn -- "$KEY" | shasum | cut -c1-12).json"
 
-write() { mkdir -p "$DIR"; print -r -- "$1" > "$CFG" }
+# One definition of what a lane flag may be, shared with scripts/orch-lane.sh
+# (spawn time) and hooks/model-policy.sh (command time) so the three cannot
+# drift. Fail closed: without it this script cannot tell a flag from a payload.
+POLICY="${0:A:h}/../../../scripts/lane-flag-policy.zsh"
+[[ -r "$POLICY" ]] || die "missing flag policy at $POLICY — refusing to write a config unchecked."
+source "$POLICY"
+
+# --- shape guards -------------------------------------------------------------
+# Every value below ends up as an argv token in a spawned command line, a jq key,
+# or a line of a brief. The tests are negative and character-based on purpose: a
+# value that survives one is inert in all three, whatever splices it next.
+bad_name()  { [[ -z "$1" || ${#1} -gt 64  || "$1" == *[^A-Za-z0-9._-]*     || "$1" == [-.]* ]] }
+bad_model() { [[ -z "$1" || ${#1} -gt 128 || "$1" == *[^A-Za-z0-9._/:@+-]* ]] }
+# setup.* ARE commands — a lane is told to run them — so their content is the
+# user's business. What is refused is a second line, which turns one reviewed
+# command into two, only one of which anybody read.
+bad_cmd()   { [[ ${#1} -gt 4096 || "$1" == *[$'\n\r']* || "$1" == *[$'\001'-$'\010']* ]] }
+int_in() {  # int_in <label> <value> <min> <max> — prints a reason, returns 1
+  local lbl="$1" v="$2"; integer lo="$3" hi="$4"
+  if [[ -z "$v" || "$v" == *[^0-9]* ]]; then
+    print -r -- "$lbl must be a whole number, got: ${(qqq)v}"; return 1
+  fi
+  if (( v < lo || v > hi )); then print -r -- "$lbl must be between $lo and $hi, got $v"; return 1; fi
+  return 0
+}
+
+# Fail closed. The old body ran `print -r -- "$1" > "$CFG"` unconditionally: when
+# the jq that produced "$1" failed — `set-lanes --max oops` was enough — it wrote
+# an empty string over a working config and exited 0. Nothing said so until the
+# next spawn was denied for a config that "did not parse".
+write() {
+  print -r -- "$1" | jq -e . >/dev/null 2>&1 \
+    || die "refusing to write $CFG: the new content is not valid JSON.
+  Nothing was changed. Check the arguments you passed — this is what a failed
+  jq upstream looks like, and writing it would destroy the config."
+  mkdir -p "$DIR"
+  local tmp="$CFG.new.$$"
+  print -r -- "$1" > "$tmp" || { rm -f "$tmp"; die "could not write $tmp" }
+  mv -f "$tmp" "$CFG" || { rm -f "$tmp"; die "could not replace $CFG" }
+}
 need()  { [[ -r "$CFG" ]] || die "no config at $CFG — run \`orch-config.sh init\` first." }
 
 case "$SUB" in
@@ -110,6 +149,67 @@ validate)
   need
   local -a problems
   jq -e . "$CFG" >/dev/null 2>&1 || die "$CFG is not valid JSON"
+
+  # ---- schema ---------------------------------------------------------------
+  # "Never hand-edit the JSON" is a rule, and a rule is not a mechanism. This is
+  # the mechanism: every shape the set-* subcommands refuse at write time is
+  # re-derived here from the file itself, so a config that arrived by some other
+  # route — an editor, a script, an agent following a README — is caught by the
+  # command the flow already runs before any lane spawns against it.
+  local -a schema
+  schema=(${(f)"$(jq -r '
+    def top: ["version","_comment","profiles","default_profile","lanes","setup"];
+    def pkeys: ["kind","model","flags","effort"];
+    [ (keys[] | select(. as $k | top | index($k) | not) | "unknown top-level key \(.) — this config did not come from set-profile/set-lanes/set-setup")
+    , (if (.profiles|type) != "object" then "profiles is not an object" else empty end)
+    , (if (.lanes != null and (.lanes|type) != "object") then "lanes is not an object" else empty end)
+    , (if (.setup != null and (.setup|type) != "object") then "setup is not an object" else empty end)
+    , ( (if (.profiles|type) == "object" then .profiles else {} end) | to_entries[] as $e
+        | $e.key as $p | $e.value as $v
+        | ( if ($v|type) != "object" then "profile \($p) is not an object"
+            else ( ($v | keys[] | select(. as $k | pkeys | index($k) | not) | "profile \($p): unknown key \(.)")
+                 , (if ($v.flags != null and ($v.flags|type) != "array") then "profile \($p): flags is not an array" else empty end)
+                 , ((if ($v.flags|type) == "array" then $v.flags else [] end) | .[] | select(type != "string") | "profile \($p): flags holds a non-string \(tojson)")
+                 )
+            end ) )
+    , ( (if (.lanes|type) == "object" then .lanes else {} end) | to_entries[]
+        | select((.value|type) != "number" or (.value != (.value|floor)))
+        | "lanes.\(.key) is not a whole number: \(.value|tojson)" )
+    , ( (if (.setup|type) == "object" then .setup else {} end) | to_entries[]
+        | select(.value != null and (.value|type) != "string")
+        | "setup.\(.key) is not a string: \(.value|tojson)" )
+    ] | .[]' "$CFG" 2>/dev/null)"})
+  (( $#schema )) && problems+=("${schema[@]}")
+
+  # Per-value policy, in zsh, from the SAME helpers set-profile writes through —
+  # so what validate blesses and what set-profile stores can never disagree.
+  local prof m fp r lv sk sv
+  typeset -a pf
+  for prof in ${(f)"$(jq -r '(if (.profiles|type)=="object" then .profiles else {} end) | keys[]' "$CFG" 2>/dev/null)"}; do
+    [[ -n "$prof" ]] || continue
+    bad_name  "$prof" && problems+=("profile name $prof is not usable: letters, digits and . _ - only")
+    m=$(jq -r --arg p "$prof" '.profiles[$p].model // ""' "$CFG")
+    [[ -z "$m" ]] || { bad_model "$m" && problems+=("profile $prof: model $m carries characters that cannot appear in an argv token") }
+    pf=(${(f)"$(jq -r --arg p "$prof" '(if (.profiles[$p].flags|type)=="array" then .profiles[$p].flags else [] end) | .[] | select(type=="string") | .' "$CFG" 2>/dev/null)"})
+    pf=(${pf:#})
+    if (( $#pf )); then
+      fp=$(lane_flags_problem "${pf[@]}") \
+        || problems+=("profile $prof: ${fp//$'\n'/ }")
+    fi
+  done
+
+  # A number that parses is not a number that makes sense. A max_concurrent of
+  # 0 denies every spawn; one of 10000 is a fork bomb with a config file in front
+  # of it. Both are "valid JSON".
+  lv=$(jq -r '.lanes.max_concurrent // empty' "$CFG");     [[ -z "$lv" ]] || { r=$(int_in "lanes.max_concurrent" "$lv" 1 256) || problems+=("$r") }
+  lv=$(jq -r '.lanes.timeout_ms // empty' "$CFG");         [[ -z "$lv" ]] || { r=$(int_in "lanes.timeout_ms" "$lv" 1000 86400000) || problems+=("$r") }
+  lv=$(jq -r '.lanes.context_cap_tokens // empty' "$CFG"); [[ -z "$lv" ]] || { r=$(int_in "lanes.context_cap_tokens" "$lv" 1000 100000000) || problems+=("$r") }
+
+  for sk in install build test baseline; do
+    sv=$(jq -r --arg k "$sk" '.setup[$k] // ""' "$CFG")
+    [[ -n "$sv" ]] || continue
+    bad_cmd "$sv" && problems+=("setup.$sk spans more than one line — a brief pastes it as a single command")
+  done
   local n; n=$(jq -r '.profiles | length' "$CFG")
   (( n > 0 )) || problems+=("no profiles declared — every spawn will be denied")
   local bad
@@ -147,6 +247,10 @@ set-profile)
   done
   [[ "$KIND" == (claude|opencode) ]] || die "set-profile needs --kind claude|opencode (got '${KIND:-none}')"
   [[ -n "$MODEL" ]] || die "set-profile needs --model. An unnamed model is the harness default, not a decision."
+  bad_name "$NAME" && die "profile name '$NAME' is not usable: letters, digits and . _ - only, 64 chars max,
+  not starting with - or . — it becomes a jq key and a --agent argv token."
+  bad_model "$MODEL" && die "model '$MODEL' is not usable: letters, digits and . _ / : @ + - only, 128 chars max.
+  It is spliced into a spawned command line, so it may not carry whitespace or shell syntax."
   # Reasoning effort is a claude flag. opencode's INTERACTIVE entry — the one
   # herdr starts — has no equivalent: --variant exists only on `opencode run`,
   # and the tui silently ignores unknown flags. Storing effort for an opencode
@@ -158,7 +262,19 @@ set-profile)
   something that cannot take effect."
     [[ "$EFFORT" == (low|medium|high|xhigh|max) ]] || die "unknown effort '$EFFORT' (want: low medium high xhigh max)"
   fi
-  local fj; fj=$(print -r -- "$FLAGS" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s . 2>/dev/null || print -r -- '[]')
+  # `flags` is the one field that becomes argv the policy hooks never see:
+  # orch-lane.sh splices it into `herdr agent start ... -- --agent <p> <flags>`,
+  # and model-policy.sh only ever compared --kind/--model/--effort. So a single
+  # stored `--dangerously-skip-permissions` turned every later lane in the repo
+  # into an ungated one, permanently and with nothing printing a word about it.
+  # An agent can be talked into running one set-profile by a README; it should
+  # not be able to make that stick.
+  typeset -a FLAG_TOK; FLAG_TOK=(${=FLAGS})
+  if (( $#FLAG_TOK )); then
+    local problems; problems=$(lane_flags_problem "${FLAG_TOK[@]}") || die "--flags refused:
+$problems"
+  fi
+  local fj; fj=$(print -l -- "${FLAG_TOK[@]}" | grep -v '^$' | jq -R . | jq -s . 2>/dev/null || print -r -- '[]')
   write "$(jq --arg n "$NAME" --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" --argjson f "$fj" \
     '.profiles[$n] = ({kind:$k, model:$m}
         + (if ($f|length)>0 then {flags:$f} else {} end)
@@ -175,6 +291,17 @@ set-lanes)
       *) die "unknown flag: $1" ;;
     esac
   done
+  # --argjson takes whatever it is handed. `--max oops` made jq exit non-zero,
+  # `j` become the empty string, and the old write() truncate the config to
+  # nothing while reporting success. Validate first; --argjson only ever sees a
+  # value already known to be a plain integer in range.
+  local reasons=""
+  [[ -n "$MAX" ]] && { reasons+=$(int_in "lanes.max_concurrent (--max)"     "$MAX" 1     256)       || true }
+  [[ -n "$TO"  ]] && { reasons+=$(int_in "lanes.timeout_ms (--timeout)"     "$TO"  1000  86400000)  || true }
+  [[ -n "$CTX" ]] && { reasons+=$(int_in "lanes.context_cap_tokens (--context)" "$CTX" 1000 100000000) || true }
+  [[ -z "$reasons" ]] || die "set-lanes refused:
+  $reasons"
+
   local j; j=$(cat -- "$CFG")
   [[ -n "$MAX" ]] && j=$(print -r -- "$j" | jq --argjson v "$MAX" '.lanes.max_concurrent=$v')
   [[ -n "$TO"  ]] && j=$(print -r -- "$j" | jq --argjson v "$TO"  '.lanes.timeout_ms=$v')
@@ -191,6 +318,18 @@ set-setup)
       *) die "unknown flag: $1" ;;
     esac
   done
+  # setup.* are commands by design — a lane brief tells the agent to run them, so
+  # what they DO is the user's decision, not this script's. What is refused is a
+  # second line: one reviewed command that arrives carrying another underneath it
+  # is two commands, and only one of them was ever read out loud.
+  local k v
+  for k v in install "$I" build "$B" test "$T" baseline "$BL"; do
+    [[ -n "$v" ]] || continue
+    bad_cmd "$v" && die "setup.$k spans more than one line (or is over 4096 chars).
+  A setup value is pasted into a lane brief as a single command. Give one command,
+  or put the sequence in a script and name the script."
+  done
+
   local j; j=$(cat -- "$CFG")
   [[ -n "$I"  ]] && j=$(print -r -- "$j" | jq --arg v "$I"  '.setup.install=$v')
   [[ -n "$B"  ]] && j=$(print -r -- "$j" | jq --arg v "$B"  '.setup.build=$v')

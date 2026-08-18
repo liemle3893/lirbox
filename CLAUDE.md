@@ -39,6 +39,23 @@ JS *conductor* (the generated `.js`) driving full-tool *worker* subagents. Hard 
 `implementation-notes/*.html` plus `writeup.html` + `design.html` + DocsGate `summary.md` into
 `docs/changes/<name>/`.
 
+## Untrusted input — read before adding a script that reads a file
+
+A checkout, a pull request and a config file in `$HOME` are all written by somebody who is not the
+person running the command. [docs/security/untrusted-input.md](./docs/security/untrusted-input.md)
+maps every place a string here becomes a path, an argv token or a child process, and what stops it.
+**Add the row before you write the code.**
+
+- Lane flags have ONE policy — `plugins/lirbox/scripts/lane-flag-policy.zsh` — enforced at write
+  time (`orch-config.sh`), spawn time (`orch-lane.sh`) and command time (`hooks/model-policy.sh`).
+  Source it; never write a second copy. Adding a harness means reading its `--help` and extending it.
+- A config value is validated against a schema (`orch-config.sh validate`), and a write that cannot
+  build valid JSON changes nothing — `set-lanes --max oops` used to truncate the config and exit 0.
+- `evals/checks-manifest.json` is PR-controlled input to `scripts/prove-checks.mjs`; its `file`,
+  `env` and `root` are checked before use, and an off-shape manifest is a hard exit 2.
+- The hostile cases are tests, not prose: `node scripts/test-hostile-input.mjs` (in CI) and
+  lane-config's frozen `hostile-config-refused` check. Extend one when you add a reader.
+
 ## Validate
 
 `claude plugin validate .` before pushing. A skill's frontmatter `description` is its **trigger** —
