@@ -62,6 +62,39 @@ detect)
   elif [[ -f "$REPO/Cargo.toml"        ]]; then pm=cargo;  install="cargo fetch";                    build="cargo build";   test="cargo test"
   elif [[ -f "$REPO/go.mod"            ]]; then pm=go;     install="go mod download";                build="go build ./..."; test="go test ./..."
   fi
+  # Which branch lanes are cut from. orch-lane.sh used to hardcode "dev", which
+  # is right in exactly the repos that use it and fails everywhere else with
+  # `fatal: not a valid object name: 'dev'` — the same message a missing --cwd
+  # produces, so the two hid behind each other. Ask git: the remote's default
+  # head first, then the local branches people actually integrate on.
+  # Order matters and origin/HEAD is NOT first: cloudflare-os integrates on dev
+  # while its origin/HEAD says main, so the remote's opinion would have written
+  # the wrong branch into the config with full confidence. What someone actually
+  # has checked out is the better signal. This stays a SUGGESTION either way —
+  # init leaves base_branch null and orch-lane.sh refuses to start without it,
+  # because the branch every worktree is cut from is a decision, like a profile.
+  # main leads every blind list. An earlier cut scanned `dev develop main master`
+  # and that is the original defect one level up: a house convention treated as a
+  # fact about all repos. Where there is no evidence, the ecosystem default wins.
+  local base="" cur c
+  cur=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  # Evidence beats the default: a checked-out integration branch is someone
+  # having already answered this. cloudflare-os sits on dev while its
+  # origin/HEAD says main, and only this rule gets that repo right.
+  for c in main master dev develop; do
+    [[ "$cur" == "$c" ]] && { base="$cur"; break }
+  done
+  if [[ -z "$base" ]]; then
+    base=$(git -C "$REPO" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
+    base="${base#origin/}"
+  fi
+  if [[ -z "$base" ]]; then
+    for c in main master dev develop; do
+      git -C "$REPO" rev-parse --verify -q "$c" >/dev/null 2>&1 && { base="$c"; break }
+    done
+  fi
+  [[ -n "$base" ]] || base="$cur"
+
   local ncpu; ncpu=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
   # opencode is commonly installed outside PATH (~/.opencode/bin). An empty
   # profile list because the binary was not found is a broken probe, not a
@@ -80,7 +113,7 @@ detect)
   fi
   jq -n --arg pm "$pm" --arg i "$install" --arg b "$build" --arg t "$test" \
         --argjson cpu "$ncpu" --argjson prof "$profiles" --arg cfg "$CFG" --arg repo "$REPO" \
-    --arg oc "$OC" '{repo:$repo, config_path:$cfg, package_manager:(if $pm=="" then null else $pm end),
+    --arg oc "$OC" --arg base "$base" '{repo:$repo, config_path:$cfg, suggested_base_branch:$base, package_manager:(if $pm=="" then null else $pm end),
       setup:{install:(if $i=="" then null else $i end), build:(if $b=="" then null else $b end),
              test:(if $t=="" then null else $t end)},
       cpus:$cpu, suggested_max_concurrent:(($cpu/2)|floor),
@@ -97,14 +130,18 @@ init)
     _comment: "Profiles are empty on purpose. A lane cannot start until at least one is declared, so the decision is made once, with the user, instead of guessed per spawn.",
     profiles: {},
     default_profile: null,
-    lanes: { max_concurrent: ($d.suggested_max_concurrent // 4), timeout_ms: 120000, context_cap_tokens: 300000 },
+    lanes: { max_concurrent: ($d.suggested_max_concurrent // 4), ready_timeout_ms: 60000,
+             context_cap_tokens: 300000, base_branch: null },
     setup: {
       install: $d.setup.install, build: $d.setup.build, test: $d.setup.test,
       baseline: null
     }
   }')"
   print -r -- "wrote $CFG"
-  print -r -- "NOT USABLE YET: no profiles declared. Add them with set-profile." ;;
+  print -r -- "NOT USABLE YET: no profiles declared. Add them with set-profile."
+  print -r -- "Also unset: lanes.base_branch (every worktree is cut from it).
+  Detected candidate: $(print -r -- "$d" | jq -r '.suggested_base_branch')
+  Confirm with the user, then: $0 set-lanes --base <branch>" ;;
 
 validate)
   need
@@ -168,17 +205,37 @@ set-profile)
 
 set-lanes)
   need
-  local MAX="" TO="" CTX=""
+  local MAX="" TO="" CTX="" BASE=""
   while (( $# )); do
     case "$1" in
       --max) MAX="$2"; shift 2 ;; --timeout) TO="$2"; shift 2 ;; --context) CTX="$2"; shift 2 ;;
+      --base) BASE="$2"; shift 2 ;;
       *) die "unknown flag: $1" ;;
     esac
   done
   local j; j=$(cat -- "$CFG")
   [[ -n "$MAX" ]] && j=$(print -r -- "$j" | jq --argjson v "$MAX" '.lanes.max_concurrent=$v')
-  [[ -n "$TO"  ]] && j=$(print -r -- "$j" | jq --argjson v "$TO"  '.lanes.timeout_ms=$v')
+  # --timeout is herdr's agent-READINESS wait, not a lane runtime cap. herdr
+  # refuses anything over 300000, and it refuses it at spawn time — which reads
+  # as "the orchestrator is broken", not "the config is wrong". This config once
+  # carried 1800000 (a runtime intent) and every lane start in a 72-hour run
+  # died on invalid_agent_timeout. Refuse it here, where the mistake is made.
+  if [[ -n "$TO" ]]; then
+    [[ "$TO" == <-> ]] || die "--timeout takes milliseconds, got '$TO'"
+    (( TO > 3000 && TO <= 300000 )) || die "--timeout $TO is outside herdr's range.
+  This is how long 'agent start' waits for the harness to become READY
+  (herdr: default 30000, max 300000) — not how long a lane may run.
+  There is no lane runtime cap in this config; use the lane's own timeout."
+    j=$(print -r -- "$j" | jq --argjson v "$TO" '.lanes.ready_timeout_ms=$v')
+  fi
   [[ -n "$CTX" ]] && j=$(print -r -- "$j" | jq --argjson v "$CTX" '.lanes.context_cap_tokens=$v')
+  if [[ -n "$BASE" ]]; then
+    git -C "$REPO" rev-parse --verify -q "$BASE" >/dev/null 2>&1 \
+      || die "base branch '$BASE' does not exist in $REPO.
+  Every worktree is cut from it; a name that resolves nowhere fails at spawn,
+  not here, and reads as a broken orchestrator."
+    j=$(print -r -- "$j" | jq --arg v "$BASE" '.lanes.base_branch=$v')
+  fi
   write "$j"; jq -c '.lanes' "$CFG" ;;
 
 set-setup)

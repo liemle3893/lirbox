@@ -31,6 +31,51 @@ KEY=$(git -C "$CWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/nul
 [[ -n "$KEY" ]] || KEY="$CWD"
 LEDGER="$HOME/.claude/lirbox-lanes/$(print -rn -- "$KEY" | shasum | cut -c1-12).tsv"
 
+# ---------------------------------------------------------------------------
+# The spawn door. Creating a lane by hand skips everything orch-lane.sh owns:
+# the --cwd pin, the readiness wait, lanes.max_concurrent, lanes.base_branch and
+# the dispatch record. In the 2026-08 run that script errored on all 26 of its
+# invocations, the orchestrator went raw for the remaining ~130 spawns, and the
+# cap in that config — 2 — never ran once while five lanes were live.
+#
+# This is safe to make absolute because PreToolUse only ever sees commands the
+# MODEL issues. orch-lane.sh's own `herdr worktree create` is a child process of
+# the script, not a tool call, so the door itself is never knocked on by this.
+#
+# POLICY-OVERRIDE is the deliberate escape, same as model-policy.sh: a raw spawn
+# is a judgement call that has to be said out loud, not a silent detour.
+typeset -a T2
+T2=(${(z)CMD})
+if [[ "$CMD" != *POLICY-OVERRIDE* ]]; then
+  integer k
+  for (( k = 1; k <= $#T2; k++ )); do
+    [[ "${T2[k]}" == (herdr|*/herdr) ]] || continue
+    local n2="${T2[k+1]}" v2="${T2[k+2]}"
+    if [[ "$n2 $v2" == "agent start" || "$n2 $v2" == "worktree create" ]]; then
+      print -u2 -r -- "DENIED: \`herdr $n2 $v2\` by hand. Lanes are created through one command.
+
+  LANE=\${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh
+
+  \$LANE start   <name> --profile <p> --run <slug>   # new worktree + pane + agent
+  \$LANE restart <name> --run <slug>                 # re-arm on the lane's existing pane
+
+Doing it by hand skips the source-repo pin, the wait for the pane to reach a
+shell prompt, lanes.max_concurrent, lanes.base_branch, and the dispatch record
+that is the only way to find this lane again. Each of those was a failure on
+record, not a precaution.
+
+Restarting a lane after a /clear, a wedge or a death is \`restart\`, not \`start\` —
+\`start\` cuts a second worktree. A /clear also drops the --agent profile, which is
+why restarting through the profile is the thing that puts the bounded context back.
+
+If this genuinely cannot go through the script, add POLICY-OVERRIDE and the
+reason to the command."
+      exit 2
+    fi
+  done
+fi
+# ---------------------------------------------------------------------------
+
 typeset -a AGENT_WRITES PANE_WRITES
 AGENT_WRITES=(prompt send-keys rename attach)
 PANE_WRITES=(send-keys send-text run close rename resize swap move zoom)
@@ -97,7 +142,8 @@ $owned_list
 Every other pane belongs to a human or another session. Keystrokes sent there
 land in someone else's session and cannot be taken back.
 
-If you need a pane, make one — \`herdr worktree create\` returns a fresh pane and
-\`herdr agent start\` claims it. If you believe you own this one, you have lost
-track of it: re-read your dispatch records rather than guessing from \`pane list\`."
+If you need a pane, make a lane — \`orch-lane.sh start\` returns a fresh worktree,
+pane and agent, and records all three. If you believe you own this one, you have
+lost track of it: re-read your dispatch records rather than guessing from
+\`pane list\`."
 exit 2

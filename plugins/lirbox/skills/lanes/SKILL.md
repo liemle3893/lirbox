@@ -154,8 +154,8 @@ Run it before every publish and after every orchestrator handover.
 |---|---|---|
 | pane alive, context and cost still climbing | working | leave it |
 | counters flat, process state `T` | stopped (records as `wedged`) | `kill -CONT <pid>` — `ctrl+c` cannot land on a stopped process |
-| counters flat, process state `R`/`S` | `wedged` | `ctrl+c` via `pane send-keys`, then `wedged → dispatched` |
-| no `agent_status` at all | `dead` | new process, same `agent_name`, then `dead → dispatched` |
+| counters flat, process state `R`/`S` | `wedged` | `ctrl+c` via `pane send-keys`, then `orch-lane.sh restart`, then `wedged → dispatched` |
+| no `agent_status` at all | `dead` | `orch-lane.sh restart <lane> --run <slug>` — same pane, same checkout, profile re-applied; then `dead → dispatched` |
 | orchestrator died, panes alive | — | reload the store, match on `agent_name`, keep going |
 
 `agent_status: working` is not liveness — it reads `working` throughout a wedge, and throughout a stop.
@@ -200,7 +200,7 @@ indistinguishable on elapsed alone, and killing it there destroys the run.
 
 | strategy | safe when | how you check |
 |---|---|---|
-| re-attach | pane alive, lane unchanged | `herdr agent get` + the `dispatch/` record |
+| re-attach | pane alive, lane unchanged | `herdr agent get` + the `dispatch/` record; re-arm with `orch-lane.sh restart` |
 | redispatch | idempotent, no durable side effect yet | **has the branch HEAD moved since `sha_at_dispatch`?** |
 | retry-whole | no **external** side effect yet | see below |
 
