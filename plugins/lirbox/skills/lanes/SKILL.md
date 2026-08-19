@@ -211,7 +211,43 @@ starting — unless you compare HEAD against `sha_at_dispatch`. That field exist
 PR or deployed is not recoverable by throwing away a checkout. Record that moment as an
 `externalized` evidence record; after it, every recovery is manual and no script will tell you so.
 
-### 7. DoD, if the run needs one
+### 7. Gate the work before it leaves
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh gate <lane> --run <slug>
+```
+
+Cuts a **separate** lane on `lanes.gate_profile`, checked out at the lane's branch, to review and fix
+Critical/High in one pass and then build. Its verdict lands in `evidence/` as
+`kind: "code_gate"` carrying conductor's fields — `gate_passed`, `critical`, `high`, `build_cmd`,
+`build_exit`.
+
+**The pass condition is `gate_passed && build_exit == 0`.** The flag is never trusted alone: a gate
+reporting success for a build it did not run is the failure the whole mechanism exists to stop. And
+the producer may not be the implementor, for the same reason `reported → verified` refuses a
+self-report.
+
+`gate-guard.sh` binds it. `git push`, `gh pr create`, and a `git merge` that lands **on the base
+branch** are refused (exit 2) for a branch whose dispatch record names a lane with no passing gate —
+**and for a lane the store never recorded as `durable`.** The gate proves the code was reviewed; the
+`durable` row proves the run knows it. In the 2026-08 run the store was not wrong, it was *empty*:
+`transitions.jsonl` stopped two days before the session ended. Nothing that arrives as context fixes
+empty — only a door does.
+
+The predicate is deliberately bounded to the one lane whose branch is being pushed. Gating on
+anything wider — "the ledger is clean" — blocks every turn end forever, because that ledger is
+append-only with no removal path. `POLICY-OVERRIDE` plus a reason is the stated escape.
+
+Why a hook and not `transition.mjs`: a clause in the door enforces nothing when nobody opens the
+door, and in the 2026-08 run `transitions.jsonl` stopped two days before the session ended. A
+PreToolUse hook is the one thing here the orchestrator cannot route around — see `<honesty>`.
+
+**What it cannot reach:** hooks see only the *orchestrator's* tool calls. Lane workers are separate
+processes in their own panes, so nothing gates what a lane does inside its worktree. It gates what
+leaves. A lane whose `start` wrote no dispatch record is also invisible to it — which is why that
+record being reliable is a precondition of this gate, not a nicety.
+
+### 8. DoD, if the run needs one
 
 Borrow loom's — do not rewrite it. `dod-freeze.mjs` and `graph-core.mjs` are standalone and depend
 on no Claude-only tool:
@@ -220,6 +256,11 @@ on no Claude-only tool:
 node ${CLAUDE_PLUGIN_ROOT}/skills/loom/scripts/dod-freeze.mjs \
   --dod <run>/dod.json --checks-dir <run>/checks
 ```
+
+A run that froze one is held to it: with `<run>/dod.json` present, `gate-guard.sh` also refuses
+`gh pr create` until an `evidence/` record of `kind: "dod_gate"` reports `all_passed`. The sha256
+lock is the point — a weakened check is **detected**, not rewarded, so editing the test a criterion
+runs stops being the cheapest route to green.
 </procedure>
 
 <gotchas>

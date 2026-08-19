@@ -50,11 +50,32 @@ if [[ "$CMD" == *agent*start* ]]; then
 fi
 
 # Panes and workspaces we just created — read them out of what herdr printed.
-if [[ "$CMD" == *worktree*create* || "$CMD" == *pane*split* ]]; then
+#
+# The two verbs differ in what they bring into existence, and the ledger is a
+# record of exactly that. `worktree create` makes a NEW workspace, so its
+# workspace_id is ours. `pane split` lands in a workspace that already existed:
+# the pane is ours, the workspace never was.
+#
+# Recording a split's workspace_id put bare `wV` on line 272 of the 2026-08
+# ledger — a workspace that predates every lane in the file and holds both the
+# human's panes and the orchestrator's own terminal. pane-guard authorizes
+# `worktree remove --workspace <ws>` for owned workspaces, so that one row
+# granted permission to destroy the session's own workspace. Since the spawn
+# door closed, this is the only route left by which a foreign workspace token
+# can reach this file at all.
+grab() {
+  local OUT PAT="$1"
   OUT=$(print -r -- "$IN" | jq -r '.tool_response.stdout // ""')
-  for tok in ${(f)"$(print -r -- "$OUT" | grep -oE '"(pane_id|workspace_id)":"[^"]+"' | sed 's/.*:"//;s/"$//' | sort -u)"}; do
+  local tok
+  for tok in ${(f)"$(print -r -- "$OUT" | grep -oE "\"($PAT)\":\"[^\"]+\"" | sed 's/.*:"//;s/"$//' | sort -u)"}; do
     add "$tok"
   done
+}
+
+if [[ "$CMD" == *worktree*create* ]]; then
+  grab 'pane_id|workspace_id'
+elif [[ "$CMD" == *pane*split* ]]; then
+  grab 'pane_id'
 fi
 
 exit 0

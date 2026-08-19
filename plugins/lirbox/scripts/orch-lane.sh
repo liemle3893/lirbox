@@ -4,6 +4,7 @@
 #
 #   orch-lane.sh start   <name> --profile <p> --run <slug> [--branch <b>] [--base <b>]
 #   orch-lane.sh restart <name> --run <slug> [--profile <p>]
+#   orch-lane.sh gate    <lane> --run <slug> [--profile <p>]
 #   orch-lane.sh brief   <name> <file>
 #   orch-lane.sh close   <name>
 #
@@ -19,8 +20,20 @@ setopt no_nomatch pipefail
 die() { print -u2 -r -- "orch-lane: $1"; exit 1 }
 h()   { HERDR_ENV=1 herdr "$@" }
 
+# A refusal that a rehearsal reports instead of enforcing. Named refuse(), not
+# gate(): `gate` is a subcommand below, and this is the thing that SOFTENS a
+# refusal — one word meaning two opposite things is a 3am problem. `--dry-run` issues
+# nothing, so gating it blocks inspection for no gain — but a rehearsal that
+# stayed silent would report a start the real one refuses. zsh locals are
+# dynamically scoped, so $DRY is the caller's.
+refuse() {
+  (( ${DRY:-0} )) || die "$1"
+  print -u2 -r -- "orch-lane: NOTE — a real start refuses here:
+$1"
+}
+
 SUB="${1:-}"; shift 2>/dev/null || true
-[[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|restart|brief|close] ..."
+[[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|restart|gate|brief|close] ..."
 
 # Same key as the ledger and the config — see hooks/lane-ledger.sh.
 KEY=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
@@ -117,6 +130,76 @@ invariants and no ubiquitous language, and will invent both.
   [[ -n "$RUN" ]] || die "start needs --run <slug>: it names the run whose
   .orchestration/<slug>/dispatch/ record makes this lane findable again."
 
+  # The FIRST lane of a run costs a decomposition and a measured baseline.
+  #
+  # Nothing here used to decide what to work on first, so the ordering predicate
+  # was lane AVAILABILITY: "both lanes are free, so I'm putting one on." The
+  # 2026-08 run never ran the three-minute suite it had itself declared expired
+  # three times, quoted a failure count from a tree that had moved twenty
+  # commits, and only converged when the human decomposed the goal by hand — the
+  # 10-of-219-test-files partition that reframed the whole day arrived at hour
+  # five, from the human, as a question.
+  #
+  # Both files are cheap and neither is a plan document. items.md is the lane
+  # split — numbered items, and which blocks which. baseline.txt is the one
+  # measurement that has to exist before anything is attributed to a change: the
+  # test command and the exit code it ACTUALLY returned, today, on this tree.
+  #
+  # Only the first start. Once a lane is dispatched this run has a shape, and
+  # re-asking every spawn would be noise that gets satisfied by a stub file.
+  local -a PRIOR
+  PRIOR=("$ROOT/.orchestration/$RUN/dispatch"/*.json(N))
+  if (( ! $#PRIOR )); then
+    local PLAN="$ROOT/.orchestration/$RUN/items.md"
+    local MEASURED="$ROOT/.orchestration/$RUN/baseline.txt"
+    local -a MISSING
+    [[ -s "$PLAN" ]]     || MISSING+=("items.md — the lane split: numbered items, and which blocks which")
+    [[ -s "$MEASURED" ]] || MISSING+=("baseline.txt — the setup.test command and the exit code it returned")
+    if (( $#MISSING )); then
+      refuse "the first lane of run '$RUN' needs the run written down first. Missing in
+  $ROOT/.orchestration/$RUN/:
+
+$(print -l -- "${MISSING[@]/#/    }")
+
+  Neither is a design doc. Without them the only thing left to order the work by
+  is which lane happens to be free, which is how a run spends five hours on the
+  hardest coupled thing and never runs the three-minute suite that would have
+  partitioned it."
+    fi
+
+    # Teeth, but only on files that are there: a rehearsal continues past the
+    # refusal above, and reading a file that does not exist would answer with
+    # shell noise instead of the point.
+    #
+    # A gate satisfied by two empty files is a check that cannot fail —
+    # the defect class this skill names as its dominant one.
+    if (( ! $#MISSING )); then
+    #
+    # grep is a shell function in some contexts on this machine and ugrep in
+    # others, and an interpolated ERE through a pipeline can return EMPTY rather
+    # than erroring — which would make these two tests silently pass. Both are
+    # done with zsh's own matching for that reason.
+    # `=~`, not a glob: the `#` in `[[:space:]]#` needs EXTENDED_GLOB, which is
+    # not set here, so as a glob it matches a literal '#' and every numbered
+    # item reads as prose. Silent, and it fails toward refusing good input.
+    local line HAS_ITEM=0
+    for line in ${(f)"$(<"$PLAN")"}; do
+      [[ "$line" =~ '^[[:space:]]*[0-9]+[.)]' ]] && { HAS_ITEM=1; break }
+    done
+    (( HAS_ITEM )) || refuse "$PLAN has no numbered items.
+  A goal restated in prose is not a decomposition. One numbered line per item,
+  and name what blocks what — concurrency falls out of that, and so does order."
+
+    local MEASURED_BODY=${(L)"$(<"$MEASURED")"}
+    [[ "$MEASURED_BODY" =~ 'exit[[:space:]]*[:=][[:space:]]*[0-9]+' ]] \
+      || refuse "$MEASURED records no observed exit code.
+  Write the command and what it returned, e.g. 'pnpm test  exit: 1  (25 failed)'.
+  An exit code is the one line that cannot be written without running the thing.
+  Every later 'it is green now' is measured against this number, and a baseline
+  taken after the change is not a baseline."
+    fi
+  fi
+
   local KIND MODEL FLAGS READY_MS EFFORT
   KIND=$(jq -r --arg p "$PROFILE" '.profiles[$p].kind // empty' "$CFG")
   [[ -n "$KIND" ]] || die "profile '$PROFILE' is not declared for this project.
@@ -201,12 +284,23 @@ invariants and no ubiquitous language, and will invent both.
   h $ARGS >/dev/null || die "agent start failed for $NAME on $PANE"
 
   if [[ -n "$RUN" ]]; then
-    local D=".orchestration/$RUN/dispatch"
+    # $ROOT, not PWD. `restart` resolves this path from the repo root, so a
+    # start issued from a subdirectory used to file the record where restart
+    # would never look — and its refusal reads "no dispatch record … start a
+    # fresh lane instead", which turns every wedged pane into a second checkout.
+    local D="$ROOT/.orchestration/$RUN/dispatch"
     mkdir -p "$D"
+    # `lane` and `worktree` are not decoration: restart reads `.worktree` to
+    # find the checkout, to fire the "this tree is gone" guard, and to measure
+    # sha_at_restart. Omitted, that read returned empty and restart silently
+    # measured the MAIN repo instead of the lane's tree — the comparison against
+    # sha_at_dispatch that is supposed to separate a lane that died after
+    # committing from one that never started.
     jq -n --arg n "$NAME" --arg p "$PANE" --arg w "$WS" --arg pr "$PROFILE" \
           --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" --arg b "$BRANCH" \
-          --arg sha "$(git rev-parse HEAD 2>/dev/null)" \
-      '{agent_name:$n,pane_id:$p,workspace_id:$w,profile:$pr,kind:$k,model:$m,effort:$e,branch:$b,sha_at_dispatch:$sha,state:"dispatched"}' \
+          --arg wt "$(print -r -- "$WT" | jq -r '.result.worktree.path // empty')" \
+          --arg sha "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" \
+      '{lane:$n,agent_name:$n,pane_id:$p,workspace_id:$w,worktree:$wt,profile:$pr,kind:$k,model:$m,effort:$e,branch:$b,sha_at_dispatch:$sha,state:"dispatched"}' \
       > "$D/$NAME.json"
   fi
 
@@ -264,6 +358,60 @@ restart)
     || die "the checkout this lane worked in is gone: $WTREE
   Its commits may still be on branch '$BRANCH'. Check before starting anything new."
 
+  # ---- stall: is this a loop, or a hard problem? ---------------------------
+  #
+  # Ported from conductor's DoDGate, which does not count money — it counts
+  # ROUNDS and then asks whether the unmet set CHANGED. Unchanged means the
+  # theory is wrong and further attempts are waste; shrinking means keep going.
+  # Its triage.cjs says the same out loud: "a bare relaunch hits the same wall",
+  # so a failure is CLASSIFIED (relaunch / ask / report) rather than retried.
+  #
+  # lanes' vocabulary for the same question: this lane has been restarted N
+  # times — has it produced any NEW evidence since the last one? A lane
+  # redispatched against the same state, having yielded nothing last time, is a
+  # loop. That is the shape that runs for a day.
+  integer PRIOR_RESTARTS
+  PRIOR_RESTARTS=$(jq -r '.restarts // 0' "$REC")
+  [[ "$PRIOR_RESTARTS" == <-> ]] || PRIOR_RESTARTS=0
+  if (( PRIOR_RESTARTS > 0 )) && (( ! FORCE )); then
+    integer MAXR FRESH=0
+    MAXR=$(jq -r '.lanes.max_restarts // 2' "$CFG")
+    [[ "$MAXR" == <-> ]] || MAXR=2
+
+    # Compare against the timestamp the last restart stamped, not a count, so
+    # evidence written BEFORE the restart cannot be read as a result of it.
+    local SINCE
+    SINCE=$(jq -r '.restarted_at // empty' "$REC")
+    if [[ -n "$SINCE" ]]; then
+      local -a EV
+      EV=("$ROOT/.orchestration/$RUN"/evidence/*.json(N))
+      if (( $#EV )); then
+        FRESH=$(jq -s -r --arg lane "$NAME" --arg since "$SINCE" \
+          '[ .[] | (if type == "array" then .[] else . end)
+                 | select(.lane == $lane and ((.at // "") > $since)) ] | length' \
+          $EV 2>/dev/null)
+        [[ "$FRESH" == <-> ]] || FRESH=0
+      fi
+    fi
+
+    if (( PRIOR_RESTARTS >= MAXR && FRESH == 0 )); then
+      die "lane '$NAME' has been restarted $PRIOR_RESTARTS time(s) and has produced NO new
+  evidence since the last one. That is a loop, not a hard problem.
+
+  Restarting again buys the same wall. Before you do:
+
+    1. Say what this lane has actually established, and what it has not.
+    2. Write the rival causes down, one command each, and run the cheapest.
+    3. If the cause is still a leading theory rather than a measurement, take it
+       to the user — do not spend another lane confirming what you assumed.
+
+  A lane that yields nothing twice is evidence about the THEORY, not the lane.
+  If this is genuinely slow rather than stuck, raise the ceiling deliberately:
+    ${0:h}/../skills/lane-config/scripts/orch-config.sh set-lanes --max-restarts <n>
+  or pass --force having said which of the three above you did."
+    fi
+  fi
+
   # A live agent is not something to restart around — that is how two processes
   # end up writing one tree.
   local ST
@@ -307,14 +455,111 @@ restart)
   local NOWSHA
   NOWSHA=$(git -C "${WTREE:-$ROOT}" rev-parse HEAD 2>/dev/null)
   local TMP="$REC.tmp"
-  jq --arg s "$NOWSHA" --arg p "$PROFILE" \
+  jq --arg s "$NOWSHA" --arg p "$PROFILE" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '.sha_at_restart=$s | .profile=$p | .state="dispatched"
-      | .restarts=((.restarts // 0) + 1)' "$REC" > "$TMP" && mv "$TMP" "$REC"
+      | .restarts=((.restarts // 0) + 1)
+      | .restarted_at=$now' "$REC" > "$TMP" && mv "$TMP" "$REC"
 
   jq -n --arg n "$NAME" --arg p "$PANE" --arg pr "$PROFILE" --arg k "$KIND" \
         --arg m "$MODEL" --arg w "${WTREE:-}" --arg s "$NOWSHA" \
         --argjson r "$(jq -r '.restarts // 1' "$REC")" \
     '{lane:$n,pane:$p,profile:$pr,kind:$k,model:$m,worktree:$w,sha_at_restart:$s,restarts:$r}'
+  ;;
+
+gate)
+  # Dispatch the code gate for a lane, as its OWN lane.
+  #
+  # A gate has to be a separate process for the same reason a verification does:
+  # a self-report can never be a gate. Producing it in the implementor's pane
+  # would satisfy the artifact and none of the point, so this cuts a fresh lane
+  # on the gate profile, checked out at the lane's branch.
+  #
+  # The verdict shape is conductor's, field for field — gate_passed, critical,
+  # high, build_cmd, build_exit — because its pass condition is the one that
+  # does not go green on the honour system: the flag is never trusted alone, a
+  # numeric build exit has to agree with it.
+  NAME="${1:-}"; shift 2>/dev/null || true
+  [[ -n "$NAME" ]] || die "gate needs the lane name to gate:
+  orch-lane.sh gate <lane> --run <slug> [--profile <p>]"
+  local RUN="" PROFILE=""
+  while (( $# )); do
+    case "$1" in
+      --run)     RUN="$2";     shift 2 ;;
+      --profile) PROFILE="$2"; shift 2 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  [[ -r "$CFG" ]] || die "no config for this repo; cannot resolve a gate profile."
+  [[ -n "$RUN" ]] || die "gate needs --run <slug> to find the lane's dispatch record."
+
+  local REC="$ROOT/.orchestration/$RUN/dispatch/$NAME.json"
+  [[ -r "$REC" ]] || die "cannot gate '$NAME': no dispatch record at $REC.
+  A lane with no record has no branch to gate and no implementor to be
+  independent of. Nothing to do here."
+
+  local BRANCH IMPL
+  BRANCH=$(jq -r '.branch // empty' "$REC")
+  IMPL=$(jq -r '.agent_name // .lane // empty' "$REC")
+  [[ -n "$BRANCH" ]] || die "the record for '$NAME' names no branch."
+
+  # The gate profile is a declared project decision like every other profile.
+  [[ -n "$PROFILE" ]] || PROFILE=$(jq -r '.lanes.gate_profile // empty' "$CFG")
+  [[ -n "$PROFILE" ]] || die "no lanes.gate_profile in $CFG, and no --profile given.
+  The gate runs on a reviewer profile — one that reviews AND fixes Critical/High
+  in a pass, then reports counts. Declare it once:
+    ${0:h}/../skills/lane-config/scripts/orch-config.sh set-lanes --gate-profile <p>"
+
+  local GLANE="gate-$NAME"
+  [[ "$IMPL" != "$GLANE" ]] || die "the gate lane and the implementor cannot be the same agent."
+
+  local EVID="$ROOT/.orchestration/$RUN/evidence"
+  mkdir -p "$EVID"
+
+  # Start it on the lane's own branch, not a fresh one: the gate reviews a diff
+  # that already exists.
+  "$0" start "$GLANE" --profile "$PROFILE" --run "$RUN" --branch "$BRANCH" --base "$BRANCH" \
+    || die "could not start the gate lane for '$NAME'."
+
+  local BRIEF="$EVID/$GLANE-brief.md"
+  cat > "$BRIEF" <<BRIEFEOF
+Gate the diff on branch \`$BRANCH\` (lane \`$NAME\`). You did not write this code.
+
+Review it, and FIX every Critical and High finding in the same pass. Then build.
+
+Write your verdict to $EVID/$GLANE-code_gate.json — exactly these fields:
+
+{
+  "kind": "code_gate",
+  "lane": "$NAME",
+  "produced_by": "$GLANE",
+  "gated_sha": "<the FULL sha of $BRANCH you actually reviewed — git rev-parse HEAD
+                 in the checkout, read it, do not copy it from this brief>",
+  "gate_passed": <true only if every Critical and High is fixed, or skipped with
+                  an explicit reason recorded below, AND the build exits 0>,
+  "critical": <count still UNRESOLVED after your fixes; 0 when gate_passed>,
+  "high":     <count still UNRESOLVED after your fixes; 0 when gate_passed>,
+  "build_cmd":  "<the command you ran>",
+  "build_exit": <its ACTUAL numeric exit code>,
+  "skipped":  [ { "title": "...", "reason": "..." } ],
+  "summary":  "one line"
+}
+
+gated_sha binds this verdict to the code. If the branch moves after you write
+it, the gate is stale and the push is refused — that is deliberate, because a
+run that loops back through implementation must not present an old PASS.
+
+build_exit is read, not taken on trust: the gate cannot pass with a non-zero
+build no matter what gate_passed says. Report the exit code you observed — a
+gate that reports 0 for a build it did not run is the one failure this whole
+mechanism exists to stop.
+
+Red means stop and report observed values. Do not weaken an assertion, delete a
+test, or relax a check to reach green.
+BRIEFEOF
+
+  "$0" brief "$GLANE" "$BRIEF" || die "gate lane '$GLANE' started but the brief did not submit."
+  print -r -- "gate dispatched: $GLANE reviewing $BRANCH (lane $NAME)
+  verdict -> $EVID/$GLANE-code_gate.json"
   ;;
 
 brief)
@@ -354,6 +599,26 @@ close)
   PANE=$(print -r -- "$ROW" | jq -r '.pane_id')
   ST=$(print -r -- "$ROW"   | jq -r '.agent_status')
 
+  # Uncommitted work in the lane's checkout is work only that pane knew about.
+  # PRINT IT FIRST, unconditionally.
+  #
+  # This used to sit below the working/blocked refusal and behind the same
+  # `! FORCE` guard. But --force is the ONLY way past that refusal, so for a
+  # WORKING lane — the single case where closing abandons anything — the listing
+  # could never be reached. The guard existed and was unreachable in the
+  # situation it was written for. A verifier lane killed mid-task in the 2026-08
+  # run left an unrestored red-arm mutant in its tree with nothing pointing at
+  # it; it surfaced hours later, and only because a disk audit walked that path.
+  local WT DIRTY
+  WT=$(print -r -- "$ROW" | jq -r '.cwd // empty')
+  if [[ -n "$WT" && -d "$WT" ]]; then
+    DIRTY=$(git -C "$WT" status --short 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$DIRTY" != 0 ]]; then
+      print -u2 -r -- "lane '$NAME' has $DIRTY uncommitted change(s) in $WT:
+$(git -C "$WT" status --short 2>/dev/null | sed 's/^/  /')"
+    fi
+  fi
+
   # Closing a pane kills the agent in it. Doing that to a lane still mid-task
   # destroys whatever only that pane holds — the md's rule is that a pane is
   # cleared once its work is durable, never before.
@@ -362,17 +627,11 @@ close)
   Wait for it to land, or pass --force if you have confirmed its work is durable."
   fi
 
-  # Even when idle/done: uncommitted work in its checkout is work only that pane
-  # knew about. Say so rather than discovering it later.
-  local WT DIRTY
-  WT=$(print -r -- "$ROW" | jq -r '.cwd // empty')
-  if [[ -n "$WT" && -d "$WT" ]]; then
-    DIRTY=$(git -C "$WT" status --short 2>/dev/null | wc -l | tr -d ' ')
-    if [[ "$DIRTY" != 0 ]] && (( ! FORCE )); then
-      die "lane '$NAME' is $ST but its checkout has $DIRTY uncommitted change(s):
+  # The listing above is information; this is still a veto. Only --force passes.
+  if [[ -n "$DIRTY" && "$DIRTY" != 0 ]] && (( ! FORCE )); then
+    die "lane '$NAME' is $ST but its checkout has $DIRTY uncommitted change(s):
   $WT
   Get them committed, or pass --force to close anyway."
-    fi
   fi
 
   h pane close "$PANE" >/dev/null || die "pane close failed for $PANE"
