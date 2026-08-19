@@ -39,15 +39,13 @@ CMD=$(print -r -- "$IN" | jq -r '.tool_input.command // ""')
 [[ "$CMD" == *POLICY-OVERRIDE* ]] && exit 0
 
 CWD=$(print -r -- "$IN" | jq -r '.cwd // ""')
-ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null)
-[[ -n "$ROOT" ]] || exit 0
 
-# In a repo that has never run a lane there is nothing to gate, and this hook
-# must be invisible. Engage only where a run store actually exists.
-typeset -a RECORDS
-RECORDS=("$ROOT"/.orchestration/*/dispatch/*.json(N))
-(( $#RECORDS )) || exit 0
-
+# The run store is probed AFTER the command is parsed, not before. Resolving the
+# repo from .cwd alone and exiting early is how `git -C <worktree> push` walked
+# straight through: the orchestrator sits in the main repo while every lane
+# lives in a worktree, so -C is the NORMAL spelling and .cwd names the wrong
+# repo. Measured live — three pushes against a lane with 3 Criticals reached the
+# network because this exit fired before anything looked at the command.
 typeset -a TOK
 TOK=(${(z)CMD})
 
@@ -69,22 +67,29 @@ TOK=(${(z)CMD})
 # The failure direction was the dangerous one: an unparseable command became
 # "this is not a lane" (allow) rather than "I cannot tell" (deny).
 # ---------------------------------------------------------------------------
-local VERB=""
+local VERB="" GIT_C=""
+integer SKIP_IDX
 typeset -a OPERANDS
 integer i j
 
 # Global options come before the subcommand. `-C` and `-c` take a value; for gh
 # so do `--repo`/`-R`. Skipping them is what makes `git -C <path> push` parse.
+# Sets SKIP_IDX (and GIT_C) rather than printing: `$(skip_globals ...)` runs in
+# a SUBSHELL, so an assignment inside it never reaches the caller — which is
+# exactly how the -C capture silently did nothing on the first attempt.
 skip_globals() {
   local -i k=$1
   while (( k <= $#TOK )); do
     case "${TOK[k]}" in
-      -C|-c|--repo|-R|--git-dir|--work-tree|--namespace|--exec-path) (( k += 2 )) ;;
+      # -C names the repo this command actually operates on. It is the reason
+      # the store must be resolved after parsing, not before.
+      -C) GIT_C="${TOK[k+1]}"; (( k += 2 )) ;;
+      -c|--repo|-R|--git-dir|--work-tree|--namespace|--exec-path) (( k += 2 )) ;;
       -*) (( k += 1 )) ;;
       *) break ;;
     esac
   done
-  print -r -- $k
+  SKIP_IDX=$k
 }
 
 # Operands are the non-flag tokens after the subcommand. Flags that take a value
@@ -109,11 +114,11 @@ for (( i = 1; i <= $#TOK; i++ )); do
   [[ "${TOK[i]}" == (git|*/git|gh|*/gh) ]] || continue
   local IS_GH=0
   [[ "${TOK[i]}" == (gh|*/gh) ]] && IS_GH=1
-  j=$(skip_globals $(( i + 1 )))
+  skip_globals $(( i + 1 )); j=$SKIP_IDX
 
   if (( IS_GH )); then
     [[ "${TOK[j]}" == pr ]] || continue
-    j=$(skip_globals $(( j + 1 )))
+    skip_globals $(( j + 1 )); j=$SKIP_IDX
     case "${TOK[j]}" in
       create) VERB="gh pr create" ;;
       merge)  VERB="gh pr merge"  ;;
@@ -130,6 +135,18 @@ for (( i = 1; i <= $#TOK; i++ )); do
   break
 done
 [[ -n "$VERB" ]] || exit 0
+
+# NOW resolve the repo — from -C when the command named one, otherwise the
+# session cwd — and only then decide whether there is a run store to gate.
+[[ -n "$GIT_C" ]] && CWD="$GIT_C"
+ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null)
+[[ -n "$ROOT" ]] || exit 0
+
+# In a repo that has never run a lane there is nothing to gate, and this hook
+# must be invisible.
+typeset -a RECORDS
+RECORDS=("$ROOT"/.orchestration/*/dispatch/*.json(N))
+(( $#RECORDS )) || exit 0
 
 # A push names a remote then a refspec; a refspec names src:dst and BOTH sides
 # can be a lane — `lane-kb:main` writes a lane onto the base branch.

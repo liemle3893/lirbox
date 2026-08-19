@@ -198,6 +198,29 @@ for (const cmd of [
   }
 }
 
+// -- 3c-bis. the repo is resolved from -C, and AFTER the command is parsed ---
+// Found by firing this hook through the real machinery for the first time: a
+// live orchestrator ran three pushes against a lane with 3 Criticals and all
+// three reached the network. The hook resolved the repo from the session cwd
+// and exited on "no run store here" BEFORE parsing anything — and the
+// orchestrator sits in the main repo while every lane lives in a worktree, so
+// `git -C <worktree> push` is the normal spelling, not an edge case.
+//
+// The `cwd` below is deliberately a DIFFERENT repo from the one -C names.
+const elsewhere = mkdtempSync(join(tmpdir(), 'elsewhere-'));
+execFileSync('git', ['-C', elsewhere, 'init', '-q', '-b', 'main'], { stdio: 'pipe' });
+setGate({ lane: 'kb', kind: 'code_gate', produced_by: 'gate-kb',
+  gate_passed: false, critical: 3, high: 2, build_cmd: 'make', build_exit: 1 });
+if (verdict(`git -C ${repo} push origin lane-kb`, elsewhere).code !== 2) {
+  fail('`git -C <lane repo> push` from a different cwd was ALLOWED. The repo must be resolved '
+     + 'from -C, and the run-store probe must run AFTER parsing — probing first means the hook '
+     + 'exits on the wrong repo before it ever looks at the command.');
+}
+if (verdict(`git -C ${repo} status --short`, elsewhere).code !== 0) {
+  fail('`git -C <repo> status` was denied — reading moves nothing outward');
+}
+rmSync(elsewhere, { recursive: true, force: true });
+
 // -- 3d. and it must not over-block ----------------------------------------
 // A guard that blocks ordinary work gets turned off, and then it guards nothing.
 git('checkout', '-q', '-b', 'not-a-lane');
