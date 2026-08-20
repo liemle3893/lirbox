@@ -523,7 +523,7 @@
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
-          "find": "  j=$(skip_globals $(( i + 1 )))",
+          "find": "  skip_globals $(( i + 1 )); j=$SKIP_IDX",
           "replace": "  j=$(( i + 1 ))"
         },
         {
@@ -549,6 +549,22 @@
           "file": "plugins/lirbox/hooks/gate-guard.sh",
           "find": "if [[ -z \"$LANE\" && \"$VERB\" == \"gh pr merge\" ]]; then",
           "replace": "if false; then"
+        },
+        {
+          "why": "the repo goes back to being resolved from the session cwd, ignoring -C \u2014 measured live: three pushes against a lane with 3 Criticals reached the network, because the orchestrator sits in the main repo while lanes live in worktrees",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "[[ -n \"$GIT_C\" ]] && CWD=\"$GIT_C\"",
+          "replace": ": "
+        },
+        {
+          "why": "skip_globals returns through a subshell again, so the -C capture silently does nothing \u2014 an assignment inside $(...) never reaches the caller",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "  SKIP_IDX=$k\n}",
+          "replace": "  print -r -- $k\n}"
         }
       ]
     },
