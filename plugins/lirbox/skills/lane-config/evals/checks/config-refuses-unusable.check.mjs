@@ -1,11 +1,19 @@
 #!/usr/bin/env node
 // Frozen check: a config that cannot decide a lane must be REFUSED, and `init`
-// must never invent the decision.
+// must hand back one that can.
 //
-// The invariant: profiles are the user's judgement. If `init` ships profiles, or
-// `validate` blesses a config with none / with a profile missing kind or model /
-// with no suite baseline, then the orchestrator silently goes back to guessing —
-// which is the exact failure this whole mechanism exists to stop.
+// The invariant, restated: `validate` is the whole gate. It must refuse a config
+// with no profiles, a profile with no kind or no model, no baseline, no
+// base_branch, or no gate_profile — and `init` must not produce a config that
+// validate blesses and the first spawn then rejects.
+//
+// The original version of this check also asserted `init` ships ZERO profiles.
+// That clause is gone deliberately. It froze a shape, not an invariant, and the
+// shape was the defect: init wrote profiles:{}, base_branch:null and
+// baseline:null, so `orch-lane.sh start` died three separate times in every new
+// repo before a lane ever ran. "The user decides" was implemented as "fail at
+// the user", which does not teach the decision — it just gets the tool dropped.
+// What survives is the part that was always right: a MODEL is never guessed.
 //
 // ORCH_CONFIG_OVERRIDE points at the script under test (set by prove-checks).
 import { execFileSync } from 'node:child_process';
@@ -36,14 +44,32 @@ if (run('init').code !== 0) fail('init failed');
 
 const cfgPath = run('path').out.trim();
 const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
-if (Object.keys(cfg.profiles || {}).length !== 0) {
-  fail(`init invented ${Object.keys(cfg.profiles).length} profile(s) — profiles are the user's decision, never a default`);
+
+// Whatever init declares, it must never name a model it could not know.
+for (const [name, p] of Object.entries(cfg.profiles || {})) {
+  if (p.model && !/^(claude|gpt|o\d)/.test(p.model)) {
+    fail(`init invented a model '${p.model}' for profile '${name}' — a guessed model is a decision nobody made`);
+  }
 }
 
-// Isolate the profiles guard: satisfy the baseline FIRST, so the only remaining
-// reason to refuse is the absent profile. Without this the baseline check fires
-// too and masks a removed profiles guard — prove-checks caught exactly that.
+// The landmine regression: init must not hand back a config that fails at the
+// first spawn. Either it validates, or init said out loud what is missing.
+const initValidate = run('validate');
+if (initValidate.code !== 0 && !/profiles|model|baseline|base_branch|gate_profile/.test(initValidate.out)) {
+  fail(`init produced a config validate refuses without naming the missing field: ${initValidate.out}`);
+}
+
+// -- validate is the gate. Each guard isolated, by removing exactly one field --
+const patch = (fn) => {
+  const c = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  fn(c);
+  writeFileSync(cfgPath, JSON.stringify(c, null, 2));
+};
+
 run('set-setup', '--baseline', '100 passed / 0 failed');
+run('set-lanes', '--gate-profile', Object.keys(cfg.profiles || {})[0] || 'x');
+
+patch((c) => { c.profiles = {}; c.default_profile = null; });
 if (run('validate').code === 0) fail('validate blessed a config with no profiles');
 
 // A profile with no model must be refused at write time.
@@ -56,8 +82,24 @@ if (run('set-profile', 'p1', '--kind', 'gpt', '--model', 'm').code === 0) {
 }
 
 run('set-profile', 'p1', '--kind', 'opencode', '--model', 'some/model');
+run('set-lanes', '--gate-profile', 'p1');
 const ok = run('validate');
 if (ok.code !== 0) fail(`validate refused a complete config: ${ok.out}`);
+
+// gate_profile is not optional and used to be unchecked: gate-guard.sh refuses
+// push, PR and merge-onto-base for a lane with no code_gate, and the gate cannot
+// start without a profile to run on. A config that validates and cannot ship is
+// a config that lied.
+patch((c) => { delete c.lanes.gate_profile; });
+if (run('validate').code === 0) fail('validate blessed a config with no lanes.gate_profile — no work can leave without a gate');
+run('set-lanes', '--gate-profile', 'p1');
+
+patch((c) => { c.lanes.gate_profile = 'not-a-profile'; });
+if (run('validate').code === 0) fail('validate blessed a gate_profile that is not a declared profile');
+run('set-lanes', '--gate-profile', 'p1');
+
+patch((c) => { c.lanes.base_branch = ''; });
+if (run('validate').code === 0) fail('validate blessed a config with no lanes.base_branch — every worktree is cut from it');
 
 // Second repo, isolating the baseline guard the same way: a complete config
 // EXCEPT for setup.baseline must still be refused.
@@ -72,6 +114,10 @@ const run2 = (...args) => {
 execFileSync('git', ['init', '-q', repo2]);
 run2('init');
 run2('set-profile', 'p1', '--kind', 'opencode', '--model', 'some/model');
+run2('set-lanes', '--gate-profile', 'p1');
+const cfg2 = run2('path').out.trim();
+{ const c = JSON.parse(readFileSync(cfg2, 'utf8')); c.setup.baseline = null;
+  writeFileSync(cfg2, JSON.stringify(c, null, 2)); }
 if (run2('validate').code === 0) {
   rmSync(repo2, { recursive: true, force: true }); rmSync(home2, { recursive: true, force: true });
   fail('validate blessed a config with no setup.baseline');

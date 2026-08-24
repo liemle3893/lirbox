@@ -79,20 +79,31 @@ expect(repo({ initial: 'master', branches: [], head: 'master' }), 'master',
 expect(repo({ initial: 'develop', branches: [], head: 'topic' }), 'develop',
   'with no candidate present at all, the suggestion must still resolve to a real branch');
 
-// -- and it stays a suggestion, never a written answer -----------------------
-// A confident wrong base cuts every worktree in the run from the wrong branch,
-// so init leaves it unset and orch-lane.sh refuses rather than guessing.
-const d = repo({ initial: 'main', branches: [], head: 'main' });
+// -- init writes the DETECTED branch, and says it assumed it -----------------
+// This arm used to require init to leave base_branch null. That froze the wrong
+// half: leaving it null did not make anyone decide, it made `orch-lane.sh start`
+// refuse in every new repo before a lane had ever run. The value that has to
+// hold is that init writes what DETECTION concluded — never a house branch —
+// and tells the user it assumed it, so a wrong one is corrected in one command
+// instead of discovered as a worktree cut from the wrong ref.
+const d = repo({ initial: 'master', branches: [], head: 'master' });
+const want = suggest(d);
+if (want !== 'master') fail(`detection itself is wrong for a master-only repo: ${want}`);
+
 const cfgHome = mkdtempSync(join(tmpdir(), 'base-home-'));
-execFileSync('zsh', [script, 'init', d], {
-  env: { ...process.env, HOME: cfgHome }, stdio: 'pipe' });
+const initOut = execFileSync('zsh', [script, 'init', d], {
+  env: { ...process.env, HOME: cfgHome }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const shown = execFileSync('zsh', [script, 'show', d], {
   env: { ...process.env, HOME: cfgHome }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 // `show` leads with a `# <path>` comment line before the JSON.
 const cfg = JSON.parse(shown.split('\n').filter((l) => !l.startsWith('#')).join('\n'));
-if (cfg.lanes.base_branch !== null) {
-  fail('init WROTE a base branch instead of leaving it null. A detected guess '
-     + 'presented as a decision is how every worktree gets cut from the wrong branch.');
+if (cfg.lanes.base_branch !== want) {
+  fail(`init wrote base_branch '${cfg.lanes.base_branch}' where detection said '${want}'. `
+     + 'A base that ignores detection cuts every worktree in the run from the wrong branch.');
+}
+if (!/ASSUMED/.test(initOut) || !initOut.includes(want)) {
+  fail('init wrote a base branch without telling the user it assumed it — a guess '
+     + 'presented as a decision is the failure, not the guess itself');
 }
 rmSync(cfgHome, { recursive: true, force: true });
 

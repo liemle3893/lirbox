@@ -22,6 +22,17 @@ setopt no_nomatch
 
 die() { print -u2 -r -- "orch-config: $1"; exit 1 }
 
+# The harness table. Which kinds exist, and which flag carries the profile, the
+# model and the effort on each — one file, shared with orch-lane.sh and
+# hooks/model-policy.sh. This used to be `(claude|opencode)` written out here
+# and in two other places, which is how a third harness becomes a three-file
+# change instead of a one-line one.
+# HARNESS_KINDS_OVERRIDE is the mutation-testing escape hatch scripts/prove-checks.mjs
+# needs: a check that guards this table can only be proven if the table it loads
+# can be pointed somewhere else. Unset in every real run.
+source "${HARNESS_KINDS_OVERRIDE:-${0:h}/../../../scripts/harness-kinds.sh}"
+
+
 SUB="${1:-path}"; shift 2>/dev/null || true
 
 # Trailing arg may be a repo path; anything starting with - is a flag.
@@ -126,23 +137,69 @@ detect)
 init)
   [[ -e "$CFG" ]] && die "refusing to overwrite $CFG (use set-profile / set-lanes / set-setup)"
   local d; d=$("$0" detect "$REPO")
-  write "$(jq -n --argjson d "$d" '{
+
+  # This used to write `profiles: {}` and `base_branch: null` on purpose, so the
+  # first `orch-lane.sh start` in every repo died three separate times before a
+  # lane ever ran. The principle was right — a profile is a decision — and the
+  # execution was a landmine: "make the user decide" was implemented as "fail",
+  # and a tool that fails on first contact does not teach the decision, it just
+  # gets abandoned. Write a working default and SAY what was assumed. Every
+  # value here is overridable with one set-* call, and `show` prints them.
+  #
+  # The three roles are lirbox's, from the tier table in the orchestrator agent:
+  # planner authors criteria (capable — a cheap lane cannot catch bad criteria),
+  # verifier is the last thing between a defect and the remote (capable, and it
+  # is the gate profile), builder types against criteria someone else wrote
+  # (cheap — the gate catches it).
+  local HK="" HM_CAP="" HM_CHEAP=""
+  if   command -v claude   >/dev/null 2>&1; then HK=claude;   HM_CAP=claude-opus-5;  HM_CHEAP=claude-sonnet-5
+  elif command -v opencode >/dev/null 2>&1; then HK=opencode; HM_CAP=""; HM_CHEAP=""
+  elif command -v omp      >/dev/null 2>&1; then HK=omp;      HM_CAP=""; HM_CHEAP=""
+  fi
+
+  local profiles='{}' dflt=null gate=null
+  if [[ -n "$HK" && -n "$HM_CAP" ]]; then
+    profiles=$(jq -n --arg k "$HK" --arg cap "$HM_CAP" --arg cheap "$HM_CHEAP" '{
+      planner:  {kind:$k, model:$cap,   effort:"high",   agent:"lirbox-planner"},
+      verifier: {kind:$k, model:$cap,   effort:"high",   agent:"lirbox-verifier"},
+      builder:  {kind:$k, model:$cheap, effort:"medium", agent:"lirbox-builder"}
+    }')
+    dflt='"builder"'; gate='"verifier"'
+  elif [[ -n "$HK" ]]; then
+    # The harness is known, the model ids are not — naming one would be the
+    # guess this file refuses to make. Declare the roles anyway so the shape is
+    # there, and let validate name the one missing field.
+    profiles=$(jq -n --arg k "$HK" '{
+      planner: {kind:$k, model:"", agent:"lirbox-planner"},
+      verifier:{kind:$k, model:"", agent:"lirbox-verifier"},
+      builder: {kind:$k, model:"", agent:"lirbox-builder"}
+    }')
+    dflt='"builder"'; gate='"verifier"'
+  fi
+
+  write "$(jq -n --argjson d "$d" --argjson p "$profiles" --argjson df "$dflt" --argjson g "$gate" '{
     version: 1,
-    _comment: "Profiles are empty on purpose. A lane cannot start until at least one is declared, so the decision is made once, with the user, instead of guessed per spawn.",
-    profiles: {},
-    default_profile: null,
+    _comment: "Written by `orch-config.sh init` from what is installed here. Every value is a default, not a decision: change any of it with set-profile / set-lanes / set-setup, and run `validate` after.",
+    profiles: $p,
+    default_profile: $df,
     lanes: { max_concurrent: ($d.suggested_max_concurrent // 4), ready_timeout_ms: 60000,
-             context_cap_tokens: 300000, base_branch: null },
+             context_cap_tokens: 300000, base_branch: $d.suggested_base_branch,
+             gate_profile: $g },
     setup: {
       install: $d.setup.install, build: $d.setup.build, test: $d.setup.test,
-      baseline: null
+      baseline: $d.setup.test
     }
   }')"
   print -r -- "wrote $CFG"
-  print -r -- "NOT USABLE YET: no profiles declared. Add them with set-profile."
-  print -r -- "Also unset: lanes.base_branch (every worktree is cut from it).
-  Detected candidate: $(print -r -- "$d" | jq -r '.suggested_base_branch')
-  Confirm with the user, then: $0 set-lanes --base <branch>" ;;
+  print -r -- ""
+  print -r -- "ASSUMED — check these before the first wave:"
+  print -r -- "  profiles       $(jq -r '.profiles | to_entries | map("\(.key)=\(.value.kind)/\(.value.model // "?")") | join("  ")' "$CFG")"
+  print -r -- "  base_branch    $(jq -r '.lanes.base_branch // "UNSET"' "$CFG")   (every worktree is cut from it)"
+  print -r -- "  gate_profile   $(jq -r '.lanes.gate_profile // "UNSET"' "$CFG")   (no work leaves without it)"
+  print -r -- "  baseline       $(jq -r '.setup.baseline // "UNSET"' "$CFG")   (how a lane tells a real red from an inherited one)"
+  print -r -- ""
+  "$0" validate "$REPO" || print -r -- "
+Fix the above with set-profile / set-lanes / set-setup, then re-run validate." ;;
 
 validate)
   need
@@ -151,17 +208,48 @@ validate)
   local n; n=$(jq -r '.profiles | length' "$CFG")
   (( n > 0 )) || problems+=("no profiles declared — every spawn will be denied")
   local bad
-  bad=$(jq -r '.profiles | to_entries[] | select((.value.kind // "") | IN("claude","opencode") | not) | .key' "$CFG")
-  [[ -z "$bad" ]] || problems+=("profile(s) with missing/unknown kind (want claude|opencode): $bad")
+  local KINDS; KINDS=$(hk_kinds)
+  local KJSON; KJSON=$(print -r -- "$KINDS" | tr ' ' '\n' | jq -R . | jq -s -c .)
+  bad=$(jq -r --argjson k "$KJSON" '.profiles | to_entries[] | select((.value.kind // "") | IN($k[]) | not) | .key' "$CFG")
+  [[ -z "$bad" ]] || problems+=("profile(s) with missing/unknown kind (want ${KINDS// /|}): $bad")
   bad=$(jq -r '.profiles | to_entries[] | select((.value.model // "") == "") | .key' "$CFG")
   [[ -z "$bad" ]] || problems+=("profile(s) with no model: $bad — an unnamed model is the harness default, not a decision")
-  bad=$(jq -r '.profiles | to_entries[] | select((.value.effort // "") != "" and .value.kind != "claude") | .key' "$CFG")
-  [[ -z "$bad" ]] || problems+=("profile(s) declaring effort on a non-claude harness: $bad — the interactive opencode entry has no effort flag, so it would be silently ignored")
+  # Harnesses whose interactive entry has no effort flag. Declared effort there
+  # is emitted into a TUI that ignores unknown flags without error, so it reads
+  # as configured and is not.
+  local -a NOEFFORT
+  local k
+  for k in ${=KINDS}; do [[ -n "${HK_EFFORT_FLAG[$k]-}" ]] || NOEFFORT+=("$k"); done
+  if (( $#NOEFFORT )); then
+    local NJSON; NJSON=$(print -rl -- "${NOEFFORT[@]}" | jq -R . | jq -s -c .)
+    bad=$(jq -r --argjson n "$NJSON" '.profiles | to_entries[] | select((.value.effort // "") != "" and (.value.kind | IN($n[]))) | .key' "$CFG")
+    [[ -z "$bad" ]] || problems+=("profile(s) declaring effort on a harness with no effort flag (${(j:, :)NOEFFORT}): $bad — it would be silently ignored")
+  fi
+  # A file-carried profile whose file has gone missing is a lane that starts
+  # with no invariants and says nothing about it.
+  local row pn pk pa
+  for row in ${(f)"$(jq -r '.profiles | to_entries[] | "\(.key)\t\(.value.kind // "")\t\(.value.agent // .key)"' "$CFG")"}; do
+    pn="${row%%$'\t'*}"; pa="${row##*$'\t'}"; pk="${${row#*$'\t'}%%$'\t'*}"
+    [[ "${HK_AGENT_ARG[$pk]-}" == file ]] || continue
+    hk_agent_file "$pa" "$REPO" >/dev/null || problems+=("profile '$pn' is $pk, which carries its context as a file, and no markdown for agent '$pa' exists")
+  done
   local dp; dp=$(jq -r '.default_profile // ""' "$CFG")
   if [[ -n "$dp" ]]; then
     jq -e --arg p "$dp" '.profiles[$p]' "$CFG" >/dev/null 2>&1 || problems+=("default_profile '$dp' is not a declared profile")
   fi
   [[ "$(jq -r '.setup.baseline // ""' "$CFG")" != "" ]] || problems+=("setup.baseline is empty — a lane cannot tell a real red from an inherited one")
+  [[ "$(jq -r '.lanes.base_branch // ""' "$CFG")" != "" ]] || problems+=("lanes.base_branch is empty — every worktree is cut from it, so start refuses without it")
+  # This used to be unchecked, so a config validated clean and then died at the
+  # one step that cannot be skipped: gate-guard.sh refuses push, PR and
+  # merge-onto-base for a lane with no code_gate, and `orch-lane.sh gate`
+  # cannot start without a profile to run the gate on. A config that validates
+  # and cannot ship is a config that lied.
+  local gp; gp=$(jq -r '.lanes.gate_profile // ""' "$CFG")
+  if [[ -z "$gp" ]]; then
+    problems+=("lanes.gate_profile is empty — no work can leave this repo without a gate, so this is not optional. Set it: $0 set-lanes --gate-profile <p>")
+  else
+    jq -e --arg p "$gp" '.profiles[$p]' "$CFG" >/dev/null 2>&1 || problems+=("lanes.gate_profile '$gp' is not a declared profile")
+  fi
   if (( ${#problems} )); then
     print -u2 -r -- "config at $CFG is not usable:"
     printf '  - %s\n' "${problems[@]}" >&2
@@ -173,36 +261,62 @@ set-profile)
   need
   local NAME="${1:-}"; shift 2>/dev/null || true
   [[ -n "$NAME" && "$NAME" != -* ]] || die "set-profile needs a profile name"
-  local KIND="" MODEL="" FLAGS="" EFFORT=""
+  local KIND="" MODEL="" FLAGS="" EFFORT="" AGENT=""
   while (( $# )); do
     case "$1" in
       --kind)   KIND="$2";   shift 2 ;;
       --model)  MODEL="$2";  shift 2 ;;
       --flags)  FLAGS="$2";  shift 2 ;;
       --effort) EFFORT="$2"; shift 2 ;;
+      # The agent the harness actually loads. Defaults to the profile name,
+      # which is right when a lirbox role and its agent share a name and wrong
+      # the moment a repo points a profile at an agent of its own.
+      --agent)  AGENT="$2";  shift 2 ;;
       *) die "unknown flag: $1" ;;
     esac
   done
-  [[ "$KIND" == (claude|opencode) ]] || die "set-profile needs --kind claude|opencode (got '${KIND:-none}')"
+  [[ -n "$AGENT" ]] || AGENT="$NAME"
+  hk_known "$KIND" || die "set-profile needs --kind $(hk_kinds | tr ' ' '|') (got '${KIND:-none}')"
   [[ -n "$MODEL" ]] || die "set-profile needs --model. An unnamed model is the harness default, not a decision."
-  # Reasoning effort is a claude flag. opencode's INTERACTIVE entry — the one
-  # herdr starts — has no equivalent: --variant exists only on `opencode run`,
-  # and the tui silently ignores unknown flags. Storing effort for an opencode
-  # profile would emit a flag that does nothing and report success.
+  # Which harnesses take a reasoning-effort flag is table data now. opencode's
+  # INTERACTIVE entry — the one herdr starts — has none: --variant exists only
+  # on `opencode run`, and the tui silently ignores unknown flags, so storing
+  # effort for an opencode profile would emit a flag that does nothing and
+  # report success. jcode's entry has none either. claude spells it --effort,
+  # omp spells it --thinking; both are stored the same way here.
   if [[ -n "$EFFORT" ]]; then
-    [[ "$KIND" == claude ]] || die "effort is not settable on an opencode lane.
-  --variant exists on \`opencode run\` but not on the interactive entry herdr starts,
-  and unknown flags are ignored without error. Leave it unset rather than store
-  something that cannot take effect."
-    [[ "$EFFORT" == (low|medium|high|xhigh|max) ]] || die "unknown effort '$EFFORT' (want: low medium high xhigh max)"
+    local EF="${HK_EFFORT_FLAG[$KIND]-}"
+    [[ -n "$EF" ]] || die "effort is not settable on a $KIND lane — its interactive entry has no
+  effort flag, and unknown flags are ignored without error. Leave it unset
+  rather than store something that cannot take effect."
+    # A known vocabulary is checked; an unknown one is accepted. Refusing a
+    # level a harness actually supports is worse than the spawn error it saves,
+    # and only the harness knows its own set.
+    local EV="${HK_EFFORT_VALUES[$KIND]-}"
+    if [[ -n "$EV" ]]; then
+      [[ " $EV " == *" $EFFORT "* ]] || die "unknown effort '$EFFORT' for $KIND (want: $EV)"
+    fi
+  fi
+  # A profile on a harness that carries its context as a FILE is only a profile
+  # if that file exists. Checked at write time, because the alternative is a
+  # lane that starts clean and runs with no invariants — the failure this
+  # config exists to prevent, and the one nobody sees happening.
+  if [[ "${HK_AGENT_ARG[$KIND]-}" == file ]]; then
+    hk_agent_file "$AGENT" "$REPO" >/dev/null || die "$KIND carries its bounded context as a file
+  (${HK_AGENT_FLAG[$KIND]}), and no markdown for agent '$AGENT' was found in
+  $REPO/.claude/agents/, the lirbox plugin's agents/, or ~/.claude/agents/.
+  Write the agent first, then declare the profile — or point this one at an
+  existing agent with --agent <id>."
   fi
   local fj; fj=$(print -r -- "$FLAGS" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s . 2>/dev/null || print -r -- '[]')
-  write "$(jq --arg n "$NAME" --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" --argjson f "$fj" \
+  write "$(jq --arg n "$NAME" --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" \
+              --arg a "$AGENT" --argjson f "$fj" \
     '.profiles[$n] = ({kind:$k, model:$m}
+        + (if $a != $n then {agent:$a} else {} end)
         + (if ($f|length)>0 then {flags:$f} else {} end)
         + (if $e != "" then {effort:$e} else {} end))
      | .default_profile = (.default_profile // $n)' "$CFG")"
-  print -r -- "profile '$NAME' = $KIND / $MODEL${EFFORT:+ / effort=$EFFORT}${FLAGS:+ / $FLAGS}" ;;
+  print -r -- "profile '$NAME' = $KIND / $MODEL${EFFORT:+ / effort=$EFFORT}$([[ "$AGENT" != "$NAME" ]] && print -rn -- " / agent=$AGENT")${FLAGS:+ / $FLAGS}" ;;
 
 set-lanes)
   need

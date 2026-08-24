@@ -20,6 +20,50 @@ setopt no_nomatch pipefail
 die() { print -u2 -r -- "orch-lane: $1"; exit 1 }
 h()   { HERDR_ENV=1 herdr "$@" }
 
+# Which harnesses exist, and which flag carries the profile / model / effort on
+# each. Shared with orch-config.sh and hooks/model-policy.sh — see the header of
+# that file for why `--agent` is no longer written out by hand here.
+# HARNESS_KINDS_OVERRIDE is the mutation-testing escape hatch scripts/prove-checks.mjs
+# needs: a check that guards this table can only be proven if the table it loads
+# can be pointed somewhere else. Unset in every real run.
+source "${HARNESS_KINDS_OVERRIDE:-${0:h}/harness-kinds.sh}"
+
+# Resolve a declared profile into what the harness is actually started with.
+# Sets KIND MODEL FLAGS EFFORT AGENT in the caller's scope (zsh locals are
+# dynamically scoped), and refuses every way a profile can be unusable BEFORE a
+# worktree exists — a lane that dies after `worktree create` leaves a checkout
+# and a pane behind for a human to clean up.
+resolve_profile() {
+  local p="$1"
+  KIND=$(jq -r --arg p "$p" '.profiles[$p].kind // empty' "$CFG")
+  [[ -n "$KIND" ]] || die "profile '$p' is not declared for this project.
+  declared: $(jq -r '.profiles | keys | join(", ")' "$CFG")
+  Add it to $CFG deliberately; do not pick a harness to suit the lane."
+  hk_known "$KIND" || die "profile '$p' declares kind '$KIND', which lirbox does not know.
+  known: $(hk_kinds)
+  Add it to plugins/lirbox/scripts/harness-kinds.sh — one table, not a branch."
+  # herdr is what actually starts the harness, and its enum is the real limit.
+  # jcode is the case in hand: `herdr agent start --kind jcode` answers
+  # "unsupported interactive agent kind", which reads as a broken orchestrator
+  # rather than a harness herdr has not added yet. Say which it is.
+  hk_herdr_supports "$KIND" || die "herdr cannot start a '$KIND' agent on this machine.
+  herdr supports: $(hk_herdr_kinds | tr '\n' ' ')
+  lirbox knows the flags for '$KIND' and will use them the moment herdr does —
+  nothing here needs changing. Until then, declare the lane on another harness."
+  MODEL=$(jq -r --arg p "$p" '.profiles[$p].model // empty' "$CFG")
+  FLAGS=$(jq -r --arg p "$p" '.profiles[$p].flags // [] | join(" ")' "$CFG")
+  EFFORT=$(jq -r --arg p "$p" '.profiles[$p].effort // empty' "$CFG")
+  AGENT=$(jq -r --arg p "$p" '.profiles[$p].agent // $p' "$CFG")
+  # Effort only rides along on a harness that has a flag for it. opencode's
+  # interactive entry ignores unknown flags without error, so emitting one there
+  # would do nothing and report success. set-profile refuses this combination at
+  # write time; refuse it here too rather than trust the config to be clean.
+  if [[ -n "$EFFORT" && -z "${HK_EFFORT_FLAG[$KIND]-}" ]]; then
+    die "profile '$p' declares effort '$EFFORT' on a $KIND lane, which has no effort
+  flag. Fix the profile with orch-config.sh set-profile."
+  fi
+}
+
 # A refusal that a rehearsal reports instead of enforcing. Named refuse(), not
 # gate(): `gate` is a subcommand below, and this is the thing that SOFTENS a
 # refusal — one word meaning two opposite things is a 3am problem. `--dry-run` issues
@@ -200,25 +244,18 @@ $(print -l -- "${MISSING[@]/#/    }")
     fi
   fi
 
-  local KIND MODEL FLAGS READY_MS EFFORT
-  KIND=$(jq -r --arg p "$PROFILE" '.profiles[$p].kind // empty' "$CFG")
-  [[ -n "$KIND" ]] || die "profile '$PROFILE' is not declared for this project.
-  declared: $(jq -r '.profiles | keys | join(", ")' "$CFG")
-  Add it to $CFG deliberately; do not pick a harness to suit the lane."
-  MODEL=$(jq -r --arg p "$PROFILE" '.profiles[$p].model // empty' "$CFG")
-  FLAGS=$(jq -r --arg p "$PROFILE" '.profiles[$p].flags // [] | join(" ")' "$CFG")
-  EFFORT=$(jq -r --arg p "$PROFILE" '.profiles[$p].effort // empty' "$CFG")
-  # Effort is a claude flag only. opencode's interactive entry (what herdr
-  # starts) has no equivalent — --variant is `opencode run` only, and the tui
-  # ignores unknown flags without error, so emitting one would do nothing and
-  # look like it worked. set-profile refuses to store this combination; refuse
-  # it here too rather than trust the config to be clean.
-  local EFLAG=""
-  if [[ -n "$EFFORT" ]]; then
-    [[ "$KIND" == claude ]] || die "profile '$PROFILE' declares effort '$EFFORT' on an opencode lane,
-  which has no effort flag. Fix the profile with orch-config.sh set-profile."
-    EFLAG="--effort"
-  fi
+  local KIND MODEL FLAGS READY_MS EFFORT AGENT
+  resolve_profile "$PROFILE"
+  # The flags that follow `--`, built from the harness table rather than written
+  # out here. This vector used to be a literal `--agent <p> --model <m>`, which
+  # is claude/opencode syntax: omp wants `--append-system-prompt <file>` and
+  # `--thinking`, and a TUI that ignores unknown flags would have run the whole
+  # lane with no invariants while reporting a clean start.
+  local -a LAUNCH
+  LAUNCH=(${(f)"$(hk_launch_args "$KIND" "$AGENT" "$MODEL" "$EFFORT" "$FLAGS" "$ROOT")"}) \
+    || die "could not build the launch flags for profile '$PROFILE'."
+  (( $#LAUNCH )) || die "profile '$PROFILE' produced no launch flags — a lane started this way
+  has no bounded context at all. Check the profile in $CFG."
   # herdr's --timeout is how long `agent start` waits for the harness to become
   # READY ("default: 30000; max: 300000"). It is not a lane runtime cap. The
   # 2026-08 run's config carried lanes.timeout_ms=1800000 — a runtime intent —
@@ -247,10 +284,7 @@ $(print -l -- "${MISSING[@]/#/    }")
 
   if (( DRY )); then
     local -a DA
-    DA=(agent start "$NAME" --kind "$KIND" --pane '<pane>' --timeout "$READY_MS" -- --agent "$PROFILE")
-    [[ -n "$MODEL" ]] && DA+=(--model "$MODEL")
-    [[ -n "$EFLAG" ]] && DA+=($EFLAG "$EFFORT")
-    [[ -n "$FLAGS" ]] && DA+=(${=FLAGS})
+    DA=(agent start "$NAME" --kind "$KIND" --pane '<pane>' --timeout "$READY_MS" -- "${LAUNCH[@]}")
     print -r -- "herdr worktree create --cwd $ROOT --branch $BRANCH --base $BASE --label $NAME --no-focus --json"
     print -r -- "herdr $DA"
     exit 0
@@ -277,11 +311,8 @@ $(print -l -- "${MISSING[@]/#/    }")
   start — or close it with: herdr pane close $PANE"
 
   local -a ARGS
-  ARGS=(agent start "$NAME" --kind "$KIND" --pane "$PANE" --timeout "$READY_MS" -- --agent "$PROFILE")
-  [[ -n "$MODEL" ]] && ARGS+=(--model "$MODEL")
-  [[ -n "$EFLAG" ]] && ARGS+=($EFLAG "$EFFORT")
-  [[ -n "$FLAGS" ]] && ARGS+=(${=FLAGS})
-  h $ARGS >/dev/null || die "agent start failed for $NAME on $PANE"
+  ARGS=(agent start "$NAME" --kind "$KIND" --pane "$PANE" --timeout "$READY_MS" -- "${LAUNCH[@]}")
+  h "${ARGS[@]}" >/dev/null || die "agent start failed for $NAME on $PANE"
 
   if [[ -n "$RUN" ]]; then
     # $ROOT, not PWD. `restart` resolves this path from the repo root, so a
@@ -422,18 +453,16 @@ restart)
   stopped one), or pass --force having confirmed it is really gone."
   fi
 
-  local KIND MODEL FLAGS EFFORT READY_MS
-  KIND=$(jq -r --arg p "$PROFILE" '.profiles[$p].kind // empty' "$CFG")
-  [[ -n "$KIND" ]] || die "profile '$PROFILE' is not declared for this project.
-  declared: $(jq -r '.profiles | keys | join(", ")' "$CFG")"
-  MODEL=$(jq -r --arg p "$PROFILE" '.profiles[$p].model // empty' "$CFG")
-  FLAGS=$(jq -r --arg p "$PROFILE" '.profiles[$p].flags // [] | join(" ")' "$CFG")
-  EFFORT=$(jq -r --arg p "$PROFILE" '.profiles[$p].effort // empty' "$CFG")
-  local EFLAG=""
-  if [[ -n "$EFFORT" ]]; then
-    [[ "$KIND" == claude ]] || die "profile '$PROFILE' declares effort on an opencode lane."
-    EFLAG="--effort"
-  fi
+  local KIND MODEL FLAGS EFFORT READY_MS AGENT
+  resolve_profile "$PROFILE"
+  # Same vector as `start`, from the same table. It has to be: re-applying the
+  # profile is the entire point of restart, and a restart that rebuilt the flags
+  # its own way would be a second place for them to drift.
+  local -a LAUNCH
+  LAUNCH=(${(f)"$(hk_launch_args "$KIND" "$AGENT" "$MODEL" "$EFFORT" "$FLAGS" "$ROOT")"}) \
+    || die "could not build the launch flags for profile '$PROFILE'."
+  (( $#LAUNCH )) || die "profile '$PROFILE' produced no launch flags — the restart would put the
+  lane back on the harness default, which is the failure restart exists to undo."
   READY_MS=$(jq -r '.lanes.ready_timeout_ms // 60000' "$CFG")
   [[ "$READY_MS" == <-> ]] || READY_MS=60000
   (( READY_MS > 300000 )) && READY_MS=300000
@@ -444,11 +473,8 @@ restart)
   If the old harness is still up, exit it first; then rerun restart."
 
   local -a ARGS
-  ARGS=(agent start "$NAME" --kind "$KIND" --pane "$PANE" --timeout "$READY_MS" -- --agent "$PROFILE")
-  [[ -n "$MODEL" ]] && ARGS+=(--model "$MODEL")
-  [[ -n "$EFLAG" ]] && ARGS+=($EFLAG "$EFFORT")
-  [[ -n "$FLAGS" ]] && ARGS+=(${=FLAGS})
-  h $ARGS >/dev/null || die "agent start failed for $NAME on $PANE"
+  ARGS=(agent start "$NAME" --kind "$KIND" --pane "$PANE" --timeout "$READY_MS" -- "${LAUNCH[@]}")
+  h "${ARGS[@]}" >/dev/null || die "agent start failed for $NAME on $PANE"
 
   # The branch moved or it did not, and which one decides whether this lane is
   # resuming or repeating. Keep sha_at_dispatch; record where HEAD is now.
