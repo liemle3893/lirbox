@@ -4,7 +4,7 @@
 #
 #   orch-lane.sh start   <name> --profile <p> --run <slug> [--branch <b>] [--base <b>]
 #   orch-lane.sh restart <name> --run <slug> [--profile <p>]
-#   orch-lane.sh gate    <lane> --run <slug> [--profile <p>]
+#   orch-lane.sh gate    <lane> --run <slug> [--profile <p>] [--pane]
 #   orch-lane.sh brief   <name> <file>
 #   orch-lane.sh close   <name>
 #
@@ -493,12 +493,26 @@ restart)
   ;;
 
 gate)
-  # Dispatch the code gate for a lane, as its OWN lane.
+  # Dispatch the code gate for a lane.
   #
-  # A gate has to be a separate process for the same reason a verification does:
-  # a self-report can never be a gate. Producing it in the implementor's pane
-  # would satisfy the artifact and none of the point, so this cuts a fresh lane
-  # on the gate profile, checked out at the lane's branch.
+  # The invariant is one line, and gate-guard.sh enforces exactly it: the verdict
+  # must carry `produced_by != <the implementor lane>`, `gate_passed == true` and
+  # `build_exit == 0`. It never asks HOW the gate ran. A self-report can never be
+  # a gate; a separate CONTEXT is what that requires, not a separate machine.
+  #
+  # So the default is the cheap way to satisfy it: an in-session subagent on the
+  # gate profile's agent and model. No pane, no worktree, no `--agent <name>`
+  # resolved at spawn — none of the surface that turns a gate into one more lane
+  # to diagnose. A gate that cannot start reads as `timed out waiting for agent
+  # startup`, which is indistinguishable from a cold pane and survives a restart.
+  # In the 2026-08 run behind this: three panes did the typing, six subagents did
+  # the reading and judging, and every Critical came from a subagent.
+  #
+  # A pane is still cut when the gate profile is not a claude one — an omp or
+  # opencode reviewer cannot run inside this session — and on `--pane`, for a
+  # gate that has to outlive the session. Both modes emit the SAME brief: the
+  # verdict contract below is the part that must not fork, because a thinner
+  # prompt is how a gate goes green on the honour system.
   #
   # The verdict shape is conductor's, field for field — gate_passed, critical,
   # high, build_cmd, build_exit — because its pass condition is the one that
@@ -506,12 +520,14 @@ gate)
   # numeric build exit has to agree with it.
   NAME="${1:-}"; shift 2>/dev/null || true
   [[ -n "$NAME" ]] || die "gate needs the lane name to gate:
-  orch-lane.sh gate <lane> --run <slug> [--profile <p>]"
-  local RUN="" PROFILE=""
+  orch-lane.sh gate <lane> --run <slug> [--profile <p>] [--pane]"
+  local RUN="" PROFILE="" PANE_MODE=0 DRY=0
   while (( $# )); do
     case "$1" in
       --run)     RUN="$2";     shift 2 ;;
       --profile) PROFILE="$2"; shift 2 ;;
+      --pane)    PANE_MODE=1;  shift   ;;
+      --dry-run|--dry) DRY=1;  shift   ;;
       *) die "unknown flag: $1" ;;
     esac
   done
@@ -523,9 +539,10 @@ gate)
   A lane with no record has no branch to gate and no implementor to be
   independent of. Nothing to do here."
 
-  local BRANCH IMPL
+  local BRANCH IMPL WTREE
   BRANCH=$(jq -r '.branch // empty' "$REC")
   IMPL=$(jq -r '.agent_name // .lane // empty' "$REC")
+  WTREE=$(jq -r '.worktree // empty' "$REC")
   [[ -n "$BRANCH" ]] || die "the record for '$NAME' names no branch."
 
   # The gate profile is a declared project decision like every other profile.
@@ -534,21 +551,37 @@ gate)
   The gate runs on a reviewer profile — one that reviews AND fixes Critical/High
   in a pass, then reports counts. Declare it once:
     ${0:h}/../skills/lane-config/scripts/orch-config.sh set-lanes --gate-profile <p>"
+  resolve_profile "$PROFILE"
 
   local GLANE="gate-$NAME"
   [[ "$IMPL" != "$GLANE" ]] || die "the gate lane and the implementor cannot be the same agent."
 
+  # Only a claude profile can run as a subagent of this session. Everything else
+  # is a separate process by construction, so it keeps the pane.
+  local MODE=pane
+  [[ "$KIND" == claude && $PANE_MODE -eq 0 ]] && MODE=subagent
+
   local EVID="$ROOT/.orchestration/$RUN/evidence"
   mkdir -p "$EVID"
 
-  # Start it on the lane's own branch, not a fresh one: the gate reviews a diff
-  # that already exists.
-  "$0" start "$GLANE" --profile "$PROFILE" --run "$RUN" --branch "$BRANCH" --base "$BRANCH" \
-    || die "could not start the gate lane for '$NAME'."
+  # Where the reviewer works. A pane is cut at the branch and lands there already;
+  # a subagent inherits this session's cwd, so it has to be told — and a gate that
+  # reviews the wrong tree is worse than no gate.
+  local WHERE
+  if [[ "$MODE" == subagent ]]; then
+    [[ -n "$WTREE" && -d "$WTREE" ]] || die "cannot gate '$NAME' from this session: the
+  record names no checkout that still exists (worktree: ${WTREE:-none}).
+  A subagent has no tree of its own — it reviews the lane's. Re-run with --pane
+  to cut the gate its own, or restore the checkout."
+    WHERE="Work in the checkout at \`$WTREE\` — cd there first. It is on branch
+\`$BRANCH\` (lane \`$NAME\`). You did not write this code."
+  else
+    WHERE="Gate the diff on branch \`$BRANCH\` (lane \`$NAME\`). You did not write this code."
+  fi
 
   local BRIEF="$EVID/$GLANE-brief.md"
   cat > "$BRIEF" <<BRIEFEOF
-Gate the diff on branch \`$BRANCH\` (lane \`$NAME\`). You did not write this code.
+$WHERE
 
 Review it, and FIX every Critical and High finding in the same pass. Then build.
 
@@ -583,8 +616,38 @@ Red means stop and report observed values. Do not weaken an assertion, delete a
 test, or relax a check to reach green.
 BRIEFEOF
 
+  if [[ "$MODE" == subagent ]]; then
+    # The script cannot spawn a subagent — only the orchestrator holds the Agent
+    # tool. It hands back the three things that call needs and stops.
+    print -r -- "gate mode: subagent (profile '$PROFILE' is a claude one)
+  agent:   $AGENT${EFFORT:+
+  effort:  $EFFORT}
+  model:   $MODEL
+  brief:   $BRIEF
+  verdict: $EVID/$GLANE-code_gate.json
+
+Run it now with the Agent tool — subagent_type '$AGENT', model '$MODEL', and the
+brief file's contents as the prompt. Do not summarise the brief; pass it whole.
+Nothing is gated until $EVID/$GLANE-code_gate.json exists."
+    exit 0
+  fi
+
+  # Start it on the lane's own branch, not a fresh one: the gate reviews a diff
+  # that already exists.
+  local -a DRY_ARG=()
+  (( DRY )) && DRY_ARG=(--dry-run)
+  "$0" start "$GLANE" --profile "$PROFILE" --run "$RUN" --branch "$BRANCH" --base "$BRANCH" \
+    "${DRY_ARG[@]}" || die "could not start the gate lane for '$NAME'."
+  if (( DRY )); then
+    print -r -- "gate mode: pane (profile '$PROFILE' is a $KIND one)
+  brief:   $BRIEF
+  verdict: $EVID/$GLANE-code_gate.json"
+    exit 0
+  fi
+
   "$0" brief "$GLANE" "$BRIEF" || die "gate lane '$GLANE' started but the brief did not submit."
-  print -r -- "gate dispatched: $GLANE reviewing $BRANCH (lane $NAME)
+  print -r -- "gate mode: pane (profile '$PROFILE' is a $KIND one)
+gate dispatched: $GLANE reviewing $BRANCH (lane $NAME)
   verdict -> $EVID/$GLANE-code_gate.json"
   ;;
 

@@ -351,12 +351,28 @@ is a demand to say the exception out loud, not a veto on your judgement.
 # The gate — work does not leave ungated
 
 ```
-${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh gate <lane> --run <slug>
+${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh gate <lane> --run <slug> [--pane]
 ```
 
-Cuts a **separate** lane on `lanes.gate_profile` at that lane's branch: review, fix every Critical
-and High in one pass, build, then write `evidence/<gate-lane>-code_gate.json`. Separate because a
-gate produced in the implementor's pane satisfies the artifact and none of the point.
+Resolves `lanes.gate_profile`, writes the brief, and tells you how to run it: review, fix every
+Critical and High in one pass, build, then write `evidence/<gate-lane>-code_gate.json`.
+
+**A claude gate profile runs as a subagent of THIS session — no pane.** The command prints the
+agent id, the model and the brief path; you make the call yourself with the **Agent tool**, passing
+the brief file's contents whole, and nothing is gated until the verdict file exists. What the gate
+must be is a **separate context** from the implementor, and `gate-guard.sh` asks for exactly that
+and nothing more. A pane satisfies it no better and costs a profile table, an `--agent <name>`
+resolved at spawn, and a pane to diagnose — a gate that cannot start reads as `timed out waiting
+for agent startup`, which is a cold pane's message and survives the restart it invites.
+
+Spend the capability there. In the run this came from, three panes did the typing and every
+Critical was found by an in-session subagent; the panes reported four true green numbers over
+per-tool grants that were completely inert. Cheap for typing, capable where the right answer lies
+outside the stated criteria.
+
+A **pane** is still cut when the gate profile is not a claude one — omp and opencode cannot run
+inside this session — and on `--pane`, for a gate that has to outlive the session. Both modes get
+the same brief; the verdict contract is not forkable.
 
 The verdict carries `gate_passed`, `critical`, `high`, `build_cmd`, `build_exit`, and the pass
 condition is **`gate_passed == true` AND `build_exit == 0`**. The flag is never trusted alone — a
