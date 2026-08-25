@@ -14,35 +14,35 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "init naming a model it could not know puts a harness assignment nobody chose into every new repo \u2014 the drift the config exists to stop, now wearing a helpful default",
+          "why": "init naming a model it could not know puts a harness assignment nobody chose into every new repo — the drift the config exists to stop, now wearing a helpful default",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
           "find": "HM_CAP=claude-opus-5;  HM_CHEAP=claude-sonnet-5",
           "replace": "HM_CAP=acme-ultra-9;  HM_CHEAP=acme-mini-9"
         },
         {
-          "why": "without the gate_profile guard a config validates clean and then dies at the one step that cannot be skipped \u2014 gate-guard.sh refuses every push, PR and merge for a lane with no code_gate",
+          "why": "without the gate_profile guard a config validates clean and then dies at the one step that cannot be skipped — gate-guard.sh refuses every push, PR and merge for a lane with no code_gate",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
-          "find": "    problems+=(\"lanes.gate_profile is empty \u2014 no work can leave this repo without a gate, so this is not optional. Set it: $0 set-lanes --gate-profile <p>\")",
+          "find": "    problems+=(\"lanes.gate_profile is empty — no work can leave this repo without a gate, so this is not optional. Set it: $0 set-lanes --gate-profile <p>\")",
           "replace": "    :"
         },
         {
           "why": "without the base_branch guard validate blesses a config whose every worktree is cut from an unset ref, which fails at spawn with the same message a missing --cwd produces",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
-          "find": "  [[ \"$(jq -r '.lanes.base_branch // \"\"' \"$CFG\")\" != \"\" ]] || problems+=(\"lanes.base_branch is empty \u2014 every worktree is cut from it, so start refuses without it\")",
+          "find": "  [[ \"$(jq -r '.lanes.base_branch // \"\"' \"$CFG\")\" != \"\" ]] || problems+=(\"lanes.base_branch is empty — every worktree is cut from it, so start refuses without it\")",
           "replace": "  :"
         },
         {
           "why": "blessing a config with zero profiles lets a run start with nothing declared, so every lane falls back to whatever the spawn command happened to say",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
-          "find": "  (( n > 0 )) || problems+=(\"no profiles declared \u2014 every spawn will be denied\")",
+          "find": "  (( n > 0 )) || problems+=(\"no profiles declared — every spawn will be denied\")",
           "replace": "  true"
         },
         {
-          "why": "accepting a profile with no model means the harness default silently becomes the decision \u2014 the drift that started this work",
+          "why": "accepting a profile with no model means the harness default silently becomes the decision — the drift that started this work",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
           "find": "  [[ -n \"$MODEL\" ]] || die \"set-profile needs --model. An unnamed model is the harness default, not a decision.\"",
@@ -52,7 +52,7 @@
           "why": "an empty setup.baseline passing validate leaves every lane unable to distinguish its own red from an inherited one, which cost the 2026-08 run several cycles",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
-          "find": "  [[ \"$(jq -r '.setup.baseline // \"\"' \"$CFG\")\" != \"\" ]] || problems+=(\"setup.baseline is empty \u2014 a lane cannot tell a real red from an inherited one\")",
+          "find": "  [[ \"$(jq -r '.setup.baseline // \"\"' \"$CFG\")\" != \"\" ]] || problems+=(\"setup.baseline is empty — a lane cannot tell a real red from an inherited one\")",
           "replace": "  true"
         }
       ]
@@ -61,7 +61,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "turning the name-branch refusal into an accept means a profile whose agent does not exist in the harness's own registry stores clean and dies at spawn \u2014 the exact issue-#88 failure, reported by herdr as an indistinguishable cold-pane timeout",
+          "why": "turning the name-branch refusal into an accept means a profile whose agent does not exist in the harness's own registry stores clean and dies at spawn — the exact issue-#88 failure, reported by herdr as an indistinguishable cold-pane timeout",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
           "find": "  Available: ${(j:, :)known}\"\n      return 1 ;;",
@@ -74,6 +74,13 @@
           "file": "plugins/lirbox/scripts/harness-kinds.sh",
           "find": "local names; names=$(hk_agent_names \"$kind\" \"$root\") || return 0",
           "replace": "local names; names=$(hk_agent_names \"$kind\" \"$root\") || return 1"
+        },
+        {
+          "why": "init shipping the bare plugin file name as the agent id hands every new repo a config its own validate refuses — claude resolves a plugin subagent only as <plugin>:<file>, so `lirbox-planner` is in no registry anywhere",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "agent:\"lirbox:lirbox-planner\"",
+          "replace": "agent:\"lirbox-planner\""
         }
       ]
     }

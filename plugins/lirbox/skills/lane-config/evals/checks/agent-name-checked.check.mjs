@@ -97,4 +97,21 @@ const scenario = (setup) => {
   if (r.code !== 0) fail(`set-profile refused an agent when the claude registry could not be determined at all: ${r.out}`);
 }
 
+// -- init's OWN output must survive its own validate --
+// The registry check is only half the fix; the other half is that init stopped
+// shipping an agent id no registry has. claude resolves a plugin-shipped
+// subagent as `<plugin>:<file>` and only that way, so the bare file name is in
+// no registry anywhere — init writing it hands every new repo a config its own
+// validate refuses on a field the user never chose. The fake registry below is
+// what a real claude with the plugin installed answers.
+{
+  const { run, cleanup } = scenario((bin) => fakeClaude(bin, [
+    'claude', 'Explore', 'Plan', 'general-purpose',
+    'lirbox:lirbox-planner', 'lirbox:lirbox-verifier', 'lirbox:lirbox-builder',
+  ]));
+  const r = run('validate');
+  cleanup();
+  if (/agent registry/.test(r.out)) fail(`init wrote profiles its own validate refuses: ${r.out}`);
+}
+
 console.log('GREEN agent-name-checked');

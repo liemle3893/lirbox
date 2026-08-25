@@ -69,7 +69,7 @@ for (const [name, p] of Object.entries(cfg.profiles || {})) {
 // The landmine regression: init must not hand back a config that fails at the
 // first spawn. Either it validates, or init said out loud what is missing.
 const initValidate = run('validate');
-if (initValidate.code !== 0 && !/profiles|model|baseline|base_branch|gate_profile|agent/.test(initValidate.out)) {
+if (initValidate.code !== 0 && !/profiles|model|baseline|base_branch|gate_profile/.test(initValidate.out)) {
   fail(`init produced a config validate refuses without naming the missing field: ${initValidate.out}`);
 }
 

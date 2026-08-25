@@ -157,15 +157,27 @@ hk_agent_names() {
       local out
       out=$(cd "$root" 2>/dev/null && claude --agent __lirbox_agent_probe__ -p '' </dev/null 2>&1)
       [[ "$out" == *'Available agents:'* ]] || return 1
-      out="${out#*Available agents: }"
+      # Take the list and NOTHING after it: the refusal can be preceded by
+      # warnings (an ANTHROPIC_API_KEY notice, for one) and could one day be
+      # followed by a hint line. Anything trailing would ride along on the last
+      # name and false-refuse it, which is the failure this whole function is
+      # built to avoid.
+      out="${out#*Available agents: }"; out="${out%%$'\n'*}"
       local -a names; names=(${(s:, :)out})
       print -rl -- "${names[@]}"
       ;;
     opencode)
       command -v opencode >/dev/null 2>&1 || return 1
       local names
+      # `agent list` prints `<name> (primary|subagent)` in column 0 and then
+      # indents that agent's permission JSON under it. Key on the column-0
+      # `<token> (` shape, NOT on a charset: opencode accepts an agent whose
+      # name starts with a capital or a digit (a `.opencode/agent/Reviewer.md`
+      # lists as `Reviewer (subagent)`), and a `^[a-z]` filter drops it — a
+      # false refusal of an agent the harness itself knows. The JSON can never
+      # match: every line of it is indented.
       names=$(cd "$root" 2>/dev/null && opencode agent list 2>/dev/null \
-        | grep -E '^[a-z][a-z0-9_-]*( |$)' | awk '{print $1}' | sort -u)
+        | grep -E '^[^[:space:]]+ \(' | awk '{print $1}' | sort -u)
       [[ -n "$names" ]] || return 1
       print -r -- "$names"
       ;;
