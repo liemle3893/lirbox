@@ -32,6 +32,32 @@ die() { print -u2 -r -- "orch-config: $1"; exit 1 }
 # can be pointed somewhere else. Unset in every real run.
 source "${HARNESS_KINDS_OVERRIDE:-${0:h}/../../../scripts/harness-kinds.sh}"
 
+# One check for both write-time (set-profile) and read-time (validate)
+# refusal: a profile whose agent will not resolve at spawn is a lane that
+# starts clean and dies with "timed out waiting for agent startup" —
+# indistinguishable from a cold pane. `file` and `name` are each an invariant
+# a profile can fail; `none` has nothing to check. Prints the problem (empty
+# on success) so each caller can either `die` on it or collect it.
+agent_problem() {
+  local kind="$1" agent="$2" repo="$3"
+  case "${HK_AGENT_ARG[$kind]-}" in
+    file)
+      hk_agent_file "$agent" "$repo" >/dev/null && return 0
+      print -r -- "$kind carries its bounded context as a file
+  (${HK_AGENT_FLAG[$kind]}), and no markdown for agent '$agent' was found in
+  $repo/.claude/agents/, the lirbox plugin's agents/, or ~/.claude/agents/.
+  Write the agent first, then declare the profile — or point this one at an
+  existing agent with --agent <id>."
+      return 1 ;;
+    name)
+      local names; names=$(hk_agent_exists "$kind" "$agent" "$repo") && return 0
+      local -a known; known=(${(f)names})
+      print -r -- "agent '$agent' is not in $kind's own agent registry.
+  Available: ${(j:, :)known}"
+      return 1 ;;
+    *) return 0 ;;
+  esac
+}
 
 SUB="${1:-path}"; shift 2>/dev/null || true
 
@@ -159,10 +185,15 @@ init)
 
   local profiles='{}' dflt=null gate=null
   if [[ -n "$HK" && -n "$HM_CAP" ]]; then
+    # $HK is claude here (the only branch with a known capable model) and
+    # claude resolves a plugin-shipped subagent as `<plugin>:<file>`, not the
+    # bare filename — `lirbox-planner` alone is not in claude's own registry,
+    # only `lirbox:lirbox-planner` is. Getting this wrong is exactly the
+    # failure hk_agent_exists now catches, including in init's own output.
     profiles=$(jq -n --arg k "$HK" --arg cap "$HM_CAP" --arg cheap "$HM_CHEAP" '{
-      planner:  {kind:$k, model:$cap,   effort:"high",   agent:"lirbox-planner"},
-      verifier: {kind:$k, model:$cap,   effort:"high",   agent:"lirbox-verifier"},
-      builder:  {kind:$k, model:$cheap, effort:"medium", agent:"lirbox-builder"}
+      planner:  {kind:$k, model:$cap,   effort:"high",   agent:"lirbox:lirbox-planner"},
+      verifier: {kind:$k, model:$cap,   effort:"high",   agent:"lirbox:lirbox-verifier"},
+      builder:  {kind:$k, model:$cheap, effort:"medium", agent:"lirbox:lirbox-builder"}
     }')
     dflt='"builder"'; gate='"verifier"'
   elif [[ -n "$HK" ]]; then
@@ -225,13 +256,13 @@ validate)
     bad=$(jq -r --argjson n "$NJSON" '.profiles | to_entries[] | select((.value.effort // "") != "" and (.value.kind | IN($n[]))) | .key' "$CFG")
     [[ -z "$bad" ]] || problems+=("profile(s) declaring effort on a harness with no effort flag (${(j:, :)NOEFFORT}): $bad — it would be silently ignored")
   fi
-  # A file-carried profile whose file has gone missing is a lane that starts
-  # with no invariants and says nothing about it.
-  local row pn pk pa
+  # An agent that will not resolve at spawn — a missing file for a
+  # file-carried harness, or a name absent from the harness's own registry —
+  # is a lane that starts clean and says nothing about it.
+  local row pn pk pa ap
   for row in ${(f)"$(jq -r '.profiles | to_entries[] | "\(.key)\t\(.value.kind // "")\t\(.value.agent // .key)"' "$CFG")"}; do
     pn="${row%%$'\t'*}"; pa="${row##*$'\t'}"; pk="${${row#*$'\t'}%%$'\t'*}"
-    [[ "${HK_AGENT_ARG[$pk]-}" == file ]] || continue
-    hk_agent_file "$pa" "$REPO" >/dev/null || problems+=("profile '$pn' is $pk, which carries its context as a file, and no markdown for agent '$pa' exists")
+    ap=$(agent_problem "$pk" "$pa" "$REPO") || problems+=("profile '$pn': $ap")
   done
   local dp; dp=$(jq -r '.default_profile // ""' "$CFG")
   if [[ -n "$dp" ]]; then
@@ -297,17 +328,13 @@ set-profile)
       [[ " $EV " == *" $EFFORT "* ]] || die "unknown effort '$EFFORT' for $KIND (want: $EV)"
     fi
   fi
-  # A profile on a harness that carries its context as a FILE is only a profile
-  # if that file exists. Checked at write time, because the alternative is a
-  # lane that starts clean and runs with no invariants — the failure this
-  # config exists to prevent, and the one nobody sees happening.
-  if [[ "${HK_AGENT_ARG[$KIND]-}" == file ]]; then
-    hk_agent_file "$AGENT" "$REPO" >/dev/null || die "$KIND carries its bounded context as a file
-  (${HK_AGENT_FLAG[$KIND]}), and no markdown for agent '$AGENT' was found in
-  $REPO/.claude/agents/, the lirbox plugin's agents/, or ~/.claude/agents/.
-  Write the agent first, then declare the profile — or point this one at an
-  existing agent with --agent <id>."
-  fi
+  # A profile's agent must resolve on THIS harness — as a file for the
+  # harnesses that carry context that way (omp), or against the harness's own
+  # registry for the ones that carry it as a name (claude, opencode). Checked
+  # at write time, because the alternative is a lane that starts clean and
+  # runs with no invariants — the failure this config exists to prevent, and
+  # the one nobody sees happening.
+  local AP; AP=$(agent_problem "$KIND" "$AGENT" "$REPO") || die "$AP"
   local fj; fj=$(print -r -- "$FLAGS" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s . 2>/dev/null || print -r -- '[]')
   write "$(jq --arg n "$NAME" --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" \
               --arg a "$AGENT" --argjson f "$fj" \

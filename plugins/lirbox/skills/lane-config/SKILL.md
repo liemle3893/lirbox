@@ -56,7 +56,9 @@ Ask these together, not one per turn. Offer the recommendation; take the answer.
   its own agents points profiles at those. `claude`/`opencode` take the id as a NAME; `omp`
   takes a PATH to the agent markdown (`--append-system-prompt`), so `set-profile` refuses an
   omp profile whose markdown does not exist — a lane that starts without it has no invariants
-  and says nothing about it.
+  and says nothing about it. `claude`/`opencode` NAMEs are checked against that harness's own
+  `--agent`/`agent list` registry (built-ins included); a registry that cannot be determined
+  (binary missing) is accepted, never refused.
 - **Effort per profile — only where the harness has a flag** (`claude` `--effort`, `omp`
   `--thinking`). The opencode and jcode entries herdr starts have none and ignore unknown flags
   silently, so `set-profile` refuses that combination rather than store what cannot take effect.

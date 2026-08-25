@@ -26,12 +26,26 @@ const here = dirname(fileURLToPath(import.meta.url));
 const script = process.env.ORCH_CONFIG_OVERRIDE
   || join(here, '..', '..', 'scripts', 'orch-config.sh');
 
+// This check is about config SHAPE (profiles/model/baseline/base_branch/
+// gate_profile), not about whether an agent id resolves on a real harness —
+// that is agent-name-checked's job. Strip any real claude/opencode off PATH
+// so set-profile always sees an undeterminable registry (accept-everything)
+// here, exactly as before agent validation existed — otherwise this check's
+// result would depend on which harnesses happen to be installed on whatever
+// machine runs it.
+const realBinDir = (bin) => {
+  try { return dirname(execFileSync('command', ['-v', bin], { shell: '/bin/zsh', encoding: 'utf8' }).trim()); }
+  catch { return null; }
+};
+const excluded = new Set([realBinDir('claude'), realBinDir('opencode')].filter(Boolean));
+const NO_HARNESS_PATH = (process.env.PATH || '').split(':').filter((d) => !excluded.has(d)).join(':');
+
 const repo = mkdtempSync(join(tmpdir(), 'lane-config-'));
 const home = mkdtempSync(join(tmpdir(), 'lane-home-'));
 const run = (...args) => {
   try {
     return { code: 0, out: execFileSync('zsh', [script, ...args, repo], {
-      env: { ...process.env, HOME: home }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+      env: { ...process.env, HOME: home, PATH: NO_HARNESS_PATH }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
   } catch (e) { return { code: e.status ?? 1, out: (e.stdout || '') + (e.stderr || '') }; }
 };
 
@@ -55,7 +69,7 @@ for (const [name, p] of Object.entries(cfg.profiles || {})) {
 // The landmine regression: init must not hand back a config that fails at the
 // first spawn. Either it validates, or init said out loud what is missing.
 const initValidate = run('validate');
-if (initValidate.code !== 0 && !/profiles|model|baseline|base_branch|gate_profile/.test(initValidate.out)) {
+if (initValidate.code !== 0 && !/profiles|model|baseline|base_branch|gate_profile|agent/.test(initValidate.out)) {
   fail(`init produced a config validate refuses without naming the missing field: ${initValidate.out}`);
 }
 
@@ -108,7 +122,7 @@ const home2 = mkdtempSync(join(tmpdir(), 'lane-home2-'));
 const run2 = (...args) => {
   try {
     return { code: 0, out: execFileSync('zsh', [script, ...args, repo2], {
-      env: { ...process.env, HOME: home2 }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+      env: { ...process.env, HOME: home2, PATH: NO_HARNESS_PATH }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
   } catch (e) { return { code: e.status ?? 1, out: (e.stdout || '') + (e.stderr || '') }; }
 };
 execFileSync('git', ['init', '-q', repo2]);
