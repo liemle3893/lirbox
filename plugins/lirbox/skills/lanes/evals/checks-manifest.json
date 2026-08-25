@@ -22,7 +22,7 @@
           "replace": "awk '$2 ~ /^Q/ {print $1}'"
         },
         {
-          "why": "the gate detects the stop and answers it with ctrl+c \u2014 a signal that is not delivered until SIGCONT is, so the block names a remedy that frees nothing",
+          "why": "the gate detects the stop and answers it with ctrl+c — a signal that is not delivered until SIGCONT is, so the block names a remedy that frees nothing",
           "env": "LANE_GATE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/lane-gate.sh",
@@ -30,7 +30,7 @@
           "replace": "  ctrl+c via pane send-keys"
         },
         {
-          "why": "the stopped process is never matched back to a lane's checkout, so the gate knows something is stopped and cannot say which lane \u2014 which is indistinguishable from not noticing",
+          "why": "the stopped process is never matched back to a lane's checkout, so the gate knows something is stopped and cannot say which lane — which is indistinguishable from not noticing",
           "env": "LANE_GATE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/lane-gate.sh",
@@ -46,7 +46,7 @@
           "why": "the stopped row's move goes back to ctrl+c: the state is detected and the lane still cannot be freed, because SIGINT is not delivered to a process the kernel will not schedule",
           "env": "LANES_SKILL_OVERRIDE",
           "file": "SKILL.md",
-          "find": "`kill -CONT <pid>` \u2014 `ctrl+c` cannot land on a stopped process",
+          "find": "`kill -CONT <pid>` — `ctrl+c` cannot land on a stopped process",
           "replace": "`ctrl+c` via `pane send-keys`"
         },
         {
@@ -57,7 +57,7 @@
           "replace": "awk '$2 ~ /Z/'"
         },
         {
-          "why": "the probe stops asking ps for process state at all \u2014 the one signal herdr cannot supply, and the only thing that separates a stopped lane from a wedged one",
+          "why": "the probe stops asking ps for process state at all — the one signal herdr cannot supply, and the only thing that separates a stopped lane from a wedged one",
           "env": "LANES_SKILL_OVERRIDE",
           "file": "SKILL.md",
           "find": "ps -o pid=,stat=,command= -A",
@@ -76,7 +76,7 @@
           "replace": "  const notes = entries.filter((e) => !['lane', 'ack', 'answer'].includes(e.type) && !superseded.has(e.id)).map((e) => ({"
         },
         {
-          "why": "accepting a finding with neither a command nor an explicit unproven marker puts an inference into the record in the same register as a measurement \u2014 the exact way a wrong fact becomes durable",
+          "why": "accepting a finding with neither a command nor an explicit unproven marker puts an inference into the record in the same register as a measurement — the exact way a wrong fact becomes durable",
           "env": "NOTES_OVERRIDE",
           "file": "scripts/notes.mjs",
           "find": "  if (type === 'finding' && !flags.cmd && !flags.unproven) {",
@@ -90,7 +90,7 @@
           "replace": "  if (false) {"
         },
         {
-          "why": "a blocked lane with no reason shows a block in the Now table with no question attached, which is indistinguishable from work in progress \u2014 the failure that let a lane sit idle for an hour",
+          "why": "a blocked lane with no reason shows a block in the Now table with no question attached, which is indistinguishable from work in progress — the failure that let a lane sit idle for an hour",
           "env": "NOTES_OVERRIDE",
           "file": "scripts/notes.mjs",
           "find": "  if (status === 'blocked' && !flags['blocked-on']) {",
@@ -100,7 +100,7 @@
           "why": "letting anything be acked collapses the one distinction the band rests on: a decision is something the orchestrator resolved for you and you may still overturn, and acking is the user's act alone",
           "env": "NOTES_OVERRIDE",
           "file": "scripts/notes.mjs",
-          "find": "  if (target.type !== 'decision') die(`${id} is a ${target.type} \u2014 only decisions are acked`);",
+          "find": "  if (target.type !== 'decision') die(`${id} is a ${target.type} — only decisions are acked`);",
           "replace": "  if (false) die('unreachable');"
         },
         {
@@ -116,7 +116,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "the readiness timeout stops being clamped, so a config carrying a lane-runtime number reaches herdr's --timeout and every start dies on invalid_agent_timeout \u2014 the defect that produced 0 clean starts in 26",
+          "why": "the readiness timeout stops being clamped, so a config carrying a lane-runtime number reaches herdr's --timeout and every start dies on invalid_agent_timeout — the defect that produced 0 clean starts in 26",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -124,7 +124,7 @@
           "replace": "\n  # Refuse to exceed the declared lane cap"
         },
         {
-          "why": "worktree create stops pinning the source repo, so herdr cuts the checkout from whatever the human last focused \u2014 three checkouts landed in another session's repo this way",
+          "why": "worktree create stops pinning the source repo, so herdr cuts the checkout from whatever the human last focused — three checkouts landed in another session's repo this way",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -132,7 +132,7 @@
           "replace": "h worktree create"
         },
         {
-          "why": "the agent is started without waiting for the pane to reach a shell prompt \u2014 the race that answered agent_pane_busy on 8 of 26 starts",
+          "why": "the agent is started without waiting for the pane to reach a shell prompt — the race that answered agent_pane_busy on 8 of 26 starts",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -164,7 +164,7 @@
           "replace": "  [[ \"$NAME\" == --NEVER* ]] && die \"the lane name comes first, before any flag:"
         },
         {
-          "why": "start stops requiring --run, so the dispatch record is skipped again and the lane cannot be found \u2014 or restarted \u2014 after this turn",
+          "why": "start stops requiring --run, so the dispatch record is skipped again and the lane cannot be found — or restarted — after this turn",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -192,16 +192,16 @@
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
-          "find": "  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\" -- --agent \"$PROFILE\")\n  [[ -n \"$MODEL\" ]] && ARGS+=(--model \"$MODEL\")\n  [[ -n \"$EFLAG\" ]] && ARGS+=($EFLAG \"$EFFORT\")\n  [[ -n \"$FLAGS\" ]] && ARGS+=(${=FLAGS})\n  h $ARGS >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved",
-          "replace": "  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\")\n  h worktree create --cwd \"$ROOT\" --branch \"$NAME-again\" --no-focus --json >/dev/null\n  h $ARGS >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved"
+          "find": "  local -a ARGS\n  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\" -- \"${LAUNCH[@]}\")\n  h \"${ARGS[@]}\" >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved",
+          "replace": "  h worktree create --cwd \"$ROOT\" --branch \"$NAME\" --base \"$BASE\" --label \"$NAME\" --no-focus --json >/dev/null\n  local -a ARGS\n  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\" -- \"${LAUNCH[@]}\")\n  h \"${ARGS[@]}\" >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved"
         },
         {
-          "why": "restart drops the profile from the spawn, which is exactly what a herdr /clear does \u2014 the defect that ran a whole miniapp track on a default agent with no invariants",
+          "why": "restart drops the profile from the spawn, which is exactly what a herdr /clear does — the defect that ran a whole miniapp track on a default agent with no invariants",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
-          "find": "  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\" -- --agent \"$PROFILE\")\n  [[ -n \"$MODEL\" ]] && ARGS+=(--model \"$MODEL\")\n  [[ -n \"$EFLAG\" ]] && ARGS+=($EFLAG \"$EFFORT\")\n  [[ -n \"$FLAGS\" ]] && ARGS+=(${=FLAGS})\n  h $ARGS >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved",
-          "replace": "  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\")\n  h $ARGS >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved"
+          "find": "  local -a ARGS\n  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\" -- \"${LAUNCH[@]}\")\n  h \"${ARGS[@]}\" >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved",
+          "replace": "  local -a ARGS\n  ARGS=(agent start \"$NAME\" --kind \"$KIND\" --pane \"$PANE\" --timeout \"$READY_MS\")\n  h \"${ARGS[@]}\" >/dev/null || die \"agent start failed for $NAME on $PANE\"\n\n  # The branch moved"
         },
         {
           "why": "restart accepts a lane with no dispatch record, so it re-arms a pane it cannot know belongs to that lane",
@@ -254,7 +254,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "a split's workspace_id is recorded again, so a workspace this run never created lands in the file that grants destruction rights \u2014 the row that authorized removing the workspace the session itself runs in",
+          "why": "a split's workspace_id is recorded again, so a workspace this run never created lands in the file that grants destruction rights — the row that authorized removing the workspace the session itself runs in",
           "env": "LANE_LEDGER_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/lane-ledger.sh",
@@ -307,7 +307,7 @@
           "replace": "      '{agent_name:$n,"
         },
         {
-          "why": "the dispatch record loses `branch`, which is the ONLY key gate-guard joins a branch to a lane by \u2014 every push then matches no record and the whole gate silently allows",
+          "why": "the dispatch record loses `branch`, which is the ONLY key gate-guard joins a branch to a lane by — every push then matches no record and the whole gate silently allows",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -320,7 +320,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "the dirty listing goes back below the force guard, where --force silences it \u2014 and --force is the only way to close a working lane, so the listing is unreachable in the one case where closing abandons work",
+          "why": "the dirty listing goes back below the force guard, where --force silences it — and --force is the only way to close a working lane, so the listing is unreachable in the one case where closing abandons work",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -328,7 +328,7 @@
           "replace": "    if [[ \"$DIRTY\" != 0 ]] && (( ! FORCE )); then\n      print -u2 -r -- \"lane '$NAME' has $DIRTY uncommitted change(s) in $WT:"
         },
         {
-          "why": "the listing names a count but never the files, so the operator is told work exists and not which work \u2014 after the pane is closed nothing else points at it",
+          "why": "the listing names a count but never the files, so the operator is told work exists and not which work — after the pane is closed nothing else points at it",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -373,7 +373,7 @@
           "replace": "    [[ -n \"$MEASURED_BODY\" ]] \\"
         },
         {
-          "why": "the gate stops being scoped to the first start and fires on every spawn, which is noise \u2014 and noise is answered with a stub file, which is how a gate becomes a ritual",
+          "why": "the gate stops being scoped to the first start and fires on every spawn, which is noise — and noise is answered with a stub file, which is how a gate becomes a ritual",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -394,7 +394,7 @@
           "replace": "    for c in dev develop main master; do\n      git -C \"$REPO\" rev-parse --verify -q \"$c\" >/dev/null 2>&1 && { base=\"$c\"; break }"
         },
         {
-          "why": "a checked-out integration branch stops counting as evidence, so cloudflare-os \u2014 on dev, origin/HEAD main \u2014 is handed main and every lane is cut from the wrong branch",
+          "why": "a checked-out integration branch stops counting as evidence, so cloudflare-os — on dev, origin/HEAD main — is handed main and every lane is cut from the wrong branch",
           "env": "ORCH_CONFIG_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/skills/lane-config/scripts/orch-config.sh",
@@ -402,12 +402,12 @@
           "replace": "  : "
         },
         {
-          "why": "init writes the detected guess into the config instead of leaving it null, turning a heuristic into a decision nobody made",
+          "why": "init hardcodes a house branch instead of writing what detection concluded — the original `--base dev` defect, moved into the config where it looks decided",
           "env": "ORCH_CONFIG_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/skills/lane-config/scripts/orch-config.sh",
-          "find": "             context_cap_tokens: 300000, base_branch: null },",
-          "replace": "             context_cap_tokens: 300000, base_branch: $d.suggested_base_branch },"
+          "find": "             context_cap_tokens: 300000, base_branch: $d.suggested_base_branch,",
+          "replace": "             context_cap_tokens: 300000, base_branch: \"dev\","
         }
       ]
     },
@@ -415,7 +415,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "the build exit stops being cross-checked, so gate_passed alone decides \u2014 the honour system conductor deliberately refuses, and a reviewer reporting success for a build it never ran walks straight through",
+          "why": "the build exit stops being cross-checked, so gate_passed alone decides — the honour system conductor deliberately refuses, and a reviewer reporting success for a build it never ran walks straight through",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -423,7 +423,7 @@
           "replace": "if ($v.gate_passed == true) then \"PASS\""
         },
         {
-          "why": "the producer is no longer required to differ from the implementor, so a lane gates its own diff \u2014 a self-report becoming a gate, which is the rule reported -> verified already refuses",
+          "why": "the producer is no longer required to differ from the implementor, so a lane gates its own diff — a self-report becoming a gate, which is the rule reported -> verified already refuses",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -455,7 +455,7 @@
           "replace": "  exit 0"
         },
         {
-          "why": "any dod_gate artifact satisfies the frozen definition of done, pass or fail \u2014 so a run publishes with criteria it did not meet",
+          "why": "any dod_gate artifact satisfies the frozen definition of done, pass or fail — so a run publishes with criteria it did not meet",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -463,7 +463,7 @@
           "replace": "      elif (($d | last) != null) then \"OK\""
         },
         {
-          "why": "the store no longer has to know the lane is committed, so a reviewed lane the run never recorded is pushed \u2014 the dark store that let transitions.jsonl stop two days before the session ended",
+          "why": "the store no longer has to know the lane is committed, so a reviewed lane the run never recorded is pushed — the dark store that let transitions.jsonl stop two days before the session ended",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -471,7 +471,7 @@
           "replace": "[[ \"$VERDICT\" == \"PASS\" && \"$DOD\" == \"OK\" ]] && exit 0"
         },
         {
-          "why": "the durable requirement drops to any recorded row at all, so a lane still at 'reported' passes \u2014 and a push claims committed, not reported",
+          "why": "the durable requirement drops to any recorded row at all, so a lane still at 'reported' passes — and a push claims committed, not reported",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -487,7 +487,7 @@
           "replace": "any(.[]; .to == \"durable\")"
         },
         {
-          "why": "a missing transitions.jsonl reads as recorded, so the emptiest possible store \u2014 no file at all \u2014 is the one case that passes",
+          "why": "a missing transitions.jsonl reads as recorded, so the emptiest possible store — no file at all — is the one case that passes",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -495,7 +495,7 @@
           "replace": "    RECORDED=\"OK\""
         },
         {
-          "why": "the gate stops being bound to the sha it reviewed, so a lane can pass, loop back through implementation, commit more, and still present the old PASS \u2014 the failure a reshapeable flow makes reachable",
+          "why": "the gate stops being bound to the sha it reviewed, so a lane can pass, loop back through implementation, commit more, and still present the old PASS — the failure a reshapeable flow makes reachable",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -519,7 +519,7 @@
           "replace": "for o in ${OPERANDS[1]}; do"
         },
         {
-          "why": "global options are no longer skipped, so `git -C <worktree> push` is not recognised as a push at all \u2014 and lanes RUN in worktrees, so that is the normal spelling",
+          "why": "global options are no longer skipped, so `git -C <worktree> push` is not recognised as a push at all — and lanes RUN in worktrees, so that is the normal spelling",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -535,7 +535,7 @@
           "replace": "    CANDIDATES+=(\"${o##*/}\")"
         },
         {
-          "why": "gh pr merge stops being a gated verb, so the gate blocks opening a PR and not merging one \u2014 it gates the announcement, not the act",
+          "why": "gh pr merge stops being a gated verb, so the gate blocks opening a PR and not merging one — it gates the announcement, not the act",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -551,7 +551,7 @@
           "replace": "if false; then"
         },
         {
-          "why": "the repo goes back to being resolved from the session cwd, ignoring -C \u2014 measured live: three pushes against a lane with 3 Criticals reached the network, because the orchestrator sits in the main repo while lanes live in worktrees",
+          "why": "the repo goes back to being resolved from the session cwd, ignoring -C — measured live: three pushes against a lane with 3 Criticals reached the network, because the orchestrator sits in the main repo while lanes live in worktrees",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -559,7 +559,7 @@
           "replace": ": "
         },
         {
-          "why": "skip_globals returns through a subshell again, so the -C capture silently does nothing \u2014 an assignment inside $(...) never reaches the caller",
+          "why": "skip_globals returns through a subshell again, so the -C capture silently does nothing — an assignment inside $(...) never reaches the caller",
           "env": "GATE_GUARD_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/hooks/gate-guard.sh",
@@ -572,7 +572,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "the stall guard is skipped entirely, so a lane that has yielded nothing across restarts is restarted forever \u2014 the shape that ran for a day",
+          "why": "the stall guard is skipped entirely, so a lane that has yielded nothing across restarts is restarted forever — the shape that ran for a day",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -580,7 +580,7 @@
           "replace": "  if false; then"
         },
         {
-          "why": "progress stops counting: fresh evidence no longer exempts a lane, turning a stall detector into a plain retry counter \u2014 the budget conductor deliberately does not use",
+          "why": "progress stops counting: fresh evidence no longer exempts a lane, turning a stall detector into a plain retry counter — the budget conductor deliberately does not use",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -609,7 +609,7 @@
       "expect": "green",
       "mutations": [
         {
-          "why": "a subcommand is renamed and the prompt is not updated \u2014 the case the derivation exists to catch. A hardcoded list would stay green.",
+          "why": "a subcommand is renamed and the prompt is not updated — the case the derivation exists to catch. A hardcoded list would stay green.",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
@@ -639,6 +639,51 @@
           "file": "plugins/lirbox/agents/lirbox-herdr-orchestrator.md",
           "find": "`POLICY-OVERRIDE` plus a reason on the command line is the stated escape",
           "replace": "`POLICY-NONESUCH` plus a reason on the command line is the stated escape"
+        }
+      ]
+    },
+    "harness-flags-come-from-the-table": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "omp goes back to being started with --agent — a flag it does not have. omp ignores unknown flags without error, so the lane reports a clean start, shows a healthy pane, and runs for hours with no invariants at all",
+          "env": "HARNESS_KINDS_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/harness-kinds.sh",
+          "find": "  omp      '--append-system-prompt'",
+          "replace": "  omp      '--agent'"
+        },
+        {
+          "why": "omp's effort flag is dropped from the table, so every omp lane silently runs at the harness default while its profile says otherwise — the model-policy drift, one level lower",
+          "env": "HARNESS_KINDS_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/harness-kinds.sh",
+          "find": "  omp      '--thinking'",
+          "replace": "  omp      ''"
+        },
+        {
+          "why": "a harness herdr cannot start stops being refused, so the lane cuts a worktree and a pane before dying on herdr's enum error — leaving a checkout for a human to clean up and reading as a broken orchestrator",
+          "env": "HARNESS_KINDS_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/harness-kinds.sh",
+          "find": "  jcode    no\n)",
+          "replace": "  jcode    yes\n)"
+        },
+        {
+          "why": "the launch vector is written out by hand again instead of coming from the table, which is correct for claude and wrong for every harness that spells its flags differently",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    DA=(agent start \"$NAME\" --kind \"$KIND\" --pane '<pane>' --timeout \"$READY_MS\" -- \"${LAUNCH[@]}\")",
+          "replace": "    DA=(agent start \"$NAME\" --kind \"$KIND\" --pane '<pane>' --timeout \"$READY_MS\" -- --agent \"$PROFILE\" --model \"$MODEL\" --effort \"$EFFORT\")"
+        },
+        {
+          "why": "the hook stops recognising a file-carried profile, so it denies every correct omp spawn as having no bounded context — and an orchestrator meeting a refusal on the sanctioned command POLICY-OVERRIDEs its way around a gate that was working",
+          "env": "MODEL_POLICY_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/model-policy.sh",
+          "find": "  for _f in \"${HK_AGENT_FLAG[$_k]-}\";  do [[ -n \"$_f\" ]] && ROLE[$_f]=ctx;    done",
+          "replace": "  for _f in \"--agent\";  do [[ -n \"$_f\" ]] && ROLE[$_f]=ctx;    done"
         }
       ]
     }

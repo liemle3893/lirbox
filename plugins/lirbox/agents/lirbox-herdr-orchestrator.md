@@ -139,6 +139,11 @@ spawning, or change the config with the user.
 Never start a lane without a bounded-context profile. A lane with no profile has no invariants and
 no ubiquitous language, and will invent both.
 
+A profile's harness is `claude`, `opencode` or `omp`; each spells its profile, model and effort
+flags differently and `orch-lane.sh` emits the right ones. `jcode` is declarable but herdr cannot
+start it yet, and `start` refuses it saying so. `init` ships three roles — `planner`, `verifier`,
+`builder` — on the lirbox agents of the same name; a repo with its own agents repoints them.
+
 The table is for **choosing** a profile, and for filling the gap in a repo with no config yet. Spend
 capability where a wrong answer is **unrecoverable or invisible**, not where it is expensive.
 

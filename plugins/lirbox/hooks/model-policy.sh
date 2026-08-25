@@ -21,6 +21,13 @@
 emulate -L zsh
 setopt no_nomatch
 
+# The harness table: kinds, and which flag carries the profile / model / effort
+# on each. Same file orch-lane.sh and orch-config.sh read.
+# HARNESS_KINDS_OVERRIDE is the mutation-testing escape hatch scripts/prove-checks.mjs
+# needs: a check that guards this table can only be proven if the table it loads
+# can be pointed somewhere else. Unset in every real run.
+source "${HARNESS_KINDS_OVERRIDE:-${0:h}/../scripts/harness-kinds.sh}"
+
 IN=$(cat)
 [[ "$(print -r -- "$IN" | jq -r '.agent_type // ""')" == "lirbox:lirbox-herdr-orchestrator" ]] || exit 0
 
@@ -39,17 +46,36 @@ done
 (( s )) || exit 0
 
 LANE="${TOK[s+3]}"
-local KIND="" MODEL="" PROFILE="" EFFORT=""
+
+# Which flag means what, derived from the harness table rather than listed here.
+# A hardcoded `--agent` was correct while claude and opencode were the only
+# harnesses and silently wrong the moment one carried its profile as
+# `--append-system-prompt <file>`: the hook saw no --agent, and denied every
+# such spawn as having no bounded context. Adding a harness must not mean
+# remembering to edit a hook.
+typeset -A ROLE
+local _k _f
+for _k in ${=$(hk_kinds)}; do
+  for _f in "${HK_AGENT_FLAG[$_k]-}";  do [[ -n "$_f" ]] && ROLE[$_f]=ctx;    done
+  for _f in "${HK_MODEL_FLAG[$_k]-}";  do [[ -n "$_f" ]] && ROLE[$_f]=model;  done
+  for _f in "${HK_EFFORT_FLAG[$_k]-}"; do [[ -n "$_f" ]] && ROLE[$_f]=effort; done
+done
+ROLE[--kind]=kind
+
+local KIND="" MODEL="" PROFILE="" EFFORT="" CTX=""
+local tok flag val
 for (( i = s; i <= $#TOK; i++ )); do
-  case "${TOK[i]}" in
-    --kind)     KIND="${TOK[i+1]}" ;;
-    --kind=*)   KIND="${TOK[i]#--kind=}" ;;
-    --model)    MODEL="${TOK[i+1]}" ;;
-    --model=*)  MODEL="${TOK[i]#--model=}" ;;
-    --effort)   EFFORT="${TOK[i+1]}" ;;
-    --effort=*) EFFORT="${TOK[i]#--effort=}" ;;
-    --agent)    PROFILE="${TOK[i+1]}" ;;
-    --agent=*)  PROFILE="${TOK[i]#--agent=}" ;;
+  tok="${TOK[i]}"
+  if [[ "$tok" == *=* && "$tok" == -* ]]; then
+    flag="${tok%%=*}"; val="${tok#*=}"
+  else
+    flag="$tok"; val="${TOK[i+1]}"
+  fi
+  case "${ROLE[$flag]-}" in
+    kind)   KIND="$val" ;;
+    model)  MODEL="$val" ;;
+    effort) EFFORT="$val" ;;
+    ctx)    CTX="$val" ;;
   esac
 done
 
@@ -62,8 +88,9 @@ deny() { print -u2 -r -- "DENIED: $1"; exit 2 }
 
 # Universal, config or not.
 [[ -n "$KIND" ]] || deny "\`herdr agent start $LANE\` names no --kind. Say which harness."
-[[ -n "$PROFILE" ]] || deny "lane '$LANE' has no --agent profile. A lane without a bounded-context
-profile has no invariants and no ubiquitous language, and will invent both."
+[[ -n "$CTX" ]] || deny "lane '$LANE' has no bounded-context profile — no --agent and no
+--append-system-prompt. A lane without one has no invariants and no ubiquitous
+language, and will invent both."
 
 if [[ ! -r "$CFG" ]]; then
   # An earlier version allowed this and printed a note. Measured: stderr from a
@@ -76,6 +103,45 @@ if [[ ! -r "$CFG" ]]; then
 Then fill it WITH THE USER — profiles they want, and which harness and model each
 one runs on — before starting any lane. One conversation now replaces a decision
 per lane, and a wrong guess here is invisible until it has cost a wave."
+fi
+
+# CTX is what the command line carries: a profile name for the name-carried
+# harnesses, and a PATH for the file-carried ones. Resolve it back to a declared
+# profile by name first, then by the agent id a profile points at, then by the
+# basename of that path. Without this last step every omp spawn looks like an
+# undeclared profile called "/Users/.../lirbox-builder.md".
+PROFILE="$CTX"
+if ! jq -e --arg p "$PROFILE" '.profiles[$p]' "$CFG" >/dev/null 2>&1; then
+  local BASE="${CTX:t:r}"
+  # Match on the KIND too. Without it, two profiles that share an agent file —
+  # the same role declared on two harnesses, which is the normal way to compare
+  # them — collapse to whichever jq listed first, and the hook then checks the
+  # spawn against a profile it was never meant to be. That reads as a model
+  # policy violation on a perfectly correct command.
+  local -a CAND
+  CAND=(${(f)"$(jq -r --arg c "$CTX" --arg b "$BASE" --arg k "$KIND" '
+    .profiles | to_entries
+    | map(select(.value.kind == $k))
+    | map(select((.value.agent // .key) as $a | $a == $c or $a == $b or .key == $b))
+    | .[].key' "$CFG" 2>/dev/null)"})
+  if (( $#CAND == 1 )); then
+    PROFILE="$CAND[1]"
+  elif (( $#CAND > 1 )); then
+    # Genuinely ambiguous: same harness, same agent, different profiles. Accept
+    # the one this spawn actually matches rather than guessing, and refuse if
+    # none matches — a silent pick here would wave through a model nobody chose.
+    PROFILE=""
+    local c
+    for c in "${CAND[@]}"; do
+      jq -e --arg p "$c" --arg m "$MODEL" --arg e "$EFFORT" \
+        '.profiles[$p] | (((.model // "") == $m) and ((.effort // "") == $e))' \
+        "$CFG" >/dev/null 2>&1 && { PROFILE="$c"; break }
+    done
+    [[ -n "$PROFILE" ]] || deny "lane '$LANE' names agent '$BASE' on --kind $KIND, which matches more
+than one declared profile (${(j:, :)CAND}), and this spawn's --model/--effort
+matches none of them. Name the profile you mean by starting through
+\`orch-lane.sh start --profile <p>\`."
+  fi
 fi
 
 WANT=$(jq -r --arg p "$PROFILE" '.profiles[$p] // empty | "\(.kind)\t\(.model // "")\t\(.effort // "")"' "$CFG" 2>/dev/null)
