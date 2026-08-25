@@ -613,8 +613,8 @@
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
-          "find": "gate)\n  # Dispatch the code gate for a lane, as its OWN lane.",
-          "replace": "reap)\n  # Dispatch the code gate for a lane, as its OWN lane."
+          "find": "\ngate)\n",
+          "replace": "\nreap)\n"
         },
         {
           "why": "the agent prompt stops naming the gate verb, so the orchestrator meets gate-guard's refusal with no idea the command exists",
@@ -684,6 +684,43 @@
           "file": "plugins/lirbox/hooks/model-policy.sh",
           "find": "  for _f in \"${HK_AGENT_FLAG[$_k]-}\";  do [[ -n \"$_f\" ]] && ROLE[$_f]=ctx;    done",
           "replace": "  for _f in \"--agent\";  do [[ -n \"$_f\" ]] && ROLE[$_f]=ctx;    done"
+        }
+      ]
+    },
+    "gate-runs-in-session": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the gate goes back to always cutting a pane. gate-guard.sh asks only that the producer is not the implementor, so the pane buys nothing — and brings back the spawn surface that killed the 2026-08 gate: `claude --agent gate` with no such agent, reported as a startup timeout and indistinguishable from a cold pane",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  [[ \"$KIND\" == claude && $PANE_MODE -eq 0 ]] && MODE=subagent",
+          "replace": "  [[ \"$KIND\" == nothing ]] && MODE=subagent"
+        },
+        {
+          "why": "the harness test is dropped, so an omp or opencode gate profile is run in-session as a claude subagent. The declared reviewer is silently replaced and the profile table stops meaning anything",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  [[ \"$KIND\" == claude && $PANE_MODE -eq 0 ]] && MODE=subagent",
+          "replace": "  [[ $PANE_MODE -eq 0 ]] && MODE=subagent"
+        },
+        {
+          "why": "the brief stops telling an in-session gate which checkout to work in. A subagent inherits the orchestrator's cwd, so it reviews whatever tree that happens to be — a PASS written against the wrong diff",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    WHERE=\"Work in the checkout at \\`$WTREE\\` — cd there first. It is on branch",
+          "replace": "    WHERE=\"Review the lane's branch. It is on branch"
+        },
+        {
+          "why": "the build_exit honesty paragraph is dropped from the brief both modes share, so a reviewer reporting gate_passed over a build it never ran has nothing telling it not to — the single failure the whole gate mechanism exists to stop",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "build_exit is read, not taken on trust: the gate cannot pass with a non-zero",
+          "replace": "build_exit is a field to fill in with a non-zero"
         }
       ]
     }
