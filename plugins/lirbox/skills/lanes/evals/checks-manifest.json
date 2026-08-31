@@ -874,6 +874,43 @@
           "replace": "const judged = Object.values(lanes).filter((l) => l.verifier_pane === 'allowed').length;"
         }
       ]
+    },
+    "hooks-stay-out-of-other-work": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "pane-guard stops asking WHO is calling, so a hook installed at user scope denies `herdr agent start` in every session on the machine — and a denial from a hook the session never heard of is uninterpretable, which is how one got read as 'another session owns this pane'",
+          "env": "PANE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/pane-guard.sh",
+          "find": "[[ \"$(print -r -- \"$IN\" | jq -r '.agent_type // \"\"')\" == \"lirbox:lirbox-herdr-orchestrator\" ]] || exit 0",
+          "replace": "[[ -n \"$IN\" ]] || exit 0"
+        },
+        {
+          "why": "model-policy stops asking who is calling, so every session's herdr command is required to name a profile from a config that session has never had",
+          "env": "MODEL_POLICY_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/model-policy.sh",
+          "find": "[[ \"$(print -r -- \"$IN\" | jq -r '.agent_type // \"\"')\" == \"lirbox:lirbox-herdr-orchestrator\" ]] || exit 0",
+          "replace": "[[ -n \"$IN\" ]] || exit 0"
+        },
+        {
+          "why": "gate-guard stops requiring a run on file, so every `git push` and `gh pr create` in every repo on this machine is refused for a lane that does not exist",
+          "env": "GATE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/gate-guard.sh",
+          "find": "(( $#RECORDS )) || exit 0",
+          "replace": "(( $#RECORDS )) || { print -u2 -r -- \"DENIED: no orchestration run\"; exit 2 }"
+        },
+        {
+          "why": "the scope is drawn on HERDR_ENV instead of on the subject — which looks right, and ungates precisely the case the spawn door exists for: orch-lane.sh sets HERDR_ENV per invocation, so an orchestrator driving herdr from a plain terminal has it unset in the hook's own env while its spawns still land",
+          "env": "PANE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/pane-guard.sh",
+          "find": "[[ \"$(print -r -- \"$IN\" | jq -r '.agent_type // \"\"')\" == \"lirbox:lirbox-herdr-orchestrator\" ]] || exit 0",
+          "replace": "[[ \"${HERDR_ENV:-}\" == 1 ]] || exit 0"
+        }
+      ]
     }
   }
 }
