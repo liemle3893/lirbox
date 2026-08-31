@@ -34,6 +34,10 @@ if (typeof args === 'string') args = JSON.parse(args)
 
 const NAME     = 'snap'
 const STATE    = `.workflows/state/${NAME}.json`
+// The state WRITER. The conductor cannot touch fs, so a worker runs this — but
+// only the payload travels through the prompt; the merge, the atomic write and
+// the validation live in the script. A literal string is not a side effect.
+const CHECKPOINT = '${CLAUDE_PLUGIN_ROOT}/skills/conductor/scripts/checkpoint.cjs'
 const BRANCH   = (args && args.branch) ? args.branch : `wf/${NAME}`
 const BASE     = (args && args.base) ? args.base : ''
 const WORKTREE = `.worktrees/${NAME}`
@@ -256,14 +260,16 @@ async function checkpoint(phaseTitle) {
   await agent(
     `Persist durable workflow state to the MAIN repo (do NOT cd into the worktree). Run EXACTLY:
 
-mkdir -p .workflows/state
-cat > .workflows/state/.${NAME}.payload.json <<'DURABLE_JSON'
+node ${CHECKPOINT} --state '${STATE}' <<'DURABLE_JSON'
 ${payload}
 DURABLE_JSON
-node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${NAME}.payload.json';let prev={};try{prev=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){};const s=JSON.parse(fs.readFileSync(p,'utf8'));const n=new Date().toISOString();s.startedAt=prev.startedAt||n;s.updatedAt=n;fs.writeFileSync(f,JSON.stringify(s,null,2));fs.unlinkSync(p)"
-node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
 
-Return whether the file was written and parses.`,
+The payload is already generated — do not edit, reformat or re-key it. The script
+preserves startedAt across resumes, writes through a temp file so an interrupted
+checkpoint cannot leave truncated JSON where the resume protocol looks, and
+validates the result before it becomes the state file.
+
+Return the line it printed, or its error.`,
     { label: `checkpoint:${phaseTitle}`, phase: phaseTitle, model: 'haiku',
       schema: STATE_WRITE_SCHEMA },
   )
@@ -697,14 +703,16 @@ FULL DoD (JSON): ${JSON.stringify(DOD_CRITERIA)}`,
     await agent(
       `Persist durable workflow state to the MAIN repo (do NOT cd into the worktree). Run EXACTLY:
 
-mkdir -p .workflows/state
-cat > .workflows/state/.${NAME}.payload.json <<'DURABLE_JSON'
+node ${CHECKPOINT} --state '${STATE}' <<'DURABLE_JSON'
 ${payload}
 DURABLE_JSON
-node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${NAME}.payload.json';let prev={};try{prev=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){};const s=JSON.parse(fs.readFileSync(p,'utf8'));const n=new Date().toISOString();s.startedAt=prev.startedAt||n;s.updatedAt=n;fs.writeFileSync(f,JSON.stringify(s,null,2));fs.unlinkSync(p)"
-node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
 
-Return whether the file was written and parses.`,
+The payload is already generated — do not edit, reformat or re-key it. The script
+preserves startedAt across resumes, writes through a temp file so an interrupted
+checkpoint cannot leave truncated JSON where the resume protocol looks, and
+validates the result before it becomes the state file.
+
+Return the line it printed, or its error.`,
       { label: 'dodgate:escalate', phase: 'DoDGate', model: 'haiku',
         schema: { type: 'object', additionalProperties: false, required: ['written'], properties: { written: { type: 'boolean' }, path: { type: 'string' } } } },
     )
@@ -858,14 +866,16 @@ RETURN:
     await agent(
       `Persist durable workflow state to the MAIN repo (do NOT cd into the worktree). Run EXACTLY:
 
-mkdir -p .workflows/state
-cat > .workflows/state/.${NAME}.payload.json <<'DURABLE_JSON'
+node ${CHECKPOINT} --state '${STATE}' <<'DURABLE_JSON'
 ${payload}
 DURABLE_JSON
-node -e "const fs=require('fs');const f='${STATE}';const p='.workflows/state/.${NAME}.payload.json';let prev={};try{prev=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){};const s=JSON.parse(fs.readFileSync(p,'utf8'));const n=new Date().toISOString();s.startedAt=prev.startedAt||n;s.updatedAt=n;fs.writeFileSync(f,JSON.stringify(s,null,2));fs.unlinkSync(p)"
-node -e "JSON.parse(require('fs').readFileSync('${STATE}','utf8'))" && echo OK
 
-Return whether the file was written and parses.`,
+The payload is already generated — do not edit, reformat or re-key it. The script
+preserves startedAt across resumes, writes through a temp file so an interrupted
+checkpoint cannot leave truncated JSON where the resume protocol looks, and
+validates the result before it becomes the state file.
+
+Return the line it printed, or its error.`,
       { label: 'failure:' + AT, phase: AT, model: 'haiku',
         schema: STATE_WRITE_SCHEMA },
     )

@@ -56,6 +56,13 @@ Three things, and confusing them is where the bugs are:
 
 A file may hold one record or an array of them — a live lane appends its own file; a seeded run
 ships one array. Both read identically.
+
+**Nothing writes an `evidence/` record by hand.** `scripts/evidence.mjs` does, and it TAKES every
+value the contract distrusts rather than accepting it: `gated_sha`/`merged_sha`/`verified_sha` from
+the checkout, `build_exit` from running the build, `gate_passed` and `passed` derived from those.
+Handing a lane a JSON template plus a paragraph asking it to report the exit code honestly is a
+request, and a reviewer that reports a green build it never ran is the exact failure the gate
+exists to stop.
 </core-model>
 
 <states>
@@ -211,6 +218,46 @@ starting — unless you compare HEAD against `sha_at_dispatch`. That field exist
 PR or deployed is not recoverable by throwing away a checkout. Record that moment as an
 `externalized` evidence record; after it, every recovery is manual and no script will tell you so.
 
+### 6b2. Size it before you spend it
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/triage.mjs --run <slug>
+```
+
+A protocol, deliberately not an agent: an agent spawned to decide whether to spend agents adds the
+cost it exists to remove, and the cases that hurt are the small ones. Most of the inputs are
+measured anyway — items, areas touched, whether a criterion names a command and an expected value.
+
+It prints the **ceiling** the measurements support, and `start --role verifier --for <lane>` refuses
+above it: a lane whose every criterion is deterministic gets no pane, because re-running those is
+what verifies them. `--because "<reason>"` proceeds and writes a `decisions/` record — the escape is
+the judgement a file count cannot make, and it is recorded rather than waived.
+
+It gates on positive evidence only. No criteria on file refuses nothing.
+
+### 6c. Verify without spending a lane
+
+A criterion that is a command and an exit code is verified by re-running it, not by re-deriving an
+environment around it. Independence is about **minds, not hands**: `reported → verified` refuses a
+self-report because the party judging must not be the party that produced it — and a script
+re-running the command at the same sha satisfies that in seconds.
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/evidence.mjs verify <lane> --run <slug> \
+  --check "unit::<cmd>" --check "typecheck::<cmd>" --summary "..."
+```
+
+It refuses `--produced-by <the lane>`, and refuses outright when HEAD has moved off the sha the
+lane's report names — numbers taken from a different tree describe different code. The record it
+writes satisfies the transition.
+
+What a verifier LANE is for is what a re-run cannot do: **breaking the check on purpose** to show it
+can fail, and judging whether the green means what the criterion says. Spend a lane on that, and on
+a **batch** — one verifier per wave, not per lane. A verifier per task is how a change involving
+almost no code costs N spawns, N installs, N builds and N contexts for N exit codes. Re-run the
+smallest scope that could go red: a suite that cannot observe the change's surface adds latency,
+not evidence, and a 9-90 minute end-to-end run belongs once per wave against the merged result.
+
 ### 7. Gate the work before it leaves
 
 ```
@@ -283,6 +330,11 @@ from graphify touch-sets — the right next step, but the skeleton has to surviv
 - `scripts/transition.mjs` — the only sanctioned writer. Exports `TABLE`, `check`, `loadRun`,
   `stateOf`, `ctxFor` for reuse.
 - `scripts/reconcile.mjs` — recompute from artifacts, diff against the store.
+- `scripts/triage.mjs` — the rung the measurements support, and per lane whether a verifier pane
+  is worth cutting. A protocol, not an agent; `orch-lane.sh start` enforces it.
+- `scripts/evidence.mjs` — the only sanctioned writer of `evidence/`. `gate` (runs the build),
+  `report` (refuses an empty branch), `verify` (runs the checks). Lanes run it; they never author
+  the JSON.
 - `scripts/views.sql` — DuckDB views, including `board`.
 - `scripts/test-transitions.mjs` — `node --test`; every illegal pair in the matrix is *shown*
   refused, not asserted.

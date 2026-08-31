@@ -172,9 +172,34 @@ if (contract(paneBrief) !== contract(subText)) {
      + 'The shape, gated_sha and the build_exit paragraph are what stop a gate '
      + 'going green on the honour system; a per-mode copy is a per-mode loophole.');
 }
-for (const needle of ['"gated_sha"', '"build_exit"', 'build_exit is read, not taken on trust',
-                      '"produced_by": "gate-l1"']) {
-  if (!subText.includes(needle)) fail(`the subagent brief dropped ${needle}`);
+// The verdict is FILED BY A COMMAND, not typed. Every field the contract does not
+// trust — gated_sha, build_exit, gate_passed — is taken by that script from the
+// checkout and from running the build. Handing the reviewer a JSON template and
+// a paragraph asking it to read the exit code honestly is a request, and the one
+// failure this gate exists to stop is a reviewer that does not honour it.
+if (!/evidence\.mjs gate/.test(subText)) {
+  fail('the brief does not tell the gate to file its verdict with evidence.mjs. Without '
+     + 'it, gated_sha and build_exit are numbers a language model retypes — and the '
+     + 'failure this whole mechanism exists to stop is exactly a reviewer reporting a '
+     + 'green build it never ran.');
+}
+if (!/--build\b/.test(subText)) {
+  fail('the brief never passes --build, so the script has no build to run and the exit '
+     + 'code goes back to being reported rather than taken.');
+}
+for (const authored of ['--critical', '--high', '--summary']) {
+  if (!subText.includes(authored)) fail(`the brief never asks for ${authored} — the counts and `
+    + 'the summary are the only judgement in the record; dropping one leaves the script '
+    + 'filing a verdict nobody made.');
+}
+// And the template must be GONE. A brief that names the script and still carries the
+// JSON leaves the old path open, which is the path that gets taken.
+for (const relic of ['"gate_passed":', '"gated_sha":', '"build_exit":']) {
+  if (subText.includes(relic)) {
+    fail(`the brief still hands the reviewer a \`${relic}\` field to fill in. A script beside `
+       + 'a template is a template: the derived value stops being derived the moment the '
+       + 'reviewer can write it instead.');
+  }
 }
 
 cleanup();
