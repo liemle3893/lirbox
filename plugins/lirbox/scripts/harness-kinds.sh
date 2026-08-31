@@ -114,14 +114,24 @@ hk_herdr_supports() {
   (( avail[(Ie)$1] ))
 }
 
+# The plugin root, captured HERE at source time rather than inside the function
+# below. zsh sets $0 to the FUNCTION NAME inside a function (FUNCTION_ARGZERO,
+# on by default), so `${0:h:h}` there expanded to `.` and the fallback looked
+# for `./agents/<a>.md` — never found, never an error. Every plugin agent then
+# read as "no markdown", which for hk_agent_file's callers means "built-in, tool
+# set unknown, accept it": a lookup that cannot fail and therefore cannot warn.
+# At this file's top level $0 is this file, which is what the fallback meant.
+typeset -g HK_PLUGIN_ROOT="${0:h:h}"
+
 # Where an agent markdown lives, for the harnesses that take a path instead of a
 # name. Repo first: a project that ships its own `.claude/agents/<p>.md` means
 # that one, not the plugin's copy of the same name.
 hk_agent_file() {
   local agent="$1" root="${2:-$PWD}" c
+  local pr="${CLAUDE_PLUGIN_ROOT:-$HK_PLUGIN_ROOT}"
   for c in "$root/.claude/agents/$agent.md" \
-           "${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/agents/$agent.md" \
-           "${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/agents/lirbox-$agent.md" \
+           "$pr/agents/$agent.md" \
+           "$pr/agents/lirbox-$agent.md" \
            "$HOME/.claude/agents/$agent.md"; do
     [[ -r "$c" ]] && { print -r -- "$c"; return 0 }
   done

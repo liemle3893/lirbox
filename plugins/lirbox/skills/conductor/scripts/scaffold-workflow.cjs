@@ -1017,6 +1017,10 @@ if (typeof args === 'string') args = JSON.parse(args)
 
 const NAME     = '${name}'
 const STATE    = \`.workflows/state/\${NAME}.json\`
+// The state WRITER. The conductor cannot touch fs, so a worker runs this — but
+// only the payload travels through the prompt; the merge, the atomic write and
+// the validation live in the script. A literal string is not a side effect.
+const CHECKPOINT = '\${CLAUDE_PLUGIN_ROOT}/skills/conductor/scripts/checkpoint.cjs'
 const BRANCH   = (args && args.branch) ? args.branch : \`wf/\${NAME}\`
 const BASE     = (args && args.base) ? args.base : '${base === true ? '' : base}'
 const WORKTREE = \`.worktrees/\${NAME}\`

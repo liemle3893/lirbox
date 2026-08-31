@@ -176,8 +176,8 @@
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
-          "find": "  [[ -n \"$BASE\" ]] || BASE=$(jq -r '.lanes.base_branch // empty' \"$CFG\")",
-          "replace": "  [[ -n \"$BASE\" ]] || BASE=dev"
+          "find": "cfg_base() { jq -r '.lanes.base_branch // empty' \"$CFG\" }",
+          "replace": "cfg_base() { jq -r '.lanes.base_branch // \"dev\"' \"$CFG\" }"
         },
         {
           "why": "an unresolvable base branch is accepted, moving the failure from config time to spawn time where it reads as a broken orchestrator",
@@ -715,12 +715,118 @@
           "replace": "    WHERE=\"Review the lane's branch. It is on branch"
         },
         {
-          "why": "the build_exit honesty paragraph is dropped from the brief both modes share, so a reviewer reporting gate_passed over a build it never ran has nothing telling it not to — the single failure the whole gate mechanism exists to stop",
+          "why": "the verdict goes back to a JSON template the reviewer fills in, so gated_sha and build_exit are numbers a language model retypes instead of values the script takes — a gate reporting a green build it never ran has nothing but a paragraph asking it not to",
           "env": "ORCH_LANE_OVERRIDE",
           "root": "repo",
           "file": "plugins/lirbox/scripts/orch-lane.sh",
-          "find": "build_exit is read, not taken on trust: the gate cannot pass with a non-zero",
-          "replace": "build_exit is a field to fill in with a non-zero"
+          "find": "    node $EVIDENCE gate $NAME --run $RUN \\\\",
+          "replace": "    write this JSON yourself: { \"gate_passed\": ..., \"gated_sha\": ..., \\\\"
+        },
+        {
+          "why": "the build command stops being passed, so the script has nothing to run and the exit code returns to being self-reported",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "      --build \"<the build command for this repo>\" \\\\",
+          "replace": "      --note \"the build passed\" \\\\"
+        }
+      ]
+    },
+    "conductor-lane-lands-on-its-branch": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the brief stops naming the merge back onto the lane branch, so conductor's work stays on wf/<lane> and the gate reviews an empty diff — the lane reports complete, the gate reports passed, and nothing shipped",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    git merge --no-ff wf/$NAME",
+          "replace": "    # conductor already committed"
+        },
+        {
+          "why": "the brief no longer asks for the log that confirms the lane branch is non-empty, so a merge that silently no-ops reads exactly like one that landed",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    git log --oneline $BRANCH ^$BASE     # must be non-empty",
+          "replace": "    # the merge is done"
+        },
+        {
+          "why": "the run name is left to conductor to kebab out of the goal, so a restarted pane re-briefed with the same goal forks a second workflow and orphans the first one's state file",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "run name \\`$NAME\\`",
+          "replace": "a run name of your choosing"
+        },
+        {
+          "why": "a harness that cannot resolve Skill(lirbox:conductor) is accepted, so the lane implements the goal by hand and looks like a working conductor lane until you read the branch",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  [[ \"$KIND\" == claude ]] || die \"profile '$PROFILE' is a $KIND lane",
+          "replace": "  [[ \"$KIND\" == anything ]] || print -r -- \"profile '$PROFILE' is a $KIND lane"
+        },
+        {
+          "why": "a claude profile whose agent carries no Skill tool is accepted, so the default path — init writes default_profile=builder, agent lirbox-builder — starts a lane that cannot invoke the skill and hand-implements the goal instead",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    if [[ -n \"$TOOLS\" && \"$TOOLS\" != *Skill* ]]; then",
+          "replace": "    if [[ -n \"$TOOLS\" && \"$TOOLS\" != *o* ]]; then"
+        },
+        {
+          "why": "a successful brief goes back to exiting 1 — the `[[ ]] && die` tail is false exactly when the lane DID submit — so every caller's `|| die` reports a failed dispatch over a lane that is working, and the documented answer to that is to start a second one",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "  if [[ \"$ST\" == idle ]]; then\n    die \"brief did not submit — '$NAME' is still idle. Check the pane by hand.\"\n  fi",
+          "replace": "  [[ \"$ST\" == idle ]] && die \"brief did not submit — '$NAME' is still idle.\" "
+        }
+      ]
+    },
+    "deterministic-checks-cost-no-lane": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "independence goes back to being a property of the HAND, so re-running a command that already has an exit code costs a spawn, an install, a build and a context — once per lane, for every `go test` in the run",
+          "env": "ORCH_AGENT_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/agents/lirbox-herdr-orchestrator.md",
+          "find": "- **Never JUDGE your own lane's result.**",
+          "replace": "- **Never verify with your own hands.** A pane that is not the implementor does that. Also:"
+        },
+        {
+          "why": "the batching rule disappears, so one verifier pane per task returns and a change involving almost no code takes hours of spawns",
+          "env": "ORCH_AGENT_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/agents/lirbox-herdr-orchestrator.md",
+          "find": "- **One verifier per WAVE, not per lane.**",
+          "replace": "- Verifiers are spawned as needed."
+        },
+        {
+          "why": "the verify command is dropped from evidence.mjs, so a deterministic criterion has no mechanism and falls back to a lane",
+          "env": "EVIDENCE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/skills/lanes/scripts/evidence.mjs",
+          "find": "} else if (cmd === 'verify') {",
+          "replace": "} else if (cmd === 'verify-disabled') {"
+        },
+        {
+          "why": "gate_passed becomes a caller-supplied flag again, so a reviewer declares its own verdict instead of the script deriving it from the build exit it observed",
+          "env": "EVIDENCE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/skills/lanes/scripts/evidence.mjs",
+          "find": "    gate_passed: critical === 0 && high === 0 && buildExit === 0,",
+          "replace": "    gate_passed: flags['gate-passed'] === 'true',"
+        },
+        {
+          "why": "nothing is executed any more, so build_exit and the verify exits go back to being numbers the record was told rather than values it took",
+          "env": "EVIDENCE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/skills/lanes/scripts/evidence.mjs",
+          "find": "import { execFileSync, spawnSync } from 'node:child_process';",
+          "replace": "import { execFileSync } from 'node:child_process';\nconst spawnSyncX = null;"
         }
       ]
     }

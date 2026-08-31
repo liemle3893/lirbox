@@ -5,6 +5,7 @@
 #   orch-lane.sh start   <name> --profile <p> --run <slug> [--branch <b>] [--base <b>]
 #   orch-lane.sh restart <name> --run <slug> [--profile <p>]
 #   orch-lane.sh gate    <lane> --run <slug> [--profile <p>] [--pane]
+#   orch-lane.sh conductor <lane> --run <slug> --goal <g> [--profile <p>]
 #   orch-lane.sh brief   <name> <file>
 #   orch-lane.sh close   <name>
 #
@@ -64,6 +65,12 @@ resolve_profile() {
   fi
 }
 
+# The base every worktree is cut from. One reader: `start` cuts the tree with it
+# and `conductor` quotes it into the brief's "is this branch actually non-empty"
+# check, and two copies of a config read is two places for a default to creep
+# back in.
+cfg_base() { jq -r '.lanes.base_branch // empty' "$CFG" }
+
 # A refusal that a rehearsal reports instead of enforcing. Named refuse(), not
 # gate(): `gate` is a subcommand below, and this is the thing that SOFTENS a
 # refusal — one word meaning two opposite things is a 3am problem. `--dry-run` issues
@@ -77,7 +84,7 @@ $1"
 }
 
 SUB="${1:-}"; shift 2>/dev/null || true
-[[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|restart|gate|brief|close] ..."
+[[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|restart|gate|conductor|brief|close] ..."
 
 # Same key as the ledger and the config — see hooks/lane-ledger.sh.
 KEY=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
@@ -88,6 +95,11 @@ SLUG=$(print -rn -- "$KEY" | shasum | cut -c1-12)
 ROOT=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)
 CFG="$HOME/.claude/lirbox-orchestrator/$SLUG.json"
 LEDGER="$HOME/.claude/lirbox-lanes/$SLUG.tsv"
+
+# The evidence writer lanes RUN. `${0:h:h}` is safe here and not inside a
+# function: at this level $0 is this script, not a function name.
+EVIDENCE="${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/skills/lanes/scripts/evidence.mjs"
+EVIDENCE="${EVIDENCE:A}"
 
 own() {
   mkdir -p "${LEDGER:h}"
@@ -159,7 +171,7 @@ invariants and no ubiquitous language, and will invent both.
   # byte-identical to what a missing --cwd produces, so the two defects hid
   # behind one message. It is a decision, like a profile: refuse rather than
   # guess which branch every worktree in this repo is cut from.
-  [[ -n "$BASE" ]] || BASE=$(jq -r '.lanes.base_branch // empty' "$CFG")
+  [[ -n "$BASE" ]] || BASE=$(cfg_base)
   [[ -n "$BASE" ]] || die "no lanes.base_branch in $CFG, and no --base given.
   Every worktree is cut from it, so guessing it wrong fails at spawn.
   Set it with the user: ${0:h}/../skills/lane-config/scripts/orch-config.sh set-lanes --base <branch>"
@@ -583,34 +595,30 @@ gate)
   cat > "$BRIEF" <<BRIEFEOF
 $WHERE
 
-Review it, and FIX every Critical and High finding in the same pass. Then build.
+Review it, and FIX every Critical and High finding in the same pass.
 
-Write your verdict to $EVID/$GLANE-code_gate.json — exactly these fields:
+Then file the verdict by RUNNING this. Do not write the JSON yourself:
 
-{
-  "kind": "code_gate",
-  "lane": "$NAME",
-  "produced_by": "$GLANE",
-  "gated_sha": "<the FULL sha of $BRANCH you actually reviewed — git rev-parse HEAD
-                 in the checkout, read it, do not copy it from this brief>",
-  "gate_passed": <true only if every Critical and High is fixed, or skipped with
-                  an explicit reason recorded below, AND the build exits 0>,
-  "critical": <count still UNRESOLVED after your fixes; 0 when gate_passed>,
-  "high":     <count still UNRESOLVED after your fixes; 0 when gate_passed>,
-  "build_cmd":  "<the command you ran>",
-  "build_exit": <its ACTUAL numeric exit code>,
-  "skipped":  [ { "title": "...", "reason": "..." } ],
-  "summary":  "one line"
-}
+    node $EVIDENCE gate $NAME --run $RUN \\
+      --build "<the build command for this repo>" \\
+      --critical <N> --high <N> \\
+      --skipped "<title>::<why it was not fixed>" \\
+      --summary "one line"
 
-gated_sha binds this verdict to the code. If the branch moves after you write
-it, the gate is stale and the push is refused — that is deliberate, because a
-run that loops back through implementation must not present an old PASS.
+It takes the reviewed sha from this checkout and the build's exit code from
+running the build itself. Neither is a number you report, because the failure
+this gate exists to stop is a reviewer reporting a green build it never ran —
+and a request not to do that is not a mechanism. \`gate_passed\` is derived from
+your counts and that exit code, so the gate cannot pass over a failing build
+whatever anyone claims.
 
-build_exit is read, not taken on trust: the gate cannot pass with a non-zero
-build no matter what gate_passed says. Report the exit code you observed — a
-gate that reports 0 for a build it did not run is the one failure this whole
-mechanism exists to stop.
+\`--critical\` and \`--high\` are what is still UNRESOLVED after your fixes, and they
+are the only judgement in the record. A finding you deliberately did not fix is
+\`--skipped\`, with the reason; it is not a finding that stops existing.
+
+If the branch moves after you file, the verdict is stale and the push is refused
+— deliberate, because a run that loops back through implementation must not
+present an old PASS.
 
 Red means stop and report observed values. Do not weaken an assertion, delete a
 test, or relax a check to reach green.
@@ -651,6 +659,168 @@ gate dispatched: $GLANE reviewing $BRANCH (lane $NAME)
   verdict -> $EVID/$GLANE-code_gate.json"
   ;;
 
+conductor)
+  # A lane whose work is a conductor workflow rather than a diff it types.
+  #
+  # Same shape as `gate`, and for the same reason: the script writes the brief
+  # because one line of it is not thinnable. Conductor commits to ITS OWN branch
+  # `wf/<name>` in its own worktree — not to the lane's branch — and
+  # gate-guard.sh gates the branch named in the dispatch record. A freehand
+  # brief that forgets the merge-back leaves the lane branch empty, so the gate
+  # reviews an empty diff and reports a clean pass. That is the one failure this
+  # subcommand exists to stop, and it is invisible in every artifact: the lane
+  # says complete, the gate says passed, the branch holds nothing.
+  #
+  # The run name is DERIVED from the lane name, never passed. It keys
+  # conductor's state file, branch and worktree, and conductor kebabs a fresh
+  # one out of the goal when it is handed a goal. So a restarted pane re-briefed
+  # with the same goal can name the run differently, fork a second workflow and
+  # orphan the first one's state. Deriving it makes a re-brief resume by
+  # construction rather than by the orchestrator remembering.
+  NAME="${1:-}"; shift 2>/dev/null || true
+  [[ -n "$NAME" ]] || die "conductor needs the lane name:
+  orch-lane.sh conductor <lane> --run <slug> --goal '<goal>' [--profile <p>]"
+  [[ "$NAME" == --* ]] && die "'$NAME' is a flag, not a lane name. The lane comes first:
+  orch-lane.sh conductor <lane> --run <slug> --goal '<goal>' [--profile <p>]"
+  local RUN="" GOAL="" PROFILE="" BRANCH="" BASE="" DRY=0
+  while (( $# )); do
+    case "$1" in
+      --run)     RUN="$2";     shift 2 ;;
+      --goal)    GOAL="$2";    shift 2 ;;
+      --profile) PROFILE="$2"; shift 2 ;;
+      --branch)  BRANCH="$2";  shift 2 ;;
+      --base)    BASE="$2";    shift 2 ;;
+      --dry-run|--dry) DRY=1;  shift   ;;
+      --kind|--model|--effort|--agent)
+        die "$1 comes from the profile, not the command line." ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  [[ -r "$CFG" ]] || die "no config for this repo; cannot resolve a profile."
+  [[ -n "$RUN" ]] || die "conductor needs --run <slug>: it names the run whose
+  dispatch record makes this lane findable again."
+  [[ -n "$GOAL" ]] || die "conductor needs --goal '<goal>'. It is what the workflow is
+  scaffolded from, and a lane briefed without one asks this pane's absent human."
+
+  [[ -n "$PROFILE" ]] || PROFILE=$(jq -r '.default_profile // empty' "$CFG")
+  [[ -n "$PROFILE" ]] || die "conductor needs --profile, and there is no default_profile in $CFG.
+  declared: $(jq -r '.profiles | keys | join(", ")' "$CFG")"
+  local KIND MODEL FLAGS EFFORT AGENT
+  resolve_profile "$PROFILE"
+  # The skill is a claude skill. On any other harness `Skill(lirbox:conductor)`
+  # resolves to nothing and the lane does the work by hand — which looks exactly
+  # like a working conductor lane until you read the branch.
+  [[ "$KIND" == claude ]] || die "profile '$PROFILE' is a $KIND lane, and lirbox:conductor is a
+  claude skill — a $KIND lane cannot invoke it and will implement the goal by
+  hand instead, which is indistinguishable from success until you read the
+  branch. Declare a claude profile for this lane."
+
+  # The kind is necessary and not sufficient: the profile's AGENT decides what
+  # the lane can actually call. lirbox's own lane agents do not carry Skill —
+  # `lirbox-builder` is Read/Edit/Write/Bash/Grep/Glob/TodoWrite, and it is what
+  # `init` writes as default_profile. Started on one of those, the lane reads a
+  # brief telling it to invoke lirbox:conductor, cannot, and implements the goal
+  # by hand instead: a healthy pane, a plausible report, and the branch is the
+  # only place the difference shows.
+  #
+  # Only decidable when the agent HAS markdown. A built-in name — general-purpose
+  # and its siblings — has no file anywhere and carries the full tool set, so an
+  # unresolvable agent is ACCEPTED. Same rule hk_agent_exists follows: cannot
+  # tell is not absence, and refusing a working config is worse than the failure.
+  local AF TOOLS
+  if AF=$(hk_agent_file "$AGENT" "$ROOT" 2>/dev/null); then
+    TOOLS=$(sed -n '/^---$/,/^---$/p' "$AF" | sed -n 's/^tools:[[:space:]]*//p')
+    if [[ -n "$TOOLS" && "$TOOLS" != *Skill* ]]; then
+      die "profile '$PROFILE' loads agent '$AGENT', whose tools do not include Skill:
+    $TOOLS
+  ($AF)
+  That lane cannot invoke lirbox:conductor. It will read the brief, fail to run
+  the skill, and implement the goal by hand — which looks like a working
+  conductor lane in every artifact except the branch. Point this profile at an
+  agent that can call Skill (a built-in like general-purpose carries them all),
+  or declare a separate profile for conductor lanes."
+    fi
+  fi
+
+  [[ -n "$BRANCH" ]] || BRANCH="$NAME"
+  [[ -n "$BASE" ]] || BASE=$(cfg_base)
+  [[ -n "$BASE" ]] || die "no lanes.base_branch in $CFG, and no --base given."
+  local BASELINE
+  BASELINE=$(jq -r '.setup.baseline // .setup.test // empty' "$CFG")
+
+  local EVID="$ROOT/.orchestration/$RUN/evidence"
+  mkdir -p "$EVID"
+  local BRIEF="$EVID/$NAME-brief.md"
+  cat > "$BRIEF" <<BRIEFEOF
+$GOAL
+
+Run this as a conductor workflow: invoke the \`lirbox:conductor\` skill with the
+run name \`$NAME\`. Use that name every time. If this pane is restarted and
+re-briefed, the same name resumes the existing state file; a name you derive
+yourself from the goal forks a second run and orphans the first one's state.
+
+${BASELINE:+Baseline: run \`$BASELINE\` before the first phase and record the exit code it
+actually returned. An inherited red is not this lane's red, and every later "it
+is green now" is measured against that number.
+
+}Conductor commits to its OWN branch \`wf/$NAME\`, in its own worktree. This lane's
+branch is \`$BRANCH\`. When the run terminates, merge it back, in this pane's
+checkout:
+
+    git merge --no-ff wf/$NAME
+    git log --oneline $BRANCH ^$BASE     # must be non-empty
+
+That diff is what the gate reviews. A lane branch with nothing on it produces a
+gate that reviews an empty diff and reports a clean pass — so the merge is part
+of the work, not cleanup afterwards. Do not \`git push\`, and do not merge onto
+\`$BASE\`.
+
+Nobody is at this pane. Where conductor's procedure asks you to confirm
+something, choose, and record the fork below rather than waiting.
+
+When it terminates, file the report by RUNNING this. Do not write the JSON
+yourself:
+
+    node $EVIDENCE report $NAME --run $RUN --base $BASE \\
+      --state "<path to the conductor state file>" \\
+      --phase "<phase name>::<what it actually did>" \\
+      --fork  "<the question>::<what you chose>::<what would overturn it>" \\
+      --summary "one line"
+
+It takes the sha from this checkout, and it refuses to file at all while this
+branch carries no commits over \`$BASE\` — which is the merge above, enforced
+rather than asked for. A report over an empty branch produces a code gate that
+reviews an empty diff and reports a clean pass, so that refusal is the point,
+not an obstacle to route around.
+
+\`--fork\` is what lets the orchestrator reverse a decision you made in its
+absence. "chose option 1" cannot be acted on; "overturned if the criteria meant
+X" can.
+
+Report numbers, not verdicts. \`complete\` is a workflow state, not a result: a
+phase conductor recorded red is red in \`--phase\` too. Do not weaken an
+assertion, delete a test, or relax a check to reach green.
+BRIEFEOF
+
+  local -a DRY_ARG=()
+  (( DRY )) && DRY_ARG=(--dry-run)
+  "$0" start "$NAME" --profile "$PROFILE" --run "$RUN" --branch "$BRANCH" --base "$BASE" \
+    "${DRY_ARG[@]}" || die "could not start the conductor lane '$NAME'."
+  if (( DRY )); then
+    print -r -- "conductor lane (rehearsal)
+  profile: $PROFILE ($KIND/$MODEL)
+  branch:  $BRANCH  (conductor works on wf/$NAME and merges back)
+  brief:   $BRIEF
+  report:  $EVID/$NAME-report.json"
+    exit 0
+  fi
+
+  "$0" brief "$NAME" "$BRIEF" || die "conductor lane '$NAME' started but the brief did not submit."
+  print -r -- "conductor lane dispatched: $NAME
+  workflow: $NAME  ->  wf/$NAME, merged back onto $BRANCH
+  report -> $EVID/$NAME-report.json"
+  ;;
+
 brief)
   NAME="${1:-}"; FILE="${2:-}"
   [[ -n "$NAME" && -n "$FILE" ]] || die "usage: orch-lane.sh brief <name> <file>"
@@ -672,7 +842,15 @@ brief)
     ST=$(h agent get "$NAME" 2>/dev/null | jq -r '.result.agent.agent_status // .result.agent_status // "unknown"')
   fi
   print -r -- "$NAME: $ST"
-  [[ "$ST" == idle ]] && die "brief did not submit — '$NAME' is still idle. Check the pane by hand."
+  # `[[ ... ]] && die` as the LAST command of the branch made a successful brief
+  # exit 1: the test is false exactly when the brief DID submit, and a false test
+  # is the script's status. Both callers wrap this in `|| die`, so every
+  # successful dispatch reported "the brief did not submit" while the lane sat
+  # there working — and the documented answer to a failed dispatch is to start
+  # another lane. Found by running it, not by reading it.
+  if [[ "$ST" == idle ]]; then
+    die "brief did not submit — '$NAME' is still idle. Check the pane by hand."
+  fi
   ;;
 
 close)

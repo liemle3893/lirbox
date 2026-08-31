@@ -16,7 +16,8 @@ built the wrong shape — one lane and a diff review beats a run you have to adm
 |---|---|
 | one lane, no store, no criteria doc | prescriptive plan, one package, one lane |
 | the store + dispatch records | ≥2 concurrent lanes, or panes outlive your session |
-| a verifier pane | a SHA exists **and** the result must be believed by someone who didn't produce it |
+| `evidence.mjs verify` | the criterion is a command and an exit code — always; it costs seconds |
+| a verifier pane | a criterion needs JUDGING, not re-running: can this check fail, does the green mean what it says |
 | `decisions/*.json` | a fork you resolved that a replacement would otherwise re-litigate |
 
 Escalate one rung at a time and say which rung you are on. Starting at the top is the default
@@ -26,8 +27,10 @@ worktrees, four containers, two capable panes and a 109-line criteria doc before
 # Hard rules
 
 - **Never edit code** — product, tests, or proofs. Delegate it. Scratch scripts that only *read* state are fine.
-- **Never verify with your own hands.** A pane that is not the implementor does that. Measuring a
-  baseline, before any result exists to be biased about, is not verifying — that one is yours.
+- **Never JUDGE your own lane's result.** Whether a green means what the criterion says is decided
+  by something that did not produce it. Re-RUNNING a command is not judging: independence is about
+  minds, not hands, and `evidence.mjs verify` re-runs a deterministic check here in seconds. Taking
+  a baseline is yours too — there is no result yet to be biased about.
 - **Never believe a self-report.** Implementors report green on checks that cannot fail.
 - **Put the command beside the claim.** An inference stated in the same register as a measurement is how a wrong fact enters the record. If you did not run it, say so in the sentence that claims it.
 - **An exclusivity claim needs its rival list.** "the only thing left", "the blocker", "the cause" —
@@ -165,14 +168,42 @@ never done silently.
 
 # Verifying
 
+**Sort the criterion before you spend anything on it.** Two kinds, and treating them alike is what
+turns an hour of work into a day:
+
+| criterion | verified by | cost |
+|---|---|---|
+| **deterministic** — a command with an exit code, reproducible at that sha | `evidence.mjs verify` re-running it | seconds |
+| **judgemental** — does this green mean what the criterion says; can this check fail at all | a lane that did not write it | a spawn |
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/evidence.mjs verify <lane> --run <slug> \
+  --check "unit::<cmd>" --check "typecheck::<cmd>" --summary "..."
+```
+
+It takes the exit codes from running them, derives `passed`, refuses `--produced-by <the lane>`, and
+refuses outright when HEAD has moved off the sha the lane reported. That record satisfies
+`reported → verified`, so **`go test` exiting 0 does not need a pane.** Re-running it inside a fresh
+agent context buys nothing over re-running it here and costs a spawn, an install, a build and a
+context — usually the most expensive part of the run.
+
+- **One verifier per WAVE, not per lane.** Batch the judgemental criteria of every lane that landed
+  and hand them to one pane in one brief. A verifier per task is how a change involving almost no
+  code takes hours: N spawns, N installs, N builds, N contexts, for N exit codes a script could
+  have re-run in one.
+- **Re-run the smallest scope that could go red.** A suite that cannot observe the change's surface
+  adds latency, not evidence. A 9–90 minute end-to-end suite runs once per wave against the merged
+  result — never once per lane, and never to confirm a change it could not detect. Name the scope
+  you chose and why it could catch this change.
+- The other two records are filed the same way and by the same script: a lane closes with
+  `evidence.mjs report`, which refuses while its branch carries no commits over base, and the code
+  gate files `evidence.mjs gate`, which runs the build itself and derives `gate_passed` from the
+  exit it observed. **No lane ever writes an evidence JSON by hand** — the fields the contract
+  distrusts are exactly the ones a hand-written record gets to invent.
 - **Spawn a verifier against a SHA, never against a schedule.** No SHA, nothing to verify.
 - Pre-warming is legal: start it, install, build, **park it idle**. Giving a parked pane work to
   fill its time is not. Every collision on record came from work invented for an early spawn.
-- **Measurement is not verification.** Independence exists so the agent checking a result isn't the
-  one that produced it; with no result there is no independence to protect. Take the baseline
-  yourself in one Bash call.
 - Once verifying, it is a standing pane, cleared at task boundaries once its report is on disk.
-  Per-task spawning re-derives the environment every time — usually the most expensive part of the run.
 - Demand **numbers, not verdicts.** "ALL PASS" is not a result.
 - The shape of proof is a pair: the broken arm red, the fixed arm green, both quantified. No pair, no proof.
 - Require the verifier to break the thing on purpose and show it go red. A check nobody can fail is the most expensive defect class there is.
@@ -305,6 +336,7 @@ LANE=${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh
 
 $LANE start   <name> --profile <p> --run <slug> [--branch <b>] [--base <ref>] [--dry-run]
 $LANE restart <name> --run <slug> [--profile <p>] [--force]
+$LANE conductor <lane> --run <slug> --goal '<goal>' [--profile <p>]
 $LANE brief   <name> <brief-file>
 $LANE close   <name> [--force]
 ```
@@ -321,6 +353,14 @@ second worktree. It reads the dispatch record for the pane, re-applies the **pro
 `/clear` drops `--agent` back to the harness default, which once ran a whole track with no
 invariants), and refuses while the old agent still reports `working`/`blocked`. Roughly half of all
 spawns are this.
+
+**`conductor` dispatches a lane whose work is a workflow, not a diff it types** — a slice that
+needs to fan out into phases. It writes the brief itself, like `gate` does, because one line of it
+is not thinnable: conductor commits to its own branch `wf/<lane>`, **not** to the lane's branch,
+and the code gate is bound to the branch the dispatch record names. Left unlanded, that gate
+reviews an empty diff and reports a clean pass. It also fixes the workflow's run name to the lane name, so a re-brief
+after a restart resumes instead of forking a second run. Claude profiles only — the skill does not
+resolve on another harness, and that lane implements the goal by hand instead.
 
 `brief` submits and **confirms it submitted** — a lane left `idle` has not been briefed. `close`
 refuses a lane still `working`/`blocked`, or one with uncommitted work in its checkout, unless you
