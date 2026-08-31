@@ -911,6 +911,35 @@
           "replace": "[[ \"${HERDR_ENV:-}\" == 1 ]] || exit 0"
         }
       ]
+    },
+    "hook-scope-matches-the-agent-id": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the plugin is renamed and the hooks are not, so every hook's agent_type matches nothing — the spawn door, the model policy and the push gate all go quietly open, and the first symptom is a lane that pushed",
+          "env": "PLUGIN_MANIFEST_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/.claude-plugin/plugin.json",
+          "find": "\"name\": \"lirbox\",",
+          "replace": "\"name\": \"lirbox-next\","
+        },
+        {
+          "why": "the orchestrator agent is renamed and the hooks keep the old id, which is the same silent ungating one level down",
+          "env": "ORCH_AGENT_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/agents/lirbox-herdr-orchestrator.md",
+          "find": "name: lirbox-herdr-orchestrator",
+          "replace": "name: lirbox-conductor-of-lanes"
+        },
+        {
+          "why": "a hook drops its agent_type scope entirely, so it runs on every Bash call in every repo on this machine — a PreToolUse hook that denies is the one thing nothing can talk its way past, and a denial from a hook the session never heard of is uninterpretable",
+          "env": "PANE_GUARD_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/hooks/pane-guard.sh",
+          "find": "[[ \"$(print -r -- \"$IN\" | jq -r '.agent_type // \"\"')\" == \"lirbox:lirbox-herdr-orchestrator\" ]] || exit 0",
+          "replace": "[[ -n \"$IN\" ]] || exit 0"
+        }
+      ]
     }
   }
 }
