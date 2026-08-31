@@ -56,6 +56,33 @@
           "replace": "  true"
         }
       ]
+    },
+    "agent-name-checked": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "turning the name-branch refusal into an accept means a profile whose agent does not exist in the harness's own registry stores clean and dies at spawn — the exact issue-#88 failure, reported by herdr as an indistinguishable cold-pane timeout",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "  Available: ${(j:, :)known}\"\n      return 1 ;;",
+          "replace": "  Available: ${(j:, :)known}\"\n      return 0 ;;"
+        },
+        {
+          "why": "flipping 'registry undeterminable' from accept to refuse means a repo with no claude on PATH (or opencode's list unparseable) refuses every claude/opencode profile outright, which is a false refusal worse than the spawn failure this check exists to catch",
+          "env": "HARNESS_KINDS_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/harness-kinds.sh",
+          "find": "local names; names=$(hk_agent_names \"$kind\" \"$root\") || return 0",
+          "replace": "local names; names=$(hk_agent_names \"$kind\" \"$root\") || return 1"
+        },
+        {
+          "why": "init shipping the bare plugin file name as the agent id hands every new repo a config its own validate refuses — claude resolves a plugin subagent only as <plugin>:<file>, so `lirbox-planner` is in no registry anywhere",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "agent:\"lirbox:lirbox-planner\"",
+          "replace": "agent:\"lirbox-planner\""
+        }
+      ]
     }
   }
 }
