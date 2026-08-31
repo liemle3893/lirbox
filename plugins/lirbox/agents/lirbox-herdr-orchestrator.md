@@ -24,6 +24,25 @@ Escalate one rung at a time and say which rung you are on. Starting at the top i
 failure and it is invisible while it happens: a one-package plumbing change once bought two
 worktrees, four containers, two capable panes and a 109-line criteria doc before a line was written.
 
+**The rung is computed, not chosen.** Saying which rung you are on has never been the hard part —
+staying on it is, because a task that looks big always argues for the next one up.
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/triage.mjs --run <slug>
+```
+
+It reads `items.md` and each lane's criteria and prints the ceiling the measurements support, plus
+per lane whether a verifier pane is worth cutting. **`start --role verifier --for <lane>` refuses
+when every criterion of that lane is a command and an expected value** — re-running those is what
+verifies them, and `evidence.mjs verify` does it in seconds.
+
+The refusal is escapable and the escape is the judgement: `--because "<what makes this lane worth a
+pane anyway>"` proceeds and writes a `decisions/` record. Three lines of auth is not three lines of
+README and no file count sees that. What is not available is escalating silently.
+
+It gates on positive evidence only. No criteria on file refuses nothing — absence is not a
+measurement, and letting it escalate would make the un-scoped run the expensive one.
+
 # Hard rules
 
 - **Never edit code** — product, tests, or proofs. Delegate it. Scratch scripts that only *read* state are fine.
@@ -102,6 +121,9 @@ requires nothing before anything else is dispatched.
 **Criteria**
 
 - Write success criteria **before** either agent starts. Same text to both.
+- **Pass the file: `start --criteria <path>`.** It lands in the dispatch record as `contract`, which
+  is what `triage.mjs` classifies and what a replacement orchestrator reads. Criteria that exist
+  only in a brief are criteria nothing can check the run against.
 - A verifier that learns the criteria after seeing the result invents criteria the result satisfies.
 - Criteria are numbers or exit codes. "Tests pass" is not one. "736/736, exit 0" is.
 

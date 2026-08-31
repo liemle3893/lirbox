@@ -829,6 +829,51 @@
           "replace": "import { execFileSync } from 'node:child_process';\nconst spawnSyncX = null;"
         }
       ]
+    },
+    "triage-refuses-a-pointless-pane": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the guard stops firing, so a lane whose every criterion is a command and an expected value still gets a pane — a spawn, an install, a build and a context to reach exit codes evidence.mjs re-runs in seconds",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    if [[ \"$ALLOWED\" == refused && -z \"$BECAUSE\" ]]; then",
+          "replace": "    if [[ \"$ALLOWED\" == never && -z \"$BECAUSE\" ]]; then"
+        },
+        {
+          "why": "--because waives the refusal without recording anything, so a replacement orchestrator inherits a pane nobody can explain and the escape becomes an unaudited bypass",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    if [[ -n \"$BECAUSE\" ]]; then\n      local DD=\"$ROOT/.orchestration/$RUN/decisions\"",
+          "replace": "    if [[ -n \"\" ]]; then\n      local DD=\"$ROOT/.orchestration/$RUN/decisions\""
+        },
+        {
+          "why": "the refusal stops naming the cheaper path, so it reads as an obstacle rather than a redirect — and a gate read as an obstacle gets routed around",
+          "env": "ORCH_LANE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/orch-lane.sh",
+          "find": "    node $EVIDENCE verify $FOR --run $RUN --check \\\"<label>::<cmd>\\\" --summary \\\"...\\\"",
+          "replace": "    (re-run them yourself somehow)"
+        },
+        {
+          "why": "an unclassifiable criterion counts as deterministic, so a criterion nobody can re-run into an answer silently gets no verifier at all — the failure direction that is invisible, unlike the one that costs a spawn",
+          "env": "TRIAGE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/skills/lanes/scripts/triage.mjs",
+          "find": "    (hasCommand(l) && hasExpectation(l) ? det : jud).push(l);",
+          "replace": "    (hasExpectation(l) ? jud : det).push(l);"
+        },
+        {
+          "why": "absent criteria raise the ceiling instead of leaving it alone, so an unmeasured run becomes the most expensive kind — the exact inversion the protocol exists to stop",
+          "env": "TRIAGE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/skills/lanes/scripts/triage.mjs",
+          "find": "const judged = Object.values(lanes).reduce((n, l) => n + l.judgemental, 0);",
+          "replace": "const judged = Object.values(lanes).filter((l) => l.verifier_pane === 'allowed').length;"
+        }
+      ]
     }
   }
 }

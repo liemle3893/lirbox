@@ -3,6 +3,7 @@
 # a thing it runs.
 #
 #   orch-lane.sh start   <name> --profile <p> --run <slug> [--branch <b>] [--base <b>]
+#                        [--role <r>] [--for <lane>] [--criteria <f>] [--because <s>]
 #   orch-lane.sh restart <name> --run <slug> [--profile <p>]
 #   orch-lane.sh gate    <lane> --run <slug> [--profile <p>] [--pane]
 #   orch-lane.sh conductor <lane> --run <slug> --goal <g> [--profile <p>]
@@ -100,6 +101,8 @@ LEDGER="$HOME/.claude/lirbox-lanes/$SLUG.tsv"
 # function: at this level $0 is this script, not a function name.
 EVIDENCE="${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/skills/lanes/scripts/evidence.mjs"
 EVIDENCE="${EVIDENCE:A}"
+TRIAGE="${TRIAGE_OVERRIDE:-${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/skills/lanes/scripts/triage.mjs}"
+TRIAGE="${TRIAGE:A}"
 
 own() {
   mkdir -p "${LEDGER:h}"
@@ -141,13 +144,17 @@ start)
   # reports THAT word as the bad flag. The real mistake is two arguments back.
   [[ "$NAME" == --* ]] && die "the lane name comes first, before any flag:
   orch-lane.sh start <name> --profile <p> [--branch <b>] [--base <ref>]"
-  local PROFILE="" BRANCH="" BASE="" RUN="" DRY=0
+  local PROFILE="" BRANCH="" BASE="" RUN="" DRY=0 ROLE="" FOR="" CRITERIA="" BECAUSE=""
   while (( $# )); do
     case "$1" in
       --profile) PROFILE="$2"; shift 2 ;;
       --branch)  BRANCH="$2";  shift 2 ;;
       --base)    BASE="$2";    shift 2 ;;
       --run)     RUN="$2";     shift 2 ;;
+      --role)    ROLE="$2";    shift 2 ;;
+      --for)     FOR="$2";     shift 2 ;;
+      --criteria) CRITERIA="$2"; shift 2 ;;
+      --because) BECAUSE="$2"; shift 2 ;;
       --dry-run|--dry) DRY=1;  shift   ;;
       # These four are the profile's to decide. Naming one on the command line
       # is the per-spawn drift this script exists to stop, so say so instead of
@@ -256,6 +263,50 @@ $(print -l -- "${MISSING[@]/#/    }")
     fi
   fi
 
+  # ---- triage: what the measurements support ------------------------------
+  #
+  # A verifier lane exists so a result is judged by something that did not
+  # produce it. A criterion that is a command and an expected value is not
+  # judged, it is RE-RUN — and evidence.mjs does that here in seconds. Spawning
+  # a pane to reach the same exit code costs a spawn, an install, a build and a
+  # context, once per lane. That is how a change involving almost no code takes
+  # hours, and it is the single most expensive habit in the runs on record.
+  #
+  # So the protocol refuses, and the refusal is escapable: `--because` names what
+  # makes this lane worth a pane anyway, and the reason is RECORDED. Three lines
+  # of auth is not three lines of README and no file count sees that — the escape
+  # is the judgement, the refusal is the default.
+  #
+  # It only fires on positive evidence: every criterion classified deterministic,
+  # none unclassifiable. Absent or unreadable criteria refuse nothing.
+  if [[ "$ROLE" == verifier && -n "$FOR" ]]; then
+    local TJ ALLOWED
+    TJ=$(node "$TRIAGE" --run "$RUN" --lane "$FOR" --json 2>/dev/null)
+    ALLOWED=$(print -r -- "$TJ" | jq -r --arg l "$FOR" '.lanes[$l].verifier_pane // "allowed"' 2>/dev/null)
+    if [[ "$ALLOWED" == refused && -z "$BECAUSE" ]]; then
+      refuse "lane '$FOR' has no criterion that needs judging:
+$(print -r -- "$TJ" | jq -r --arg l "$FOR" '"    " + .lanes[$l].why')
+
+  Re-run them instead — seconds, not a spawn:
+    node $EVIDENCE verify $FOR --run $RUN --check \"<label>::<cmd>\" --summary \"...\"
+
+  If this lane is worth a pane anyway — a check that may not be able to fail, a
+  risk no file count sees — say what makes it so:
+    --because \"<reason>\"
+  It is recorded, not waived."
+    fi
+    if [[ -n "$BECAUSE" ]]; then
+      local DD="$ROOT/.orchestration/$RUN/decisions"
+      mkdir -p "$DD"
+      jq -n --arg f "spawn a verifier pane for '$FOR' over triage's refusal" \
+            --arg c "$NAME" --arg r "$BECAUSE" --arg l "$FOR" \
+        '{fork:$f, options:["evidence.mjs verify (re-run, seconds)","a verifier pane (a spawn)"],
+          chosen:("pane " + $c), reason:$r,
+          would_overturn:("if every criterion for " + $l + " really is a command and an expected value, this pane bought nothing")}' \
+        > "$DD/verifier-$FOR.json"
+    fi
+  fi
+
   local KIND MODEL FLAGS READY_MS EFFORT AGENT
   resolve_profile "$PROFILE"
   # The flags that follow `--`, built from the harness table rather than written
@@ -343,7 +394,11 @@ $(print -l -- "${MISSING[@]/#/    }")
           --arg k "$KIND" --arg m "$MODEL" --arg e "$EFFORT" --arg b "$BRANCH" \
           --arg wt "$(print -r -- "$WT" | jq -r '.result.worktree.path // empty')" \
           --arg sha "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" \
-      '{lane:$n,agent_name:$n,pane_id:$p,workspace_id:$w,worktree:$wt,profile:$pr,kind:$k,model:$m,effort:$e,branch:$b,sha_at_dispatch:$sha,state:"dispatched"}' \
+      --arg role "$ROLE" --arg for "$FOR" --arg contract "${CRITERIA:+${CRITERIA:A}}" \
+      '{lane:$n,agent_name:$n,pane_id:$p,workspace_id:$w,worktree:$wt,profile:$pr,kind:$k,model:$m,effort:$e,branch:$b,sha_at_dispatch:$sha,state:"dispatched"}
+       + (if $role != "" then {role:$role} else {} end)
+       + (if $for  != "" then {verifies:$for} else {} end)
+       + (if $contract != "" then {contract:$contract} else {} end)' \
       > "$D/$NAME.json"
   fi
 
