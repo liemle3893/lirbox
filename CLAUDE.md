@@ -15,7 +15,7 @@ Skill catalog → [README.md](./README.md). Adding a skill/agent/plugin, and all
 `assets/validate.mjs`; run it on output (`node .../validate.mjs <file>.html`) — it catches Mermaid
 label-escaping bugs. `deep-understanding` is an interactive tutor (no artifact).
 
-**Orchestration loops** (`conductor`, `loom`, `prospector`, `whetstone`, `arena`) — a deterministic
+**Orchestration loops** (`conductor`, `prospector`, `whetstone`, `arena`) — a deterministic
 JS *conductor* (the generated `.js`) driving full-tool *worker* subagents. Hard rules:
 
 - **The conductor layer is pure JS: NO `fs`/`git`/`require`/`Date.now()`/`Math.random()`.** Every

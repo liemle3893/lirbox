@@ -310,7 +310,7 @@ $([[ "$RECORDED" != "OK" ]] && print -r -- "
   in $RUNDIR/transitions.jsonl, so the board cannot show what you are about to
   push, and a replacement orchestrator would find this lane still open.
 
-    node \${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/transition.mjs \\\\
+    node \${CLAUDE_PLUGIN_ROOT}/scripts/lanes/transition.mjs \\\\
       --root $RUNDIR --lane $LANE --to durable --reason \"...\"
 
   That command refuses an illegal move rather than recording a false one, so it

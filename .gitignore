@@ -20,9 +20,6 @@ docs/superpowers/
 .improve/
 .arena/
 
-# Build-time scratch left by loom (graph, state, checks, editor action files)
-.loom/
-
 # Harbor derived build input. A tier-3 task IS its declaration under
 # plugins/lirbox/skills/<skill>/harbor/tasks/<id>/ — Harbor runs that directory directly. The only
 # untrackable piece is environment/skill/, the PRUNED copy of the skill the image installs for the

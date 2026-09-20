@@ -28,7 +28,7 @@ worktrees, four containers, two capable panes and a 109-line criteria doc before
 staying on it is, because a task that looks big always argues for the next one up.
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/triage.mjs --run <slug>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/lanes/triage.mjs --run <slug>
 ```
 
 It reads `items.md` and each lane's criteria and prints the ceiling the measurements support, plus
@@ -199,7 +199,7 @@ turns an hour of work into a day:
 | **judgemental** — does this green mean what the criterion says; can this check fail at all | a lane that did not write it | a spawn |
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/evidence.mjs verify <lane> --run <slug> \
+node ${CLAUDE_PLUGIN_ROOT}/scripts/lanes/evidence.mjs verify <lane> --run <slug> \
   --check "unit::<cmd>" --check "typecheck::<cmd>" --summary "..."
 ```
 
@@ -237,12 +237,12 @@ context — usually the most expensive part of the run.
 
 # The store — `lanes`
 
-Open one at the rung the sizing table says. Load the `lanes` skill for the record shapes; the
-contract below is yours and does not change.
+Open one at the rung the sizing table says. The record shapes are defined by the scripts below —
+they are the source of truth; the contract below is yours and does not change.
 
 ```
 RUN=.orchestration/<goal>;  mkdir -p $RUN/dispatch $RUN/evidence $RUN/decisions $RUN/progress
-LANES=${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts
+LANES=${CLAUDE_PLUGIN_ROOT}/scripts/lanes
 ```
 
 - **You are the only caller of `transition.mjs`. Lanes never touch the store.** They write reports to
@@ -282,7 +282,7 @@ LANES=${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts
 what made it look different every session and lose the entries that mattered.
 
 ```
-NOTES=${CLAUDE_PLUGIN_ROOT}/skills/lanes/scripts/notes.mjs
+NOTES=${CLAUDE_PLUGIN_ROOT}/scripts/lanes/notes.mjs
 
 node $NOTES lane <name> --status doing|blocked|done [--item S] [--blocked-on S] [--artifact S]
 node $NOTES add decision|deviation|tradeoff|question|finding --title S [--body S] [--lane S] …

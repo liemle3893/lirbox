@@ -99,9 +99,9 @@ LEDGER="$HOME/.claude/lirbox-lanes/$SLUG.tsv"
 
 # The evidence writer lanes RUN. `${0:h:h}` is safe here and not inside a
 # function: at this level $0 is this script, not a function name.
-EVIDENCE="${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/skills/lanes/scripts/evidence.mjs"
+EVIDENCE="${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/scripts/lanes/evidence.mjs"
 EVIDENCE="${EVIDENCE:A}"
-TRIAGE="${TRIAGE_OVERRIDE:-${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/skills/lanes/scripts/triage.mjs}"
+TRIAGE="${TRIAGE_OVERRIDE:-${CLAUDE_PLUGIN_ROOT:-${0:h:h}}/scripts/lanes/triage.mjs}"
 TRIAGE="${TRIAGE:A}"
 
 own() {
