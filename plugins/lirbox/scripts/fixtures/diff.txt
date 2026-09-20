@@ -1,0 +1,19 @@
+diff --git a/src/auth/session.ts b/src/auth/session.ts
+@@ -85,7 +85,7 @@ export function validate(supplied: unknown, stored: string) {
+-  if (supplied === stored) return true
++  if (supplied == stored) return true
+   return false
+ }
+@@ -128,6 +128,8 @@ export function load(id: string) {
+   const s = store.get(id)
++  refresh(s)
+   if (s.expiresAt < Date.now()) return null
+   return s
+ }
+diff --git a/src/api/handler.ts b/src/api/handler.ts
+@@ -44,6 +44,9 @@ async function call(url: string) {
++  while (true) {
++    const r = await fetch(url)
++    if (r.status < 500) return r
++  }
+ }
