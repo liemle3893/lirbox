@@ -40,12 +40,16 @@ Default output path: `./<slug>-flowchart.html`.
 
 ### 3. Verify before claiming done
 - **The gate, runnable headless:** `node <skill-dir>/assets/validate.mjs <output>.html`
-  must print `PASS` / exit 0 — it deterministically catches the label-escaping bugs above.
-  Fix every finding and re-run until clean; do NOT claim done while it fails.
-- Both `TEMPLATE-GRAPH` and both `TEMPLATE-STEPS` markers removed; zero leftover `{{…}}`.
-- Every graph node id has a `click` line and a matching `STEPS` entry; `DEFAULT_NODE` is a
-  real key; exactly one `:::crit` node; one `<h1 class="title">`; the Mermaid `<script>`
-  still has `integrity` + `crossorigin`.
+  must print `PASS` / exit 0 — it catches the label-escaping bugs above **and** the page
+  contract below. Fix every finding and re-run until clean; do NOT claim done while it fails.
+- Enforced by that same run, so you do not check them by hand: both `TEMPLATE-GRAPH` and both
+  `TEMPLATE-STEPS` markers removed; zero leftover `{{…}}`; every `click` id has a `STEPS`
+  entry; `DEFAULT_NODE` is a real key; exactly one `:::crit`; one `<h1 class="title">`; a
+  `<style>` block; the Mermaid `<script>` still has `integrity` + `crossorigin`.
+- **When injecting the graph, anchor on `<pre class="mermaid">`, not on the marker text.**
+  The template's own instruction comment quotes `%% TEMPLATE-GRAPH-START`, so a regex on the
+  marker matches the comment first and swallows `<head>`, `<style>` and `<header>` on the way
+  to the real one. The validator now refuses the result; it used to print `PASS`.
 - Optional (needs internet): open in a browser to confirm nodes are clickable and the panel
   updates — the validator already guarantees the Mermaid parses and renders.
 - Grounding: if traced from code, snippets/labels are real (read the files); if conceptual,

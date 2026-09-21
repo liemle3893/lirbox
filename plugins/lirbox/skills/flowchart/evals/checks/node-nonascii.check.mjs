@@ -17,7 +17,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VALIDATE = join(HERE, '..', '..', 'assets', 'validate.mjs');
+// FLOWCHART_VALIDATE_OVERRIDE points at the validate.mjs under test. Without an escape hatch
+// prove-checks cannot mutation-test this check at all, and it reports UNPROVEN rather than good.
+const VALIDATE =
+  process.env.FLOWCHART_VALIDATE_OVERRIDE || join(HERE, '..', '..', 'assets', 'validate.mjs');
 const FIXTURE = join(HERE, '..', 'fixtures', 'node-nonascii.html');
 
 function validateExit() {
