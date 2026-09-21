@@ -23,7 +23,7 @@
 //   7. The plan's goal (id="goal") + exactly one data-goal-coverage claim row.
 //   8. Exactly one <script type="application/json" id="taskgraph"> block: the plan's
 //      declared execution shape, with `levels` DERIVED from the edges, not asserted.
-//   9. Every REFUTED / OPEN row carries a fix disposition: `fix: mechanical` | `fix: needs-decision`.
+//   9. Every OPEN row carries a fix disposition: `fix: mechanical` | `fix: needs-decision`.
 
 import { readFileSync } from 'node:fs';
 
@@ -31,14 +31,6 @@ const VERDICTS = new Set(['GO', 'GO-WITH-CONDITIONS', 'NO-GO']);
 const QUADRANTS = new Set(['known-known', 'known-unknown', 'unknown-known', 'unknown-unknown']);
 const STATUSES = new Set(['VERIFIED', 'REFUTED', 'UNVERIFIED', 'UNSTATED-ASSUMPTION', 'BLIND-SPOT-RISK']);
 const OPEN = new Set(['UNVERIFIED', 'BLIND-SPOT-RISK']);
-// Rows that must declare whether their repair is transcription or authorship. Deliberately NOT
-// `OPEN`: OPEN drives the derived verdict and the conditions-to-clear count, and REFUTED belongs
-// in neither (it forces NO-GO directly, and its route out is "what would have to change", not a
-// condition). But autofix has to decide whether it may act on a REFUTED row, and that decision is
-// the fix class -- so the disposition is demanded here too. A REFUTED row whose correction is
-// fully determined by the evidence (a renamed symbol, a Makefile target that does not exist) is
-// transcription; one that needs a new approach is authorship. Only the row can say which.
-const NEEDS_FIX_TAG = new Set([...OPEN, 'REFUTED']);
 
 const path = process.argv[2];
 if (!path) {
@@ -108,7 +100,7 @@ if (conditions !== open) {
   errors.push(`conditions-to-clear count (${conditions}) != open items (${open})`);
 }
 
-// 9. Every REFUTED / OPEN row carries a fix disposition (SKILL.md step 7).
+// 9. Every OPEN row carries a fix disposition (SKILL.md step 7).
 //
 // This rule exists because the convention did NOT survive without it. Measured over 20 paired
 // Harbor trials, `fix:` appeared in only 4 of 10 reports per arm — while every OTHER element of
@@ -122,13 +114,12 @@ const fullRows = [...markup.matchAll(/<tr\b[^>]*\bclass="[^"]*\bclaim\b[^"]*"[^>
 const FIX = /\bfix:\s*(mechanical|needs-decision)\b/i;
 const untagged = fullRows
   .map((r, i) => ({ i: i + 1, s: attr(r, 'data-status') }))
-  .filter(({ i, s }) => NEEDS_FIX_TAG.has(s) && !FIX.test(fullRows[i - 1]));
+  .filter(({ i, s }) => OPEN.has(s) && !FIX.test(fullRows[i - 1]));
 if (untagged.length) {
   errors.push(
-    `${untagged.length} row(s) carry no fix disposition (row ${untagged.map((u) => u.i).join(', ')}) — ` +
-      `every REFUTED / UNVERIFIED / BLIND-SPOT-RISK row needs "fix: mechanical" (the repair is ` +
-      `determined by the finding) or "fix: needs-decision"; without it a reader cannot tell what ` +
-      `can be applied`
+    `${untagged.length} open row(s) carry no fix disposition (row ${untagged.map((u) => u.i).join(', ')}) — ` +
+      `every UNVERIFIED / BLIND-SPOT-RISK row needs "fix: mechanical" (the repair is determined by ` +
+      `the finding) or "fix: needs-decision"; without it a reader cannot tell what can be applied`
   );
 }
 

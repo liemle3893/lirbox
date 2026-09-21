@@ -137,12 +137,29 @@ const assertions = [
     want: 'a report whose every open row is tagged must be ACCEPTED',
   },
   {
-    id: 'scoped-to-open-rows-only',
+    id: 'demands-disposition-on-refuted',
     where: 'assets/validate.mjs',
-    // VERIFIED / UNSTATED-ASSUMPTION / REFUTED are not open; demanding a disposition there would
-    // be noise, and REFUTED already routes through step 7's "what would have to change".
-    ok: verdictOn(report([row('VERIFIED'), row('UNSTATED-ASSUMPTION'), row('REFUTED')], 'NO-GO', 0)) === 0,
-    want: 'rows that are not open need no disposition — the rule must not demand one',
+    // REFUTED is where the disposition MATTERS most: autofix's gate is the fix class, so a
+    // refutation that carries none leaves the one decision autofix depends on unstated. It used
+    // to be exempt here, which made "REFUTED + mechanical" inexpressible and forced the ban that
+    // exemption was written to justify.
+    ok: verdictOn(report([row('REFUTED')], 'NO-GO', 0)) === 1,
+    want: 'a REFUTED row with no fix disposition must be REJECTED — the fix class is what gates autofix',
+  },
+  {
+    id: 'accepts-mechanical-refuted',
+    where: 'assets/validate.mjs',
+    // The capability the re-axing exists for: a refutation whose correction is fully determined
+    // must be EXPRESSIBLE. A validator that rejected this would reinstate the ban structurally.
+    ok: verdictOn(report([row('REFUTED', FIX_M)], 'NO-GO', 0)) === 0,
+    want: 'a REFUTED row tagged "fix: mechanical" must be ACCEPTED — autofix must be able to act on it',
+  },
+  {
+    id: 'scoped-to-adjudicable-rows-only',
+    where: 'assets/validate.mjs',
+    // VERIFIED / UNSTATED-ASSUMPTION have nothing to repair; demanding a disposition is noise.
+    ok: verdictOn(report([row('VERIFIED'), row('UNSTATED-ASSUMPTION')], 'GO', 0)) === 0,
+    want: 'VERIFIED / UNSTATED-ASSUMPTION rows need no disposition — the rule must not demand one',
   },
   {
     id: 'rejects-partial-tagging',
@@ -158,8 +175,8 @@ const assertions = [
     // every untagged one.
     ok: verdictOn(report([row('VERIFIED', FIX_M), row('UNVERIFIED')], 'GO-WITH-CONDITIONS', 1)) === 1,
     want:
-      'a disposition on a NON-open row must not satisfy an untagged open row — a file-level ' +
-      'presence test is exactly the leniency this replaces',
+      'a disposition on a row that needs none must not satisfy an untagged open row — a ' +
+      'file-level presence test is exactly the leniency this replaces',
   },
   {
     id: 'rejects-bogus-disposition',

@@ -15,7 +15,7 @@
   "checks": {
     "autofix-bounded": {
       "expect": "green",
-      "note": "Added 2026-08-03. plan-check adjudicated and stopped: a finding whose repair is fully determined by the finding itself still had to be re-applied by hand, and NO-GO arrived with no route out. Autofix closes that -- but the risk it introduces is worse than the gap it fills, so this check guards the BOUNDARY, not the feature: the input plan is never overwritten (it is the evidence that justified the edits), REFUTED is never autofixed (repairing a wrong model of reality is design, not transcription -- and a laundered REFUTED makes the plan READ as verified), and an applied fix re-opens its proposition so the verdict can never improve merely because the map was redrawn.",
+      "note": "Added 2026-08-03; re-axed 2026-09-21. Autofix turns findings whose repair is determined by the finding itself into edits. The original boundary banned autofix on the REFUTED *status*, which is the wrong axis: the doc's own mechanical list holds refutations (a moved symbol, a command form proven not to work), so it forbade repairs it had just authorised, and made REFUTED+mechanical inexpressible downstream -- half of six Harbor trials responded by not autofixing at all. The gate is now the FIX CLASS (needs-decision is excluded; authorship, not transcription). The anti-laundering property is carried where it always belonged: a verdict may improve ONLY because a row was re-checked against reality, never because the text was edited. This check guards that boundary, not the feature: the input plan is never overwritten, authorship is never autofixed, the status is explicitly NOT the gate (so the old ban cannot creep back in beside the new rule), and an applied fix re-opens its proposition.",
       "mutations": [
         {
           "why": "lets autofix overwrite the plan it audited, destroying the evidence for its own edits",
@@ -25,18 +25,32 @@
           "replace": "Apply the fixes to the plan."
         },
         {
-          "why": "removes the REFUTED exclusion, allowing verdict laundering -- the failure mode with the worst blast radius",
+          "why": "removes the authorship exclusion, so autofix may rewrite a claim whose correct text is not established -- the failure mode with the worst blast radius",
           "env": "PLAN_CHECK_AUTOFIX_MD",
           "file": "references/autofix.md",
-          "find": "- **`REFUTED`** — the plan's model of reality is wrong. Choosing the new approach is\n  design. Autofix must not touch it, and must not let the plan read as if it had.",
+          "find": "- **A `REFUTED` row whose repair needs a new approach** — the plan's model of reality is\n  wrong and the evidence does not say what to do instead. Choosing that is design. Autofix\n  must not touch it, and must not let the plan read as if it had.",
           "replace": "- **Hard ones** — use judgement."
         },
         {
-          "why": "drops the re-verification requirement, so an edited plan keeps a verdict that was never re-earned",
+          "why": "collapses the gate back onto the STATUS axis -- the original bug, which forbade the mechanical refutations the doc itself authorises",
+          "env": "PLAN_CHECK_AUTOFIX_MD",
+          "file": "references/autofix.md",
+          "find": "The gate is the **fix class**, never the status. `REFUTED` is not the line: a claim can be\nrefuted by evidence that also fully determines its correction (the symbol moved; the target\ndoes not exist), and transcribing that is not a decision. What is excluded is authorship —\nany repair where the correct text is not already established, whatever the row's status.",
+          "replace": "`REFUTED` is never autofixed."
+        },
+        {
+          "why": "drops the re-verification requirement, so an edited plan keeps a verdict that was never re-earned -- with the status ban gone, this sentence is the ONLY thing stopping laundering",
           "env": "PLAN_CHECK_AUTOFIX_MD",
           "file": "references/autofix.md",
           "find": "An autofixed row is UNVERIFIED again until re-checked. Applying a fix invalidates the\nreport that motivated it. Re-run steps 3–6 on every touched proposition and re-emit the\nreport before the verdict is recomputed.",
           "replace": "Apply the fixes and note them in the report."
+        },
+        {
+          "why": "removes the verdict-moves-only-on-re-verification rule, the invariant that replaced the blanket ban",
+          "env": "PLAN_CHECK_AUTOFIX_MD",
+          "file": "references/autofix.md",
+          "find": "A verdict may improve ONLY because a row was re-checked against reality and came back\nclean — never because the plan's text now reads better. Recompute the verdict from\nre-verified rows alone. This is what stops laundering, and it is the whole of what stops\nit; no status is banned from repair to achieve it.",
+          "replace": "Recompute the verdict after applying fixes."
         }
       ]
     },
@@ -82,7 +96,7 @@
           "why": "drops the restatement from step 8 (the step that writes the report), leaving it only in step 7 where it already measured 4/10",
           "env": "PLAN_CHECK_SKILL_MD",
           "file": "SKILL.md",
-          "find": "   Carry step 7's disposition onto **every open row** — `<span class=\"fix\">fix: mechanical</span>`\n   or `fix: needs-decision`; machine-checked, and drop the span on rows that are not open.\n",
+          "find": "   Carry step 7's disposition onto **every `REFUTED` and open row** —\n   `<span class=\"fix\">fix: mechanical</span>` or `fix: needs-decision`; machine-checked, and drop\n   the span on `VERIFIED` / `UNSTATED-ASSUMPTION` rows.\n",
           "replace": ""
         },
         {
@@ -96,8 +110,8 @@
           "why": "makes the rule per-FILE instead of per-row -- the leniency the Harbor grader had, where one tagged row excuses every untagged one",
           "env": "PLAN_CHECK_VALIDATE",
           "file": "assets/validate.mjs",
-          "find": "  .filter(({ i, s }) => OPEN.has(s) && !FIX.test(fullRows[i - 1]));",
-          "replace": "  .filter(({ s }) => OPEN.has(s) && !FIX.test(markup));"
+          "find": "  .filter(({ i, s }) => NEEDS_FIX_TAG.has(s) && !FIX.test(fullRows[i - 1]));",
+          "replace": "  .filter(({ s }) => NEEDS_FIX_TAG.has(s) && !FIX.test(markup));"
         },
         {
           "why": "accepts any `fix:` value, so 'fix: later' or 'fix: TODO' passes as a disposition and the mechanical/needs-decision split stops meaning anything",
@@ -105,6 +119,13 @@
           "file": "assets/validate.mjs",
           "find": "const FIX = /\\bfix:\\s*(mechanical|needs-decision)\\b/i;",
           "replace": "const FIX = /\\bfix:/i;"
+        },
+        {
+          "why": "exempts REFUTED from the disposition rule -- the original bug, which made 'REFUTED + mechanical' inexpressible and structurally forced the status ban in autofix.md",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "const NEEDS_FIX_TAG = new Set([...OPEN, 'REFUTED']);",
+          "replace": "const NEEDS_FIX_TAG = OPEN;"
         }
       ]
     },
