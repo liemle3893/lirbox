@@ -1,0 +1,118 @@
+{
+  "_comment": [
+    "Expectation manifest for do's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern). MUST exit 0 or 1.",
+    "",
+    "A check file missing from this manifest FAILS the gate.",
+    "LOCKED (evals/**): improvement loops may never edit this file."
+  ],
+  "checks": {
+    "reject-not-softened": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "dropping STOP from the reject row lets a rejected task keep being worked instead of ending the turn",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "**STOP.** Do not implement, do not offer a smaller version.",
+          "replace": "Do not implement."
+        },
+        {
+          "why": "dropping the hard-rules ban on a softened re-scope leaves only the routes-table wording, so a whetstone edit to one place silently loses the other",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "no smaller version offered.",
+          "replace": "handle it as scoped instead."
+        },
+        {
+          "why": "without this sentence, pushback on a reject reads as an invitation to retry the same task smaller — the exact softening this route exists to refuse",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "not a retry of this one with the scope shaved down.",
+          "replace": "not a retry of this one."
+        }
+      ]
+    },
+    "inline-no-permission-ask": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "removing the hard-rule's 'no confirmation step' reopens the approval round-trip inline exists to remove",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "No confirmation step; the route already is the approval.",
+          "replace": "Confirm with the user first."
+        },
+        {
+          "why": "removing the routes-table's own denial of an approval round-trip leaves inline indistinguishable from lane in the one table a reader skims",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "No plan step, no \"should I proceed?\", no approval round-trip.",
+          "replace": "Do it now, this session."
+        },
+        {
+          "why": "an actual permission-seeking imperative inside inline's own prose is the real regression — the routing decision stops being the approval",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "Implement it, verify it against whatever the task states as done, report the result.",
+          "replace": "Ask the user for confirmation, then implement it, verify it against whatever the task states as done, report the result."
+        }
+      ]
+    },
+    "lane-always-asks": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the routes-table row is the first thing a reader checks per route; losing 'ask before running it' there means lane reads as fire-and-forget",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "Print the exact `orch-lane.sh start` command and **ask before running it.**",
+          "replace": "Print the exact `orch-lane.sh start` command and run it."
+        },
+        {
+          "why": "losing the hard-rules restatement means only the table carries the rule, and printing the command could be read as already having acted",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "**`lane` always asks**, even though the command was already printed",
+          "replace": "**`lane` prints the command**, ready to run"
+        },
+        {
+          "why": "the `### lane` prose is where the actual instruction lives; without 'then ask' the printed command has no next step attached to it at all",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "filled in, then ask.",
+          "replace": "filled in."
+        }
+      ]
+    },
+    "no-interrogation-path": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "dropping this turns step 1 back into an interrogation gate before intake ever runs, which is the exact multi-day-run failure mode intake was built to stop",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "Ask the user nothing before this.",
+          "replace": "Confirm scope with the user before this."
+        },
+        {
+          "why": "removing the hard-rule leaves only the flow's step-1 wording as evidence, so an edit that reopens interrogation elsewhere in the skill goes unnoticed",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "**Never interrogate.**",
+          "replace": "**Clarify scope.**"
+        },
+        {
+          "why": "without this line the `scope` route reads as license to ask the user directly instead of handing off to the planner, which is the interrogation path this skill exists to avoid",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "The fix is not five questions to the user — it is `lirbox-planner`",
+          "replace": "The fix is to ask the user a few questions, then hand off to `lirbox-planner`"
+        }
+      ]
+    }
+  }
+}
