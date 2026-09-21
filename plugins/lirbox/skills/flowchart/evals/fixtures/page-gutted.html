@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- ITEM-B fixture: a STRUCTURALLY GUTTED page whose mermaid labels are perfectly clean.
+     Every label here is plain ASCII with no raw ( ) { } [ ] " and no literal \n, so the
+     baseline validator — which only inspects label escaping — PASSES this file.
+
+     What is actually missing: the titled H1, the entire style block, the Mermaid script tag with
+     its integrity/crossorigin, and a STEPS entry for the node `b`. This is a real failure mode,
+     not a hypothetical: an author regex targeting the graph markers can match the template's own
+     instruction comment -- which quotes those markers -- and swallow the head, the styles and the
+     header on the way to the real one. The page renders as unstyled rubble.
+
+     Deliberately worded without literal tags or marker text: the validator now blanks HTML
+     comments before the structural pass (a commented-out header is not a header), and an earlier
+     draft of this fixture described its own defects using the very strings being searched for,
+     which made every one of them undetectable.
+
+     The Item-B acceptance-check asserts validate.mjs FAILS this file, so it is RED on baseline
+     (discriminating) and green only once the validator enforces the page contract the skill's
+     own verify checklist already writes down. Locked. -->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>page-gutted fixture</title></head>
+  <body>
+    <pre class="mermaid">
+flowchart TD
+  a([Start]):::term --> b[Do the thing]:::crit
+  b --> c{OK?}:::dec
+  c -->|yes| d[Done]:::ok
+  c -->|no| a
+
+  classDef term fill:#E3DACC,stroke:#C9BCA3,color:#141413;
+  classDef dec fill:#F3EFE6,stroke:#E3DACC,color:#141413;
+  classDef ok fill:#EEF1E7,stroke:#788C5D,color:#3A3A37;
+  classDef crit fill:#FBEDE7,stroke:#D97757,stroke-width:2px,color:#B04A3F;
+
+  click a selectNode "details"
+  click b selectNode "details"
+  click c selectNode "details"
+  click d selectNode "details"
+</pre>
+    <script>
+      const STEPS = {
+        a: { title: "Start", meta: ["entry"], body: "<p>Where it begins.</p>" },
+        c: { title: "OK?", meta: ["gate"], body: "<p>The decision.</p>" },
+        d: { title: "Done", meta: ["exit"], body: "<p>Finished.</p>" }
+      };
+      const DEFAULT_NODE = "a";
+      function selectNode(id){ return STEPS[id]; }
+      window.selectNode = selectNode;
+    </script>
+  </body>
+</html>

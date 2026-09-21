@@ -37,7 +37,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
-const TEMPLATE = join(ROOT, 'plugins/lirbox/skills/flowchart/assets/template.html');
+// FLOWCHART_TEMPLATE_OVERRIDE points at the template under test (set by prove-checks).
+const TEMPLATE =
+  process.env.FLOWCHART_TEMPLATE_OVERRIDE ||
+  join(ROOT, 'plugins/lirbox/skills/flowchart/assets/template.html');
 
 let raw;
 try {

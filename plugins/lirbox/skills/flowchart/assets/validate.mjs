@@ -73,6 +73,71 @@ function checkLabel(text, { edge }) {
   return issues;
 }
 
+// ---- page contract ----
+//
+// Label escaping is only half the gate. A page can have a perfectly escaped graph and still be
+// rubble: an author regex anchored on `%% TEMPLATE-GRAPH-START` matches the template's OWN
+// instruction comment (it quotes the marker) and swallows <head>, <style> and <header> on the way
+// to the real marker. Observed — and this validator printed PASS on the result.
+//
+// So we also enforce what SKILL.md's Verify checklist already writes down in prose.
+//
+// Only for files that CLAIM to be a finished page. The fixtures in evals/ are bare mermaid
+// fragments with no panel wiring; running the page contract over them would turn every one of
+// them red. A finished page always carries the template's panel wiring or its leftover markers.
+function looksLikeFinishedPage(html) {
+  return /\bDEFAULT_NODE\b/.test(html) || /\bselectNode\b/.test(html) ||
+    /TEMPLATE-(?:GRAPH|STEPS)-(?:START|END)/.test(html);
+}
+
+function structuralFindings(rawHtml, graphText) {
+  const out = [];
+  // Comments are not the page. A commented-out <h1> is not a header, and the template's own
+  // instruction comment quotes `%% TEMPLATE-GRAPH-START` — counting that as a leftover marker
+  // would flag every correctly-filled page. Blanking comments while preserving newlines keeps
+  // reported line numbers honest. This is the same mistake an author regex makes when it anchors
+  // on a marker the comment also contains; the validator does not get to make it too.
+  const html = rawHtml.replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  const at = (needle) => (needle && html.includes(needle) ? html.slice(0, html.indexOf(needle)).split('\n').length : 0);
+  const add = (msg, needle) => out.push({ line: at(needle), msg });
+
+  const h1 = (html.match(/<h1[^>]*class=["'][^"']*\btitle\b[^"']*["']/gi) || []).length;
+  if (h1 !== 1) add(`page contract: expected exactly one <h1 class="title">, found ${h1} — the header was lost or duplicated`);
+
+  if (!/<style[\s>]/i.test(html)) add('page contract: no <style> block — the page renders unstyled');
+
+  const leftovers = [...new Set(html.match(/\{\{[^}\n]{0,120}\}\}/g) || [])];
+  if (leftovers.length) add(`page contract: ${leftovers.length} unfilled placeholder(s) left: ${leftovers.slice(0, 3).join(' ')}`, leftovers[0]);
+
+  const markers = [...new Set(html.match(/TEMPLATE-(?:GRAPH|STEPS)-(?:START|END)/g) || [])];
+  if (markers.length) add(`page contract: template marker(s) still present: ${markers.join(' ')} — replace the block and delete both markers`, markers[0]);
+
+  const crit = (graphText.match(/:::crit\b/g) || []).length;
+  if (crit !== 1) add(`page contract: expected exactly one :::crit node, found ${crit} — highlight the single control point`);
+
+  const script = (html.match(/<script[^>]*\bsrc=["'][^"']*mermaid[^"']*["'][^>]*>/i) || [])[0];
+  if (!script) add('page contract: no Mermaid <script src=…> — the chart cannot render');
+  else {
+    if (!/\bintegrity=/i.test(script)) add('page contract: the Mermaid <script> lost its integrity attribute — never drop SRI', script);
+    if (!/\bcrossorigin=/i.test(script)) add('page contract: the Mermaid <script> lost its crossorigin attribute', script);
+  }
+
+  // Every clickable node must open something, and the default panel must exist.
+  const stepKeys = new Set();
+  const stepsBlock = (html.match(/const\s+STEPS\s*=\s*\{([\s\S]*?)\n\s*\};/) || [])[1];
+  if (stepsBlock) for (const m of stepsBlock.matchAll(/^\s{0,8}([A-Za-z_]\w*)\s*:\s*\{/gm)) stepKeys.add(m[1]);
+  if (!stepKeys.size) add('page contract: no STEPS entries found — every node panel would be empty');
+  else {
+    const clicked = [...graphText.matchAll(/^\s*click\s+(\w+)\s/gm)].map((m) => m[1]);
+    const orphan = [...new Set(clicked.filter((id) => !stepKeys.has(id)))];
+    if (orphan.length) add(`page contract: click wired for node(s) with no STEPS entry: ${orphan.join(', ')} — clicking them opens nothing`);
+    const dflt = (html.match(/DEFAULT_NODE\s*=\s*["'](\w+)["']/) || [])[1];
+    if (!dflt) add('page contract: DEFAULT_NODE is not set — the panel is empty on load');
+    else if (!stepKeys.has(dflt)) add(`page contract: DEFAULT_NODE "${dflt}" is not a STEPS key — the panel is empty on load`);
+  }
+  return out;
+}
+
 function validateFile(file) {
   let html;
   try { html = readFileSync(file, 'utf8'); }
@@ -80,6 +145,7 @@ function validateFile(file) {
   const blocks = mermaidBlocks(html);
   if (blocks.length === 0) return [{ line: 0, msg: 'no <pre class="mermaid"> block found' }];
   const findings = [];
+  if (looksLikeFinishedPage(html)) findings.push(...structuralFindings(html, blocks.map((b) => b.text).join('\n')));
   for (const b of blocks) {
     const lines = b.text.split('\n');
     lines.forEach((raw, i) => {

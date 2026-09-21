@@ -14,10 +14,63 @@
   ],
   "checks": {
     "node-nonascii": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the non-ASCII test goes back to edge labels only, so an em-dash in a NODE label sails through and btoa() throws at render in the browser -- the exact regression this check was written for",
+          "env": "FLOWCHART_VALIDATE_OVERRIDE",
+          "file": "assets/validate.mjs",
+          "find": "  if (/[^\\x00-\\x7F]/.test(text)) {",
+          "replace": "  if (edge && /[^\\x00-\\x7F]/.test(text)) {"
+        }
+      ]
     },
     "pan-zoom-fullscreen": {
-      "expect": "green"
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the template loses its fullscreen entry point, so the chart cannot be opened full-screen and a large graph is unreadable in the panel-width column",
+          "env": "FLOWCHART_TEMPLATE_OVERRIDE",
+          "file": "assets/template.html",
+          "find": "    else if (chart.requestFullscreen) chart.requestFullscreen();",
+          "replace": "    else if (chart.requestNothing) chart.requestNothing();"
+        }
+      ]
+    },
+    "page-structure-enforced": {
+      "expect": "green",
+      "_note": [
+        "The only check here that asserts against the PAGE rather than label escaping.",
+        "validate.mjs is the skill's stated load-bearing gate but only ever read Mermaid labels, so a",
+        "page with no h1, no styles and no Mermaid script printed PASS. Observed while building a real",
+        "flowchart. Proven RED on that baseline.",
+        "Assertion 3 (the unfilled template must fail) has no mutation of its own: it trips BOTH the",
+        "placeholder and the marker finding, so neutering either one leaves the other and the assertion",
+        "still holds. It is guarded by the same reporting path as assertion 1, which mutation 3 breaks."
+      ],
+      "mutations": [
+        {
+          "why": "the structural pass is never invoked, so a page that is rubble below the graph passes on clean labels alone",
+          "env": "FLOWCHART_VALIDATE_OVERRIDE",
+          "file": "assets/validate.mjs",
+          "find": "  if (looksLikeFinishedPage(html)) findings.push(...structuralFindings(html, blocks.map((b) => b.text).join('\\n')));",
+          "replace": ""
+        },
+        {
+          "why": "the page contract fires on bare mermaid fragments too, which turns every sibling fixture in this suite red -- the over-broad fix that satisfies the invariant by breaking the suite",
+          "env": "FLOWCHART_VALIDATE_OVERRIDE",
+          "file": "assets/validate.mjs",
+          "find": "function looksLikeFinishedPage(html) {",
+          "replace": "function looksLikeFinishedPage(html) {\n  return true;"
+        },
+        {
+          "why": "structural findings are still computed but never recorded -- the refactor that keeps every call site and silently drops the reporting, which no assertion on a sub-check would catch",
+          "env": "FLOWCHART_VALIDATE_OVERRIDE",
+          "file": "assets/validate.mjs",
+          "find": "  const add = (msg, needle) => out.push({ line: at(needle), msg });",
+          "replace": "  const add = () => {};"
+        }
+      ]
     }
   }
 }
