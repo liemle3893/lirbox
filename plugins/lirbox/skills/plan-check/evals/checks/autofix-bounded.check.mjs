@@ -70,14 +70,44 @@ const assertions = [
     want: 'SKILL.md itself must state that the input plan is never modified — the repair lands in a sibling artifact',
   },
   {
-    id: 'refuted-never-autofixed',
+    id: 'authorship-never-autofixed',
     where: 'references/autofix.md',
-    // The bright line: a wrong model of reality is a decision, not a transcription. The REASON
-    // must be stated with the exclusion — elsewhere the doc notes REFUTED is "never autofixable"
-    // while explaining NO-GO, and an assertion satisfied by that sentence would not notice this
-    // rule being deleted (it did not, until prove-checks said so).
-    ok: someBlock(autofix, /REFUTED/, /never|not autofix|excluded|must not/i, /design|authorship|transcription/i),
-    want: 'REFUTED rows must be excluded from autofix by name, WITH the reason — repairing them is design, not transcription',
+    // The bright line, stated on the axis that actually carries it: the FIX CLASS. It was written
+    // as a ban on the REFUTED *status*, which is a different axis — the doc's own mechanical list
+    // holds refutations (a moved symbol, a command form proven not to work), so it forbade the
+    // repairs it had just authorised, and made "REFUTED + mechanical" inexpressible downstream.
+    // The REASON must travel with the exclusion: an assertion matching only "needs-decision" would
+    // not notice the rule collapsing back into a status ban.
+    // Anchored to the enumerated exclusion LIST, not to the section prose. The section opens with
+    // a paragraph stating the fix-class rule, and an assertion scanning the whole section stayed
+    // green when the bullet was deleted (prove-checks caught exactly that false-green) — the
+    // paragraph covered for the missing item. The bullets are what an agent reads to decide a
+    // specific row, so the bullets are what this asserts on.
+    ok: (() => {
+      const section = (autofix.split(/^## What needs a decision[^\n]*$/m)[1] || '').split(/^## /m)[0];
+      const bullets = section.split(/^- /m).slice(1);
+      return bullets.some(
+        (b) => /must not touch|never autofix|not autofixed|excluded/i.test(b) &&
+               /design|authorship|not (say|establish)|new approach/i.test(b)
+      );
+    })(),
+    want: 'the exclusion list must carry a BULLET excluding authorship-class repair WITH the reason — a section paragraph must not be able to cover for a deleted item',
+  },
+  {
+    id: 'status-is-not-the-gate',
+    where: 'references/autofix.md',
+    // Guards the re-axing itself. Without this, restoring "REFUTED is never autofixed" alongside
+    // the new prose would leave every other assertion green while the contradiction returned.
+    ok: /REFUTED/.test(autofix) && /not the (line|gate)|never the status|not the status|fix class, never/i.test(autofix),
+    want: 'the doc must say explicitly that REFUTED is NOT the line — otherwise the status ban can creep back in beside the fix-class rule',
+  },
+  {
+    id: 'verdict-improves-only-on-re-verification',
+    where: 'references/autofix.md',
+    // The invariant the old status ban was a blunt proxy for, now carrying the weight alone: a
+    // verdict may move because a row was re-checked, never because the text was edited.
+    ok: someBlock(autofix, /verdict/i, /only|never/i, /re-?verif|re-?check/i),
+    want: 'the verdict must be stated as improvable ONLY by re-verification, never by the edit — this is what replaces the blanket ban',
   },
   {
     id: 'autofix-forces-reverification',

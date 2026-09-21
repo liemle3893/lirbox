@@ -81,16 +81,19 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
    DoD criterion were met, would the stated goal be achieved?*
 7. **Verdict** — `NO-GO` if any `REFUTED` on a critical path; else
    `GO-WITH-CONDITIONS` if any open item (`UNVERIFIED` / `BLIND-SPOT-RISK`) remains;
-   else `GO`. Every open item becomes a condition-to-clear. Tag each open row
+   else `GO`. Every open item becomes a condition-to-clear. Tag each `REFUTED` and open row
    `fix: mechanical` (the repair is determined by the finding) or `fix: needs-decision`.
+   `REFUTED` is tagged too: the fix **class** decides what autofix may touch, never the status,
+   and a refutation can be either — a renamed symbol is transcription, a wrong approach is not.
    A `NO-GO` must state, per `REFUTED` row, **what would have to change to clear it** —
    a verdict with no route is a dead end, not a finding.
 8. **Emit the report** — copy `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/assets/template.html`
    to `./plan-check-<slug>.html` and fill it. **Lead with the verdict-changing risks**
    (refutations, blind-spots, conditions); mechanically-verified rows last. Keep the
    `<style>` block unchanged.
-   Carry step 7's disposition onto **every open row** — `<span class="fix">fix: mechanical</span>`
-   or `fix: needs-decision`; machine-checked, and drop the span on rows that are not open.
+   Carry step 7's disposition onto **every `REFUTED` and open row** —
+   `<span class="fix">fix: mechanical</span>` or `fix: needs-decision`; machine-checked, and drop
+   the span on `VERIFIED` / `UNSTATED-ASSUMPTION` rows.
    Fill the **Definition of done** section AND its machine-readable twin
    (`<script type="application/json" id="dod">`): extract the plan's success criteria, refine
    each to `checkable` (a concrete command, exit 0 = met) or `judged` (needs cited evidence),
@@ -110,7 +113,9 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
     - The input plan is **never modified** — write a sibling `<plan>.autofix.md`.
     - An applied fix invalidates the report: re-run steps 3–6 on every touched row, re-emit,
       then recompute the verdict.
-    - `REFUTED` is never autofixed, so autofix cannot clear a `NO-GO` — only shrink it.
+    - `fix: needs-decision` is never autofixed — **the fix class is the gate, not the status**.
+      A `fix: mechanical` `REFUTED` row IS repaired, and if re-verification then clears it the
+      verdict moves honestly; a `NO-GO` whose refutations all need a decision does not move.
 11. **Offer the handoff** — offer to launch `deep-understanding` on the risky
     assumptions so you internalize what could break, or `plan-deck` to re-author against
     the `REFUTED` rows. Don't auto-run either.

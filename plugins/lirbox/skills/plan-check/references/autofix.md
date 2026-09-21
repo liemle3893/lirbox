@@ -35,8 +35,14 @@ evidence gathered during the check.
 
 ## What needs a decision (never autofixed)
 
-- **`REFUTED`** — the plan's model of reality is wrong. Choosing the new approach is
-  design. Autofix must not touch it, and must not let the plan read as if it had.
+The gate is the **fix class**, never the status. `REFUTED` is not the line: a claim can be
+refuted by evidence that also fully determines its correction (the symbol moved; the target
+does not exist), and transcribing that is not a decision. What is excluded is authorship —
+any repair where the correct text is not already established, whatever the row's status.
+
+- **A `REFUTED` row whose repair needs a new approach** — the plan's model of reality is
+  wrong and the evidence does not say what to do instead. Choosing that is design. Autofix
+  must not touch it, and must not let the plan read as if it had.
 - **`BLIND-SPOT-RISK`** — a risk nobody weighed. The response is a judgement call about
   cost and appetite, which is the author's.
 - **`UNVERIFIED` needing a live system** — no evidence exists yet to transcribe.
@@ -44,12 +50,23 @@ evidence gathered during the check.
   plan records.** A file claimed by two tasks is *reported*; whether to merge the tasks or
   declare them serial is the author's call, not a repair.
 
-## NO-GO is not cleared by autofix
+## NO-GO is cleared by re-verification, never by the edit
 
-A `NO-GO` means a critical-path claim is `REFUTED`, and that class is never autofixable —
-so autofix can never turn `NO-GO` into `GO`. What it does is shrink the decision set:
-clear the mechanical rows so the remaining blockers are only the ones that genuinely need
-a human. The verdict is then recomputed from re-verified rows alone.
+<non-negotiable>
+A verdict may improve ONLY because a row was re-checked against reality and came back
+clean — never because the plan's text now reads better. Recompute the verdict from
+re-verified rows alone. This is what stops laundering, and it is the whole of what stops
+it; no status is banned from repair to achieve it.
+</non-negotiable>
+
+So a `NO-GO` carrying one `fix: mechanical` refutation — the plan names `make test-all`,
+the Makefile has only `test` — can honestly become `GO-WITH-CONDITIONS`: the row is
+transcribed to what the repo holds, re-run through steps 3–6, and comes back `VERIFIED`
+on evidence. The verdict moved because the claim is now true, not because it was reworded.
+
+A `NO-GO` whose refutations are all `fix: needs-decision` does not move, and must not be
+made to. Autofix shrinks the decision set — clearing the mechanical rows so the remaining
+blockers are only the ones that genuinely need a human.
 
 To stop `NO-GO` being a dead end, each `REFUTED` row must carry **what would have to
 change to clear it** — the concrete claim, evidence, or approach that would need to

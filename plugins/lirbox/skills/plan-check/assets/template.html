@@ -116,10 +116,13 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
     <tbody>
       <!-- One <tr class="claim"> per proposition. data-quadrant and data-status are REQUIRED
            and machine-checked. Put "(needs: …)" detail in the Status cell text, not the attribute.
-           Every OPEN row (UNVERIFIED / BLIND-SPOT-RISK) MUST also carry a fix disposition —
+           Every REFUTED / UNVERIFIED / BLIND-SPOT-RISK row MUST also carry a fix disposition —
            <span class="fix">fix: mechanical</span> when the repair is fully determined by the
-           finding, <span class="fix">fix: needs-decision</span> when it is not. Machine-checked;
-           drop the span on rows that are not open. -->
+           finding, <span class="fix">fix: needs-decision</span> when it is not. REFUTED is
+           included on purpose: it is the fix CLASS, not the status, that decides whether autofix
+           may act, and a REFUTED row can be either (a renamed symbol is transcription; a wrong
+           approach is authorship). Machine-checked; drop the span on VERIFIED /
+           UNSTATED-ASSUMPTION rows. -->
       <tr class="claim" data-quadrant="{{QUADRANT}}" data-status="{{STATUS}}">
         <td>{{PROPOSITION}}</td>
         <td><span class="tag q-{{QUADRANT}}">{{QUADRANT}}</span></td>

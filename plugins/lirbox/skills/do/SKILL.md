@@ -19,6 +19,10 @@ It replaces nothing intake/route-guard/board/orch-lane already do; it is the thi
    failed" case that skips routing.
 2. **Announce the route in ONE line**: the route, the reason `route.json` gives, and — for
    `scope` — the missing done-criterion. Nothing more before acting.
+   **Read `decided_by` and say which it is.** `jev` means the route was measured; `fallback` means
+   nothing was — intake could not reach a model and wrote the cheapest route rather than wedging
+   you. Both print `inline`, so a dead API key and a confident go-ahead are the same word on the
+   same line unless you say so.
 3. **Act**, per the table below.
 </flow>
 
@@ -64,6 +68,8 @@ backstop for the hook.
 - **`inline` executes immediately.** No confirmation step; the route already is the approval.
 - **`lane` always asks**, even though the command was already printed — printing isn't starting.
 - **A `reject` is not a negotiation.** No softened re-scope, no smaller version offered.
+- **An unmeasured route says so.** `decided_by: fallback` is not a verdict, it is intake declining
+  to wedge you; never report it as though a model agreed.
 </hard-rules>
 
 <multi-slice>
