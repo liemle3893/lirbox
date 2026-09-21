@@ -44,11 +44,18 @@ for (const sub of ['references', 'assets', 'scripts']) {
 }
 for (const [rel, p] of shipped) ok(statSync(p).size > 0, `${rel} is not empty`);
 
-// 3. Shell scripts parse. A skill whose one command is a broken script fails at the last step.
+// 3. Shell scripts parse — with the interpreter their shebang names, never a blanket `sh`.
+//    `sh` is bash on macOS and dash on Linux CI: a bash script with arrays passes `sh -n` on a
+//    laptop and fails it in CI, which is how the first version of this floor went red on the
+//    one machine that gates the merge. A script is valid in the shell it declares.
+const SHELLS = ['bash', 'zsh', 'dash', 'ksh', 'sh'];
 for (const [rel, p] of shipped.filter(([r]) => extname(r) === '.sh')) {
+  const bang = (readFileSync(p, 'utf8').split('\n')[0].match(/^#!\s*(\S+)(?:\s+(\S+))?/) || []);
+  const named = bang[1] ? (bang[1].endsWith('/env') ? bang[2] : bang[1].split('/').pop()) : 'sh';
+  const shell = SHELLS.includes(named) ? named : 'sh';
   let parses = true;
-  try { execFileSync('sh', ['-n', p], { stdio: 'pipe' }); } catch { parses = false; }
-  ok(parses, `${rel} parses (sh -n)`);
+  try { execFileSync(shell, ['-n', p], { stdio: 'pipe' }); } catch { parses = false; }
+  ok(parses, `${rel} parses (${shell} -n, from its shebang)`);
 }
 
 // 4. A shipped template is still a template: it has holes left, and it is still a whole page.
