@@ -59,9 +59,11 @@ never buys the expensive route: a low-confidence `lane` downgrades to `inline`, 
 
 ## `jev.mjs` — typed judgment
 
-`POST https://openrouter.ai/api/v1/systemone` (override via `JEV_API_URL`), model pinned
-`jev-1.13` (a floating alias would silently rescale the metric), key `OPENROUTER_API_TOKEN` (env, or
-the gitignored repo-root `.env`). Question types: **Choice / Score / Noul**.
+`POST https://openrouter.ai/api/v1/systemone`, model pinned `jev-1.13` (a floating alias would
+silently rescale the metric). Env is **TypeSafe's own contract**, never invented names:
+`TYPESAFE_API_KEY` (via OpenRouter it holds the OpenRouter key; env, or the gitignored repo-root
+`.env`) and `TYPESAFE_BASE_URL` — a **base**, default `https://openrouter.ai/api`; the client
+appends `/v1/systemone`, as the SDKs do. Question types: **Choice / Score / Noul**.
 
 **Fails CLOSED by default**: any failure writes the literal token `NOT_MEASURED` as the answer and
 exits non-zero, so a caller can never confuse "scored low" with "did not score". `--fail-open`
