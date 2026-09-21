@@ -1,1 +1,0 @@
-GREEN: implement until the RED tests pass; never weaken or delete tests to go green.
