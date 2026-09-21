@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Expectation manifest for this skill's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern). MUST exit 0 or 1.",
+    "",
+    "A check file missing from this manifest FAILS the gate: an unlisted check is unguarded.",
+    "No acceptance-checks yet -- this skill has a FLOOR only. The floor is the always-on fence;",
+    "a check is added the first time a concern about this skill is turned into a RED-on-baseline",
+    "command. LOCKED (evals/**)."
+  ],
+  "checks": {}
+}
