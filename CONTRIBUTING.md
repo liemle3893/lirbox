@@ -129,8 +129,11 @@ gh pr create --fill
 `.githooks/pre-push` refuses the same push locally, before the network call.
 `--no-verify` skips the hook but not the ruleset — the server still rejects it.
 
-Run branches from the loop skills (`improve/*`, `opt/*`, `wf/*`, `evals/*`) are
-unrestricted; they already finish by opening a PR.
+The ruleset only protects `main` — any other branch pushes freely and is not itself PR-gated.
+(Historical note: `improve/*`, `opt/*` and `wf/*` were the run-branch prefixes of the
+whetstone/prospector/conductor Workflow-tool loops, which pushed such a branch and then opened
+their own PR onto `main`. Those loops are gone, so nothing produces branches with those prefixes
+anymore.)
 
 ## Testing
 
@@ -149,11 +152,11 @@ triggers. Advisory only: it reports, it does not edit.
 
 ### Tier 2 — evals (REQUIRED — this is the real release gate)
 
-A skill with no floor cannot be regression-tested, and **cannot be improved by `whetstone`
-later**: whetstone's keep-rule is *floor passes AND the item's check goes RED→GREEN AND the
-surface-lock holds*, so with no floor there is nothing to tunnel-proof against. Skills that
-shipped without one (`codewalk`, `c4-model`, `deep-understanding`, `pr-writeup`) are stuck
-ungated and unimprovable — do not add to that list.
+A skill with no floor cannot be regression-tested: there is nothing to tunnel-proof a change
+against, whether the change is made by hand or by a future eval-gated improvement loop (such a
+loop's keep-rule would be *floor passes AND the item's check goes RED→GREEN AND the surface-lock
+holds*). Skills that shipped without one (`codewalk`, `c4-model`, `deep-understanding`,
+`pr-writeup`) are stuck ungated — do not add to that list.
 
 ```
 plugins/lirbox/skills/<name>/evals/
@@ -177,10 +180,10 @@ node scripts/evals-all.mjs --fast
 #### Changing a shipped skill — the check gate
 
 > **Every skill change lands behind a discrimination-gated frozen check and a green floor.**
-> Whether a `whetstone` loop or a human executes the change is a **cost decision**, not a rule.
+> Whether a scripted loop or a human executes the change is a **cost decision**, not a rule.
 
-The check must be **proven RED on the baseline** before the fix
-(`node plugins/lirbox/skills/whetstone/scripts/check-baseline.cjs "<check cmd>"` → `DISCRIMINATING`)
+The check must be **proven RED on the baseline** before the fix — run the check command against
+the unfixed baseline and confirm it fails (`<check cmd>; test $? -ne 0 && echo DISCRIMINATING`) —
 and registered in that skill's `checks-manifest.json`. A check that was never seen failing is not a
 gate.
 
@@ -195,17 +198,8 @@ structure — a variable name, a nearby token — instead of an invariant.
 Do **not** bother promoting green checks into `evals/floor/` — `floor/06-checks-manifest.test.mjs`
 already runs every check on every floor run and enforces its expected state.
 
-#### When to spend a `whetstone` run rather than editing directly
-
-Worth it for: unattended/overnight work, a backlog large enough that per-item revert will actually
-fire, or a fixer you don't trust to self-police the surface. At small N, attended, it is mostly
-overhead — and the loop **cannot fix a stale check**, because `evals/**` is locked to it, so a wrong
-check silently shapes the fix.
-
-If you do run it, **push the frozen checks first**: the worktree is cut from the pushed remote tip,
-so locally-committed checks are invisible and the floor silently runs a smaller set. After an
-improve-PR merges, **prune** resolved items from `feedback/<skill>.jsonl` — it is the queue of OPEN
-concerns only.
+After the fix lands, **prune** the resolved item from `feedback/<skill>.jsonl` — it is the queue of
+OPEN concerns only.
 
 ### Tier 3 — Harbor: containerised behavioural test — REQUIRED, NOT OFFERED
 
@@ -336,9 +330,11 @@ Check each dimension separately — `reward` hit 1.000 there while `quality` did
 
 Four honest caveats.
 
-Harbor now has **one task proven end-to-end** (`conductor/scaffold-multiphase`: nop + oracle +
-a paid `claude-code` run, both dimensions scoring). `swe-run.mjs` is still the execution engine for
-scorecards; treat tier 3 as a working instrument for one task, not yet the default path.
+Harbor was first proven end-to-end on `conductor/scaffold-multiphase` (nop + oracle + a paid
+`claude-code` run, both dimensions scoring) — that task is gone along with the conductor skill it
+graded, but the instrument is the same one other skills' Harbor tasks now use. `swe-run.mjs` is
+still the execution engine for scorecards; check `plugins/lirbox/skills/*/harbor/tasks/` for the
+current count before assuming tier 3 is the default path everywhere.
 
 When putting a skill in front of the agent, **never point at `plugins/lirbox/skills`** — skills keep
 their eval material inside their own directory, so an unpruned tree puts every task's hidden graders
@@ -374,9 +370,9 @@ tests/
 ```
 
 Harbor scores the task on the **`reward`** key. That is what makes the split load-bearing rather
-than cosmetic: the whetstone loop keeps or reverts a change on that scalar, so a stochastic judge
-must never contribute to it. Keep the judge under its own key and **never add a `tests/reward.toml`
-aggregation** that folds it back in.
+than cosmetic: a keep-or-revert decision (by hand, or by a future improvement loop) is made on
+that scalar, so a stochastic judge must never contribute to it. Keep the judge under its own key
+and **never add a `tests/reward.toml` aggregation** that folds it back in.
 
 **Run each dimension as its own `rewardkit` process.** Passing both directories to one invocation
 puts them in a single `asyncio.TaskGroup`, where *any* dimension raising aborts the whole run and

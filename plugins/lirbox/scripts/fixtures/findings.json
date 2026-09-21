@@ -1,0 +1,43 @@
+{
+  "findings": [
+    {
+      "file": "src/auth/session.ts",
+      "line": 88,
+      "severity": "Critical",
+      "title": "Session token compared with == , allowing type coercion bypass",
+      "detail": "The new branch compares the supplied token to the stored one with ==, so a crafted non-string value coerces to equal.",
+      "confidence": 95
+    },
+    {
+      "file": "src/auth/session.ts",
+      "line": 131,
+      "severity": "High",
+      "title": "Expired sessions are refreshed instead of rejected",
+      "detail": "refresh() is called before the expiry check, so an expired session is silently extended.",
+      "confidence": 85
+    },
+    {
+      "file": "src/util/log.ts",
+      "line": 12,
+      "severity": "Low",
+      "title": "console.log left in the diff",
+      "detail": "Debug logging. The linter already flags this.",
+      "confidence": 20
+    },
+    {
+      "file": "src/api/handler.ts",
+      "line": 47,
+      "severity": "Medium",
+      "title": "Unbounded retry loop on 5xx",
+      "detail": "Retries without a cap; a persistent 5xx spins forever.",
+      "confidence": 70
+    },
+    {
+      "file": "src/api/handler.ts",
+      "line": 203,
+      "severity": "Medium",
+      "title": "Variable shadows an outer binding",
+      "detail": "Pre-existing on a line the diff did not modify."
+    }
+  ]
+}

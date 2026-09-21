@@ -6,8 +6,8 @@
 // CANNOT share a runner. This runner is the floor command:
 //     node plugins/lirbox/skills/flowchart/evals/run.mjs
 // It exits 0 iff every evals/floor/*.test.mjs passes; 1 if any fails or none are found.
-// Acceptance-checks live separately under evals/checks/ and are run one-at-a-time by the
-// whetstone loop (each is its own command in feedback/flowchart.jsonl).
+// Acceptance-checks live separately under evals/checks/ and are run one-at-a-time (each is its
+// own command, drafted from a feedback/flowchart.jsonl item).
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

@@ -15,6 +15,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 
 | Skill | What it does |
 |-------|--------------|
+| **`do`** | The single entrypoint. Hand it any task — "do this", "handle this" — and it routes the task through `intake.mjs` before anything happens to it: `reject` (say no, stop), `scope` (hand to `lirbox-planner` for one slice), `inline` (do it now, the routing decision is the approval) or `lane` (print the `orch-lane.sh start` command and ask). Uncertainty never buys the expensive route. |
 | **`pr-writeup`** | Turn any pull request into a self-contained HTML write-up (TL;DR, motivation, file-by-file tour, where-to-focus, test plan, rollout). Features, bugfixes, refactors, docs. |
 | **`plan-deck`** | Turn a spec or task into a self-contained HTML implementation plan (milestone timeline, data-flow, mockups, key code, risks, open questions). Feature, backend, infra/migration, refactor. |
 | **`codewalk`** | Trace one path through a real codebase into a self-contained HTML walkthrough (path diagram, numbered steps with verified `file:line` + code excerpts, key files, gotchas). For onboarding or auditing a flow/subsystem. |
@@ -23,28 +24,27 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`sequence-diagram`** | Draw a time-ordered interaction as a self-contained interactive HTML sequence diagram — Mermaid sequenceDiagram (autonumbered) + a numbered step list driving a clickable detail panel (who→who, sync/async, code at the call site). Note: renders via a CDN, so this one needs internet. |
 | **`c4-model`** | Model a system's architecture as a C4 model (LikeC4): one `.c4` source → landscape/container/component drill-down views, built into a single self-contained interactive HTML page (offline-viewable) + the committed `.c4` source of truth. Note: toolchain runs in a throwaway docker container (pinned image, ~1 GB first pull) — needs docker, installs nothing on the host. |
 | **`deep-understanding`** | Interactive tutor: teaches you to deeply understand a PR/change/subsystem, incrementally — assesses what you know, fills gaps, quizzes you (problem → solution → impact), and doesn't stop until mastery is verified. Not a document — a guided session. |
-| **`conductor`** | Drive the Workflow tool with durable on-disk state, crash/restart resume, worktree isolation, opt-in enforcement gates, and a cost report. For long or interruptible multi-subagent runs (migrations, audits, staged delivery). |
-| **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE surface — keeping a change only when it strictly beats the metric **and** passes the gate, within an optional edit-size budget — then opens a PR for review (never auto-merges). For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost — or a skill's held-out task-pass-rate (see the [`skill-train`](./plugins/lirbox/skills/prospector/references/skill-train.md) recipe). |
-| **`whetstone`** | Overnight, eval-gated skill improver on the same backbone: grinds a backlog through a deterministic floor + per-item acceptance-check (fail-before/pass-after), keeping only changes a check confirms, plus an optional compaction pass that shrinks the skill — then opens a PR for review (never auto-merges). Backlog items are filed by hand **or harvested from failing eval tasks**; SkillOpt-derived controls (train/val scoring, edit-size budget) keep fixes general. For sharpening skills (or other deterministic-output targets). See the [cookbook](./docs/skill-improvement-cookbook.md). |
-| **`arena`** | Reproducible pairwise **leaderboard** on the same backbone: runs `conductor` against frozen fixture tasks under multiple configs (model/mode/effort), judges the **delivered diffs** pairwise (3 runs × 5 position-swapped passes), and emits a Bradley-Terry/win-rate ranking — then opens a PR for review (never auto-merges). For answering "did this change actually improve conductor's output across a task suite?" when there's no single scalar to hill-climb. |
-| **`loom`** | Graph-shaped delivery — gate failures loop back, independent work forks and rejoins, the graph rewrites itself under invariants, previewed and edited in the browser before launch. |
-| **`lanes`** | The other execution model: work runs in **external agent processes** (herdr panes, worktrees, any harness) that outlive the session, so an orchestrator can die and re-attach. Append-only JSON store read through DuckDB views; `transition.mjs` refuses a self-report becoming `verified` and refuses `published` without `verified` in history; `reconcile.mjs` recomputes state from the artifacts and reports drift. Where `conductor`/`loom` gate structurally in pure JS, this gates procedurally — prevention plus detection, stated as weaker. |
+| **`plan-check`** | Rigorously verify a plan (ops/infra runbook or code-change plan) against the real repo/docs before it's executed — pressure-tests claims, surfaces unknowns, emits a self-contained HTML report with a GO / GO-WITH-CONDITIONS / NO-GO verdict. Read-only; never runs commands against live systems. |
+| **`feedback`** | User-invoked only: turns a concern about a lirbox skill into a scrubbed, structured GitHub issue on `liemle3893/lirbox`. Never auto-invoked. |
 | **`lane-config`** | Set up or change the per-project orchestration config that decides which harness, model and reasoning effort each lane profile runs on, plus lane caps, timeouts and the setup commands every brief carries. Stored per repo (keyed like the lane ledger), written only through validating subcommands — `detect` measures, `init` scaffolds with **no** profiles, `validate` refuses a config that cannot decide a lane. Profiles are the user's judgement, asked once, never guessed per spawn. |
 | **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over the word budget or dense with long prose), unbalanced/missing XML structural tags, weak frontmatter triggers, and oversized inline flowcharts or reference files. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
 
 ### Agents
 
-Generic, public-ready subagents (in `plugins/lirbox/agents/`) — the default enforcement-gate
-agents for `conductor`, also usable standalone:
+Generic, public-ready subagents (in `plugins/lirbox/agents/`). Most are dispatched as lanes or gates
+by `lirbox-herdr-orchestrator`; all ten are usable standalone:
 
 | Agent | Role |
 |-------|------|
+| **`lirbox-planner`** | Plans the **next one slice** of a run — what it delivers, criteria as `command :: expected value`, what it touches — and refuses to enumerate the slice after it. Re-invoked from each slice's *actual* result, not from an up-front decomposition. |
+| **`lirbox-builder`** | Implements one scoped slice inside a single lane worktree, against acceptance criteria someone else wrote. Reports observed numbers, never verdicts, and stops at the first red rather than debugging past it. |
+| **`lirbox-verifier`** | Independently verifies a lane's result at a named SHA — re-runs the checks, breaks them on purpose to prove they can fail, reports quantified pass/fail. Never fixes what it finds. Also the profile behind the code gate. |
 | **`lirbox-test-writer`** | Test-first (RED): writes failing tryve-E2E/unit tests from acceptance criteria before implementation. |
 | **`lirbox-tryve-enhancer`** | Hardens coverage from the engineering perspective — error paths, boundaries, auth, concurrency — from the diff. |
 | **`lirbox-code-reviewer`** | Reviews changed code (correctness/security/rules/quality) **and fixes** Critical/High, keeping the build green. |
 | **`lirbox-docs-writer`** | Writes a concise implementation summary into `docs/changes/` from the diff + goal + notes. |
 | **`lirbox-web-verifier`** | Web half of the frontend verification gate: writes Playwright E2E specs for assertable criteria and captures per-viewport screenshot/console evidence for judged ones; engine chain playwright → browser-MCP → OS-script, tooling failure never silently passes. |
-| **`lirbox-herdr-orchestrator`** | Runs a multi-agent session across Herdr panes — scopes work, writes success criteria *before* either lane starts, delegates to implementor and verifier panes, adjudicates their reports, commits and pushes. Never edits code, never verifies with its own hands, never believes a self-report. Pairs with the `lanes` skill. |
+| **`lirbox-herdr-orchestrator`** | Runs a multi-agent session across Herdr panes — scopes work, writes success criteria *before* either lane starts, delegates to implementor and verifier panes, adjudicates their reports, commits and pushes. Never edits code, never verifies with its own hands, never believes a self-report. Drives `plugins/lirbox/scripts/orch-lane.sh` and the append-only run store in `plugins/lirbox/scripts/lanes/`. |
 | **`lirbox-mobile-verifier`** | Mobile half of the frontend verification gate: detects RN/Flutter/native, writes Maestro/Appium E2E flows, falls back to raw `simctl`/`adb` evidence capture on simulators/emulators; raw tier is honestly flagged evidence-only. |
 
 ## Install
@@ -59,6 +59,7 @@ In Claude Code:
 Then use a skill — just describe the task:
 
 ```text
+do this: <task>                     # do (routes it first — reject/scope/inline/lane)
 write up PR 1059                    # pr-writeup
 write up PR 1059 verbose            # snippet on every non-trivial file
 make a plan-deck for <spec/task>    # plan-deck
@@ -68,14 +69,11 @@ diagram the components of <service>  # component-diagram
 sequence-diagram the login flow      # sequence-diagram
 C4 model of <system>                # c4-model (LikeC4; needs docker)
 help me deeply understand PR 1059   # deep-understanding (interactive, quizzes you)
-implement <plan/spec> with resume   # conductor (durable, crash-safe multi-subagent run)
-make the /search endpoint faster    # prospector (proposes a metric + gate, confirms once)
-improve the flowchart skill         # whetstone (overnight, eval-gated, from a backlog)
-which conductor config wins         # arena (pairwise leaderboard over frozen fixtures)
+verify this migration plan          # plan-check (pressure-tests it, GO/NO-GO report)
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:arena`, `lirbox:lanes`, `lirbox:skill-lint`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:do`, `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
 
 ## Test locally (no install)
 
@@ -102,18 +100,15 @@ pushing new commits is enough for installed users to pick up updates on
 
 ## Guides
 
-- [Making a skill whetstone-ready](./docs/whetstone-ready.md) — the floor + acceptance-check
-  scaffolding a skill needs before `whetstone` can grind it.
-- [Skill-improvement cookbook](./docs/skill-improvement-cookbook.md) — the end-to-end SkillOpt-style
-  flow: scored tasks (train/val) → harvest failures into a backlog → `whetstone` with a compaction
-  pass → review the auto-PR. Worked example with real before/after numbers.
-- [`skill-train` recipe](./plugins/lirbox/skills/prospector/references/skill-train.md) — point
-  `prospector` at a skill to hill-climb its held-out task-pass-rate.
-- [Running the arena](./docs/arena-guide.md) — how to run `arena` (skill + manual orchestration),
-  add fixture tasks, compare conductor **versions** via `--plugin-dir`, and read the leaderboard.
-  Includes a worked run (current vs baseline conductor) and the live-run gotchas.
-- [SkillOpt exploration](./docs/skillopt-exploration.md) — why these controls exist (the Microsoft
-  SkillOpt mapping onto `prospector`/`whetstone`) and the empirical run that validated them.
+Getting a skill to Tier 2 (floor + acceptance-checks) and the check-gate discipline for changing
+one afterward are covered in [CONTRIBUTING.md](./CONTRIBUTING.md#testing).
+
+The `conductor` / `loom` / `prospector` / `whetstone` / `arena` loops that used to automate parts of
+this were **deleted** along with the Workflow tool they were built on; that discipline is now done by
+hand. Their guides under `docs/` (`arena-guide.md`, `arena-handoff.md`, `whetstone-ready.md`,
+`skill-improvement-cookbook.md`, `skillopt-exploration.md`, `loop-consolidation.md`, `docs/plans/`)
+are kept as **historical records of what was measured** — the scripts and skills they instruct you to
+run no longer exist, so read them for the findings, not for the commands.
 
 ## Extending
 

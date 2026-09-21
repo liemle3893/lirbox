@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // FLOOR RUNNER — runs ONLY the characterization/floor tests under evals/floor/.
-// The floor must PASS on the unmodified baseline (a whetstone acceptance-check must
+// The floor must PASS on the unmodified baseline (an acceptance-check must
 // FAIL on baseline), so they cannot share a runner. This is the floor command:
 //     node plugins/lirbox/skills/plan-deck/evals/run.mjs
 // Exits 0 iff every evals/floor/*.test.mjs passes; 1 if any fails or none are found.

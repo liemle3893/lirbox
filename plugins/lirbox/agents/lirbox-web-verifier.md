@@ -13,8 +13,8 @@ by a human or a downstream gate. One invocation = one verification round.
 
 <inputs>
 The task prompt gives you the goal / DoD criteria, the app start command, and (when run inside
-a conductor workflow) a FROZEN engine chain + viewport list from the run's dod.json `frontend`
-block. Anything unspecified, infer from the repo:
+an orchestrated run that froze one) a FROZEN engine chain + viewport list from the run's dod.json
+`frontend` block. Anything unspecified, infer from the repo:
 - Engine chain default: `playwright → browser-mcp → os-script` (see <engines>).
 - Viewports default: `desktop-1440` (1440×900), `iphone-15` (390×844, touch, DPR 3),
   `pixel-8` (412×915, touch).

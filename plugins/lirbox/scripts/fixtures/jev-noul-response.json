@@ -1,0 +1,10 @@
+{
+  "model": "typesafe/jev-1.13-20260917",
+  "answers": {
+    "q1": { "type": "noul", "noul": 0.82 },
+    "q2": { "type": "noul", "noul": 0.14 }
+  },
+  "usage": { "input_tokens": 419, "output_tokens": 35, "cost": 1.7598e-5 },
+  "id": "gen-dec-fixture-noul",
+  "provider": "TypeSafe"
+}

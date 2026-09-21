@@ -14,15 +14,6 @@ docs/superpowers/
 .pr-writeup/
 *-writeup.html
 
-# Conductor / prospector / whetstone / arena runtime state (local; the resume key lives here, not tracked)
-.workflows/
-.optimize/
-.improve/
-.arena/
-
-# Build-time scratch left by loom (graph, state, checks, editor action files)
-.loom/
-
 # Harbor derived build input. A tier-3 task IS its declaration under
 # plugins/lirbox/skills/<skill>/harbor/tasks/<id>/ — Harbor runs that directory directly. The only
 # untrackable piece is environment/skill/, the PRUNED copy of the skill the image installs for the
@@ -34,16 +25,13 @@ plugins/lirbox/skills/*/harbor/tasks/*/environment/skill/
 # results and artifacts). Runtime, per-run, often large — never committed.
 jobs/
 
-# Build-time scratch left by conductor/prospector workers (delivered only via docs/changes, else dropped)
+# Build-time scratch left by lane worker agents (delivered only via docs/changes, else dropped)
 implementation-notes/
 
 # Per-run orchestration store + run ledger written by the herdr orchestrator
 # (dispatch/, evidence/, decisions/, progress/, notes.jsonl, implementation-notes.html).
-# Run scratch — the finished ledger is PROMOTED into docs/changes/<run>/ at publish, like conductor's.
+# Run scratch — the finished ledger is PROMOTED into docs/changes/<run>/ at publish.
 .orchestration/
-
-# Git worktrees created by conductor/prospector/whetstone
-.worktrees/
 
 # Generated single-file HTML artifacts (flowchart / codewalk / plan-deck / component / sequence skills)
 *-flowchart.html
@@ -53,17 +41,11 @@ implementation-notes/
 *-sequence.html
 *-c4.html
 
-# EXCEPTION: conductor's Writeup phase PROMOTES delivery artifacts into docs/changes/<name>/
-# (writeup.html, design.html, notes/*.html, summary.md) — these ARE tracked, they ride the PR.
+# EXCEPTION: the herdr orchestrator's Finish step (via lirbox-docs-writer) PROMOTES a run's
+# implementation summary into docs/changes/<name>/ — these ARE tracked, they ride the PR.
 # Must come AFTER the filename-globs above so it re-includes anything they would catch.
 !docs/changes/
 !docs/changes/**
-
-# EXCEPTION: arena's Finalize phase PROMOTES the leaderboard into docs/arena/<name>/
-# (leaderboard.html, report.md) — tracked so the finalize PR carries a diff.
-!docs/arena/
-!docs/arena/**
-
 
 # graphify machine-local pointers — absolute paths to this machine's interpreter
 # and scan root, rewritten on every run. The rest of graphify-out/ stays tracked.

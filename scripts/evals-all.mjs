@@ -25,7 +25,7 @@
  * Usage:
  *   node scripts/evals-all.mjs              # everything
  *   node scripts/evals-all.mjs --fast       # skip the slow generator nets
- *   node scripts/evals-all.mjs --skill conductor
+ *   node scripts/evals-all.mjs --skill plan-check
  *   node scripts/evals-all.mjs --list       # what would run, run nothing
  *
  * Exit 0 iff every floor passed, every green check is green, every manifest is in sync, and no

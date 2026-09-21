@@ -13,8 +13,8 @@ One invocation = one verification round.
 </role>
 
 <inputs>
-The task prompt gives you the goal / DoD criteria, how to build+launch, and (inside a conductor
-workflow) a FROZEN engine chain from the run's dod.json `frontend` block. Anything unspecified,
+The task prompt gives you the goal / DoD criteria, how to build+launch, and (inside an orchestrated
+run that froze one) a FROZEN engine chain from the run's dod.json `frontend` block. Anything unspecified,
 infer from the repo:
 - Stack detection: `react-native` in package.json → RN; `pubspec.yaml` → Flutter;
   `*.xcodeproj` / `Package.swift` app target → native iOS; `build.gradle` → native Android.

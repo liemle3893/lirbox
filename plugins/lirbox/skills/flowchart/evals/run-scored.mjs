@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// SCORED RUNNER (scaffolded by scaffold-readiness.cjs --scored) — the prospector skill-train metric.
+// SCORED RUNNER (scaffolded by scaffold-readiness.cjs --scored) — a train/val pass-rate metric for
+// this skill. Originally the metric an optimization loop hill-climbed (that loop, and the Workflow
+// tool it ran on, are gone); it remains a standalone way to measure the held-out pass rate by hand.
 // Runs every tasks/<split>/*.test.mjs and prints ONE machine-parseable line:
 //     score=<pass-percentage> (passed=<k>/<n>, split=<split>)
-// prospector metric config (recipe: prospector/references/skill-train.md):
-//     { "cmd": "node plugins/lirbox/skills/flowchart/evals/run-scored.mjs --split val", "parse": "score=([0-9.]+)", "direction": "max" }
 // TRAIN/VAL SPLIT: the keep decision MUST run on --split val (held out); only --split train results
 // may be shown to the propose/fix worker — otherwise the skill overfits the tasks that judge it.
 // Exit 0 iff the score was measured (any pass rate); non-zero only for structural errors.

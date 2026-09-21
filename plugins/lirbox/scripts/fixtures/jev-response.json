@@ -1,0 +1,36 @@
+{
+  "model": "typesafe/jev-1.13-20260917",
+  "answers": {
+    "f0": {
+      "type": "score",
+      "score": 4,
+      "legend": { "0": "lo", "1": "hi" },
+      "probabilities": { "0": 0.0, "1": 0.0, "2": 0.02, "3": 0.08, "4": 0.9 },
+      "confidence": 0.9
+    },
+    "f1": {
+      "type": "score",
+      "score": 2.6,
+      "legend": { "0": "lo", "1": "hi" },
+      "probabilities": { "0": 0.0, "1": 0.05, "2": 0.4, "3": 0.5, "4": 0.05 },
+      "confidence": 0.5
+    },
+    "f2": {
+      "type": "score",
+      "score": 0,
+      "legend": { "0": "lo", "1": "hi" },
+      "probabilities": { "0": 0.88, "1": 0.1, "2": 0.02, "3": 0.0, "4": 0.0 },
+      "confidence": 0.88
+    },
+    "f3": {
+      "type": "score",
+      "score": 3.4,
+      "legend": { "0": "lo", "1": "hi" },
+      "probabilities": { "0": 0.0, "1": 0.02, "2": 0.08, "3": 0.5, "4": 0.4 },
+      "confidence": 0.5
+    }
+  },
+  "usage": { "input_tokens": 4820, "output_tokens": 310, "cost": 2.0244e-4 },
+  "id": "gen-dec-fixture-score",
+  "provider": "TypeSafe"
+}

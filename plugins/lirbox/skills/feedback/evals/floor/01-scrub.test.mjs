@@ -1,5 +1,5 @@
 // FLOOR (behavior characterization) — scrub.cjs redacts PII/secrets and leaves clean prose intact.
-// This is the load-bearing behavior test the floor pins. Locked (evals/**): the whetstone fixer may
+// This is the load-bearing behavior test the floor pins. Locked (evals/**): an automated fixer may
 // NEVER edit this file.
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';

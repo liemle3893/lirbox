@@ -40,7 +40,7 @@
 // the mutated file's path inside the copy. A check with no such escape hatch cannot be mutation-
 // proven — that is a property of the check, and the report says so rather than pretending.
 //
-// Usage:  node scripts/prove-checks.mjs [--skill conductor] [--strict]
+// Usage:  node scripts/prove-checks.mjs --skill <skill> [--strict]
 //         --strict  exit 1 if any declared mutation fails to produce RED (for CI)
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
@@ -52,7 +52,8 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf('--' + n); return i === -1 ? d : argv[i + 1]; };
 const STRICT = argv.includes('--strict');
-const SKILL = arg('skill', 'conductor');
+const SKILL = arg('skill', null);
+if (!SKILL) { console.error('usage: node scripts/prove-checks.mjs --skill <skill> [--strict]'); process.exit(2); }
 
 const SKILL_DIR = join(REPO, 'plugins/lirbox/skills', SKILL);
 const MANIFEST = join(SKILL_DIR, 'evals/checks-manifest.json');
