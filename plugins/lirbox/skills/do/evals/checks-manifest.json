@@ -113,6 +113,80 @@
           "replace": "The fix is to ask the user a few questions, then hand off to `lirbox-planner`"
         }
       ]
+    },
+    "reject-outranks-capability": {
+      "expect": "green",
+      "_note": [
+        "The only check here that asserts against the ROUTER rather than the manual.",
+        "Its four siblings all read SKILL.md; none of them would go RED if decideRoute returned",
+        "'scope' forever, which is how the capability-outranks-reject bug shipped in aad48c7.",
+        "Proven RED on that baseline before the fix: assertion 1 failed, the three guard rails passed."
+      ],
+      "mutations": [
+        {
+          "why": "the reject branch stops returning its own route, so a 0.95-confidence refusal is handed to the planner to be cut smaller — the softened re-scope the route exists to refuse",
+          "env": "INTAKE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/intake.mjs",
+          "find": "route: 'reject',",
+          "replace": "route: 'scope',"
+        },
+        {
+          "why": "the reject branch is never entered at all, so a confident refusal falls through to the bottom of the ladder and reads as permission to proceed",
+          "env": "INTAKE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/intake.mjs",
+          "find": "if (route.choice === 'reject') {",
+          "replace": "if (false) {"
+        },
+        {
+          "why": "the capability gate stops outranking lane, so a prod-credential task buys a worktree this repo cannot give it — the over-broad fix that passes the invariant by deleting the guard rail",
+          "env": "INTAKE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/intake.mjs",
+          "find": "if (cap.noul > MEDIUM && capConf >= HIGH) {",
+          "replace": "if (false) {"
+        },
+        {
+          "why": "lowering the confidence bar lets an uncertain refusal become a verdict, so doubt buys the one route whose cost is that the work never happens at all",
+          "env": "INTAKE_OVERRIDE",
+          "root": "repo",
+          "file": "plugins/lirbox/scripts/intake.mjs",
+          "find": "export const HIGH = 0.8",
+          "replace": "export const HIGH = 0.5"
+        }
+      ]
+    },
+    "fallback-is-announced": {
+      "expect": "green",
+      "_note": [
+        "decideRoute writes decided_by:'fallback' with route:'inline' when an answer is unusable",
+        "or jev dies. Both print the same route string as a measured go-ahead, so the skill has to",
+        "say which it got. Proven RED against SKILL.md at git HEAD before the fix, GREEN after."
+      ],
+      "mutations": [
+        {
+          "why": "the announce step stops naming decided_by at all, so an unmeasured route is reported with the same authority as a measured one",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "**Read `decided_by` and say which it is.**",
+          "replace": ""
+        },
+        {
+          "why": "the reason the field matters is dropped, leaving an unexplained ritual that the next edit deletes as noise",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "a dead API key and a confident go-ahead are the same word on the",
+          "replace": "the route reads the same either way on the"
+        },
+        {
+          "why": "the hard-rules bullet stops denying that a fallback is a judgment, so only the flow step carries the rule and an edit to one place silently loses the other",
+          "env": "DO_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "`decided_by: fallback` is not a verdict",
+          "replace": "`decided_by: fallback` is a verdict"
+        }
+      ]
     }
   }
 }

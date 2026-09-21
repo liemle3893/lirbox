@@ -148,19 +148,12 @@ export function decideRoute(answers) {
     }
   }
 
-  // Same shape, same bar: work needing prod credentials, a browser or a simulator fits neither
-  // an in-session edit nor a lane worktree as this repo configures them. A human supplies the
-  // capability or restates the task.
-  if (cap.noul > MEDIUM && capConf >= HIGH) {
-    return {
-      route: 'scope',
-      decided_by: 'jev',
-      reason:
-        `needs capability beyond editing files in this repo (noul=${cap.noul}, ` +
-        `confidence=${capConf.toFixed(2)}); scope it against what the runner actually has`,
-    }
-  }
-
+  // A confident refusal outranks BOTH gates below it. Needing prod credentials is a reason to
+  // scope work that should happen; it was never a reason to re-open work that should not. While
+  // the capability gate sat above this block, a task jev refused at 0.95 came out as `scope` and
+  // went to the planner to be cut into one slice — which is precisely the softened re-scope the
+  // `reject` route exists to refuse. An uncertain refusal still falls through to `scope`: doubt
+  // may not buy the one route whose cost is that the work never happens at all.
   if (route.choice === 'reject') {
     if (routeConf >= HIGH) {
       return {
@@ -175,6 +168,20 @@ export function decideRoute(answers) {
       reason:
         `'reject' at ${band(routeConf)} confidence (${routeConf.toFixed(2)} < ${HIGH}); an ` +
         `uncertain refusal is a question for a human, not a verdict`,
+    }
+  }
+
+  // Same shape, same bar: work needing prod credentials, a browser or a simulator fits neither
+  // an in-session edit nor a lane worktree as this repo configures them. A human supplies the
+  // capability or restates the task. This still outranks `lane` on purpose — a prod database
+  // migration fits no worktree this repo can cut.
+  if (cap.noul > MEDIUM && capConf >= HIGH) {
+    return {
+      route: 'scope',
+      decided_by: 'jev',
+      reason:
+        `needs capability beyond editing files in this repo (noul=${cap.noul}, ` +
+        `confidence=${capConf.toFixed(2)}); scope it against what the runner actually has`,
     }
   }
 
