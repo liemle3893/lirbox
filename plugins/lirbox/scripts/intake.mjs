@@ -15,13 +15,15 @@
 // model should be making.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const JEV = join(HERE, 'jev.mjs')
+// Overridable the same way orch-lane.sh takes TRIAGE_OVERRIDE, and for the same reason: the only
+// way to assert "jev died without writing" is to substitute a jev that does exactly that.
+const JEV = process.env.INTAKE_JEV_OVERRIDE || join(HERE, 'jev.mjs')
 const REPO_ROOT = resolve(HERE, '..', '..', '..')
 
 export const NOT_MEASURED = 'NOT_MEASURED'
@@ -256,6 +258,13 @@ function main() {
   const stateFile = join(runDir, '.jev-state.json')
   writeFileSync(stateFile, JSON.stringify(state, null, 2))
 
+  // The run slug is reused across re-routes, so a scratch file from the LAST call is sitting here.
+  // If this call's jev dies before it writes (spawn failure, OOM, a kill), the read below would
+  // parse those stale answers, find no `error`, and emit `decided_by: "jev"` for a route nothing
+  // measured this time. Deleting it first makes "jev did not write" indistinguishable from
+  // "jev is not installed" — both unreadable, both fallback.
+  rmSync(scratch, { force: true })
+
   const args = [JEV, '--state', stateFile, '--questions', qFile, '--out', scratch, '--fail-open']
   if (values.model) args.push('--model', values.model)
   if (values['timeout-ms']) args.push('--timeout-ms', values['timeout-ms'])
@@ -268,6 +277,13 @@ function main() {
     raw = JSON.parse(readFileSync(scratch, 'utf8'))
   } catch (e) {
     raw = { model: values.model || null, answers: {}, error: `unreadable jev output: ${e.message}` }
+  }
+  // --fail-open means jev exits 0 for every failure it MEASURED and wrote down. A non-zero exit is
+  // therefore jev itself breaking, and whatever is in the file is not this call's measurement.
+  if ((jev.error || jev.status !== 0) && !raw.error) {
+    raw.error = jev.error
+      ? `jev could not be run: ${jev.error.message}`
+      : `jev exited ${jev.status}${jev.signal ? ` (signal ${jev.signal})` : ''} without reporting why`
   }
 
   const decision = decideRoute(raw.answers)

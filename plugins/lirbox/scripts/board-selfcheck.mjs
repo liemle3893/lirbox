@@ -59,6 +59,21 @@ const ASSERTIONS = [
     assert.equal(sliceOf(cwd, 'r', 's1').verified_by, 'bob');
   }],
 
+  // The two-call version of a self-report: get verified by somebody else, then quietly re-record
+  // yourself as the implementor. Without a guard the slice ends up with one name on both lines and
+  // still counts in `N of M delivered` — the column stops meaning anything a call later.
+  ['re-signing as implementor after verification is refused', (b) => {
+    const cwd = fresh();
+    board(b, ['--run', 'r', '--set', 's1', '--status', 'delivered', '--by', 'bob',
+      '--criterion', 'node t.js :: exit 0'], cwd);
+    board(b, ['--run', 'r', '--set', 's1', '--status', 'delivered', '--verified-by', 'alice'], cwd);
+    const r = board(b, ['--run', 'r', '--set', 's1', '--status', 'delivered', '--by', 'alice'], cwd);
+    assert.notEqual(r.code, 0, 'taking over as implementor of a slice you verified must be refused');
+    const s = sliceOf(cwd, 'r', 's1');
+    assert.equal(s.implementor, 'bob', 'the refused write must not have reassigned the implementor');
+    assert.notEqual(s.implementor, s.verified_by, 'implementor and verified_by must never be one name');
+  }],
+
   ['verification with no implementor is refused', (b) => {
     const cwd = fresh();
     board(b, ['--run', 'r', '--set', 's1', '--status', 'delivered', '--criterion', 'node t.js :: exit 0'], cwd);
@@ -115,6 +130,7 @@ const ASSERTIONS = [
 const MUTATIONS = [
   ['self-report guard removed', 'who === slice.implementor', 'false', 'self-report leaves verified_by null'],
   ['no-implementor guard removed', 'if (!slice.implementor)', 'if (false)', 'verification with no implementor is refused'],
+  ['re-sign guard removed', 'args.by === slice.verified_by', 'false', 're-signing as implementor after verification is refused'],
   ['empty-command guard removed', 'if (!command)', 'if (false)', 'a criterion with no command is refused'],
   ['empty-expected guard removed', 'if (!expected)', 'if (false)', 'a criterion with no expected value is refused'],
   ['count ignores verification', "s.status === 'delivered' && !!s.verified_by", "s.status === 'delivered'", 'N of M counts only delivered-and-verified'],

@@ -82,7 +82,16 @@ function set(slug, args) {
     if (!/^-?\d+$/.test(args.exit)) die(`--exit must be an integer, got ${JSON.stringify(args.exit)}`);
     slice.exit = Number(args.exit);
   }
-  if (args.by !== undefined) slice.implementor = args.by;
+  if (args.by !== undefined) {
+    // Reassigning the implementor is how the one unfakeable column got faked: record bob as the
+    // implementor, have alice verify it, then quietly re-record alice as the implementor and the
+    // slice still counts as delivered-and-verified with one name on both lines. Refuse the move
+    // rather than silently voiding the verification — a signature that disappears is not noticed.
+    if (slice.verified_by && args.by === slice.verified_by) {
+      die(`cannot set --by "${args.by}" on ${id}: it already carries verified_by "${slice.verified_by}" — that would leave one name on both lines. Re-verify from somebody else instead.`);
+    }
+    slice.implementor = args.by;
+  }
   slice.status = args.status;
 
   if (args['verified-by'] !== undefined) {
@@ -119,5 +128,9 @@ function print(slug, slices) {
 
 const args = parseArgs(process.argv.slice(2));
 if (!args.run) die('--run <slug> is required');
+// The slug is path-joined. Same alphabet as an id, so `--run ../..` cannot walk out of the store.
+if (!/^[A-Za-z0-9._-]+$/.test(args.run) || /^\.+$/.test(args.run)) {
+  die(`--run slug must be [A-Za-z0-9._-]+ and not all dots, got ${JSON.stringify(args.run)}`);
+}
 if (args.set !== undefined) set(args.run, args);
 print(args.run, load(args.run));

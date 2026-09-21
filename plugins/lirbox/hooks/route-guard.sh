@@ -58,11 +58,14 @@ for (( i = 1; i <= $#TOK; i++ )); do
   done
   [[ "${TOK[j]}" == start ]] || continue
   FOUND=1
-  # --run names the run whose route file governs this start.
+  # --run names the run whose route file governs this start. ${(Q)} strips one level of shell
+  # quoting: `--run 'my-run'` reaches us as the literal token `'my-run'`, and looking for
+  # .orchestration/'my-run'/route.json finds nothing — so a run that IS routed would be refused
+  # with "has no intake route", which is both wrong and unactionable.
   for (( j = j + 1; j <= $#TOK; j++ )); do
     case "${TOK[j]}" in
-      --run)   SLUG="${TOK[j+1]}"; break ;;
-      --run=*) SLUG="${TOK[j]#*=}";  break ;;
+      --run)   SLUG="${(Q)TOK[j+1]}"; break ;;
+      --run=*) SLUG="${(Q)${TOK[j]#*=}}";  break ;;
     esac
   done
   break

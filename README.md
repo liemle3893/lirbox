@@ -15,6 +15,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 
 | Skill | What it does |
 |-------|--------------|
+| **`do`** | The single entrypoint. Hand it any task — "do this", "handle this" — and it routes the task through `intake.mjs` before anything happens to it: `reject` (say no, stop), `scope` (hand to `lirbox-planner` for one slice), `inline` (do it now, the routing decision is the approval) or `lane` (print the `orch-lane.sh start` command and ask). Uncertainty never buys the expensive route. |
 | **`pr-writeup`** | Turn any pull request into a self-contained HTML write-up (TL;DR, motivation, file-by-file tour, where-to-focus, test plan, rollout). Features, bugfixes, refactors, docs. |
 | **`plan-deck`** | Turn a spec or task into a self-contained HTML implementation plan (milestone timeline, data-flow, mockups, key code, risks, open questions). Feature, backend, infra/migration, refactor. |
 | **`codewalk`** | Trace one path through a real codebase into a self-contained HTML walkthrough (path diagram, numbered steps with verified `file:line` + code excerpts, key files, gotchas). For onboarding or auditing a flow/subsystem. |
@@ -30,11 +31,14 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 
 ### Agents
 
-Generic, public-ready subagents (in `plugins/lirbox/agents/`) — the default lanes/gates for a
-`lirbox-herdr-orchestrator` run, also usable standalone:
+Generic, public-ready subagents (in `plugins/lirbox/agents/`). Most are dispatched as lanes or gates
+by `lirbox-herdr-orchestrator`; all ten are usable standalone:
 
 | Agent | Role |
 |-------|------|
+| **`lirbox-planner`** | Plans the **next one slice** of a run — what it delivers, criteria as `command :: expected value`, what it touches — and refuses to enumerate the slice after it. Re-invoked from each slice's *actual* result, not from an up-front decomposition. |
+| **`lirbox-builder`** | Implements one scoped slice inside a single lane worktree, against acceptance criteria someone else wrote. Reports observed numbers, never verdicts, and stops at the first red rather than debugging past it. |
+| **`lirbox-verifier`** | Independently verifies a lane's result at a named SHA — re-runs the checks, breaks them on purpose to prove they can fail, reports quantified pass/fail. Never fixes what it finds. Also the profile behind the code gate. |
 | **`lirbox-test-writer`** | Test-first (RED): writes failing tryve-E2E/unit tests from acceptance criteria before implementation. |
 | **`lirbox-tryve-enhancer`** | Hardens coverage from the engineering perspective — error paths, boundaries, auth, concurrency — from the diff. |
 | **`lirbox-code-reviewer`** | Reviews changed code (correctness/security/rules/quality) **and fixes** Critical/High, keeping the build green. |
@@ -55,6 +59,7 @@ In Claude Code:
 Then use a skill — just describe the task:
 
 ```text
+do this: <task>                     # do (routes it first — reject/scope/inline/lane)
 write up PR 1059                    # pr-writeup
 write up PR 1059 verbose            # snippet on every non-trivial file
 make a plan-deck for <spec/task>    # plan-deck
@@ -68,7 +73,7 @@ verify this migration plan          # plan-check (pressure-tests it, GO/NO-GO re
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:do`, `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
 
 ## Test locally (no install)
 
@@ -96,10 +101,14 @@ pushing new commits is enough for installed users to pick up updates on
 ## Guides
 
 Getting a skill to Tier 2 (floor + acceptance-checks) and the check-gate discipline for changing
-one afterward are covered in [CONTRIBUTING.md](./CONTRIBUTING.md#testing). (The
-whetstone/prospector/arena Workflow-tool loops that used to automate parts of this — and the
-`docs/*.md` guides written for them — were removed along with the Workflow tool; that discipline
-is now done by hand, or by whatever loop replaces them next.)
+one afterward are covered in [CONTRIBUTING.md](./CONTRIBUTING.md#testing).
+
+The `conductor` / `loom` / `prospector` / `whetstone` / `arena` loops that used to automate parts of
+this were **deleted** along with the Workflow tool they were built on; that discipline is now done by
+hand. Their guides under `docs/` (`arena-guide.md`, `arena-handoff.md`, `whetstone-ready.md`,
+`skill-improvement-cookbook.md`, `skillopt-exploration.md`, `loop-consolidation.md`, `docs/plans/`)
+are kept as **historical records of what was measured** — the scripts and skills they instruct you to
+run no longer exist, so read them for the findings, not for the commands.
 
 ## Extending
 

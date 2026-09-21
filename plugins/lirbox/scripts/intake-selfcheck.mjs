@@ -103,6 +103,51 @@ check('c: total Jev failure -> cheapest route, exit 0, decided_by fallback', () 
   assert.equal(route.confidence[K[0]], 'NOT_MEASURED', 'an unmeasured answer must say so')
 })
 
+// (c2) the run slug is reused across re-routes, so last call's .jev-raw.json is already on disk.
+// A jev that dies before writing must NOT let that file be read as this call's measurement — that
+// is "the gate passed because the check did not run", wearing decided_by: "jev".
+check('c2: a jev that dies without writing never reuses the last run\'s answers', () => {
+  const root = mkdtempSync(join(tmp, 'stale-root-'))
+  const runDir = join(root, '.orchestration', 'c2-stale')
+  mkdirSync(runDir, { recursive: true })
+  // A high-confidence `lane` from a previous, successful call.
+  writeFileSync(join(runDir, '.jev-raw.json'), JSON.stringify({
+    model: 'typesafe/jev-1.13-fixture',
+    answers: {
+      [K[0]]: { type: 'choice', choice: 'lane', confidence: 0.96 },
+      [K[1]]: { type: 'noul', noul: 0.95 },
+      [K[2]]: { type: 'noul', noul: 0.02 },
+    },
+  }))
+  const deadJev = join(tmp, 'dead-jev.mjs')
+  writeFileSync(deadJev, 'process.exit(3)\n')   // exits non-zero, writes nothing
+
+  const r = spawnSync(process.execPath,
+    [INTAKE, '--task', TASK, '--run', 'c2-stale', '--out-root', root],
+    { encoding: 'utf8', env: { ...process.env, OPENROUTER_API_TOKEN: 'test-token', INTAKE_JEV_OVERRIDE: deadJev } })
+  const route = JSON.parse(readFileSync(join(runDir, 'route.json'), 'utf8'))
+  assert.equal(r.status, 0, `intake must still exit 0, got ${r.status}`)
+  assert.notEqual(route.route, 'lane', 'a stale scratch file must never buy the expensive route')
+  assert.equal(route.route, 'inline', `expected the cheapest route, got ${route.route}`)
+  assert.equal(route.decided_by, 'fallback', `expected fallback, got ${route.decided_by} — ${route.reason}`)
+  assert.ok(route.jev_error, 'route.json must record that jev broke')
+  // Sibling: the SAME substituted jev, writing a real answer, still reaches `lane` — otherwise the
+  // assertion above would also pass on an intake that can only ever say `inline`.
+  const liveJev = join(tmp, 'live-jev.cjs')   // .cjs: it uses require()
+  writeFileSync(liveJev,
+    'const i=process.argv.indexOf("--out");' +
+    'require("fs").writeFileSync(process.argv[i+1],JSON.stringify(' +
+    JSON.stringify({
+      answers: {
+        [K[0]]: { type: 'choice', choice: 'lane', confidence: 0.96 },
+        [K[1]]: { type: 'noul', noul: 0.95 },
+        [K[2]]: { type: 'noul', noul: 0.02 },
+      },
+    }) + '))\n')
+  const ok = runIntake('c2-live', [], { INTAKE_JEV_OVERRIDE: liveJev })
+  assert.equal(ok.route.route, 'lane', `the substituted jev must still be able to reach lane, got ${ok.route.route}`)
+})
+
 // --- hooks/route-guard.sh --------------------------------------------------
 
 const START = '${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh start impl --profile builder --run '
@@ -158,6 +203,18 @@ check('f: guard allows `start` when the route is `lane`', () => {
   assert.doesNotMatch(r.stderr, /DENIED/, `a routed lane must not be denied: ${r.stderr}`)
   // `inline` is a route, not a lane — but it is not this hook's business to relitigate it.
   assert.equal(hook(repoWith('f-inline', routeFile('inline')), START + 'f-inline').status, 0)
+})
+
+// (f2) a quoted slug is the same slug. Without unquoting, `--run 'x'` makes the guard look for
+// .orchestration/'x'/route.json, miss it, and refuse a routed run with "has no intake route" —
+// wrong in both directions: it blocks legitimate work and it mis-states why.
+check('f2: the guard reads a quoted --run the same as a bare one', () => {
+  const ok = hook(repoWith('f2-lane', routeFile('lane')), START + "'f2-lane'")
+  assert.equal(ok.status, 0, `a quoted, lane-routed slug must pass: ${ok.stderr}`)
+  const no = hook(repoWith('f2-reject', routeFile('reject')), START + '"f2-reject"')
+  assert.equal(no.status, 2, `a quoted, reject-routed slug must still deny, got ${no.status}`)
+  assert.match(no.stderr, /routed run 'f2-reject' to 'reject'/,
+    `the denial must name the real slug, not the quoted spelling: ${no.stderr}`)
 })
 
 // (g) a broken hook must never wedge the user's tools — and must never do it silently.
