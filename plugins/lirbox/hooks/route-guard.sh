@@ -7,7 +7,7 @@
 # the INWARD one (nothing expensive starts unrouted). Same shape, same escape, opposite end.
 #
 # What it refuses: `orch-lane.sh start` when .orchestration/<slug>/route.json is absent, or says
-# `reject`, or says `scope`. Nothing else. `restart`, `gate`, `conductor`, `brief` and `close` all
+# `reject`, or says `scope`. Nothing else. `restart`, `gate`, `brief` and `close` all
 # act on a lane that already exists — the decision they would be gating was made at `start`.
 #
 # Parsing is pure zsh for the reason gate-guard.sh gives at length: `grep` is a shell function in

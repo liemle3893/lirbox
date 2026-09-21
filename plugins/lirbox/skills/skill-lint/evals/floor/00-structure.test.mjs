@@ -4,9 +4,9 @@
 // goes RED here and is reverted.
 //
 // NOTE: this is a THIN floor. Add >=1 behavior characterization test alongside it (e.g. run this
-// skill's validator/generator/asset and assert its output) before relying on whetstone.
+// skill's validator/generator/asset and assert its output) before trusting it to catch a regression.
 //
-// Locked (evals/**): the whetstone fixer may NEVER edit this file.
+// Locked (evals/**): an automated fixer may NEVER edit this file.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, basename, resolve } from 'node:path';

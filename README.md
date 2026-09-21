@@ -23,17 +23,15 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`sequence-diagram`** | Draw a time-ordered interaction as a self-contained interactive HTML sequence diagram — Mermaid sequenceDiagram (autonumbered) + a numbered step list driving a clickable detail panel (who→who, sync/async, code at the call site). Note: renders via a CDN, so this one needs internet. |
 | **`c4-model`** | Model a system's architecture as a C4 model (LikeC4): one `.c4` source → landscape/container/component drill-down views, built into a single self-contained interactive HTML page (offline-viewable) + the committed `.c4` source of truth. Note: toolchain runs in a throwaway docker container (pinned image, ~1 GB first pull) — needs docker, installs nothing on the host. |
 | **`deep-understanding`** | Interactive tutor: teaches you to deeply understand a PR/change/subsystem, incrementally — assesses what you know, fills gaps, quizzes you (problem → solution → impact), and doesn't stop until mastery is verified. Not a document — a guided session. |
-| **`conductor`** | Drive the Workflow tool with durable on-disk state, crash/restart resume, worktree isolation, opt-in enforcement gates, and a cost report. For long or interruptible multi-subagent runs (migrations, audits, staged delivery). |
-| **`prospector`** | Sequential keep-or-discard optimization loop on conductor's durable backbone: auto-proposes a numeric metric + hard correctness gate from a goal (confirm once), then hill-climbs ONE surface — keeping a change only when it strictly beats the metric **and** passes the gate, within an optional edit-size budget — then opens a PR for review (never auto-merges). For objective scalars: hot-path perf, bundle/binary size, memory, test-suite speed, eval score, LLM cost — or a skill's held-out task-pass-rate (see the [`skill-train`](./plugins/lirbox/skills/prospector/references/skill-train.md) recipe). |
-| **`whetstone`** | Overnight, eval-gated skill improver on the same backbone: grinds a backlog through a deterministic floor + per-item acceptance-check (fail-before/pass-after), keeping only changes a check confirms, plus an optional compaction pass that shrinks the skill — then opens a PR for review (never auto-merges). Backlog items are filed by hand **or harvested from failing eval tasks**; SkillOpt-derived controls (train/val scoring, edit-size budget) keep fixes general. For sharpening skills (or other deterministic-output targets). See the [cookbook](./docs/skill-improvement-cookbook.md). |
-| **`arena`** | Reproducible pairwise **leaderboard** on the same backbone: runs `conductor` against frozen fixture tasks under multiple configs (model/mode/effort), judges the **delivered diffs** pairwise (3 runs × 5 position-swapped passes), and emits a Bradley-Terry/win-rate ranking — then opens a PR for review (never auto-merges). For answering "did this change actually improve conductor's output across a task suite?" when there's no single scalar to hill-climb. |
+| **`plan-check`** | Rigorously verify a plan (ops/infra runbook or code-change plan) against the real repo/docs before it's executed — pressure-tests claims, surfaces unknowns, emits a self-contained HTML report with a GO / GO-WITH-CONDITIONS / NO-GO verdict. Read-only; never runs commands against live systems. |
+| **`feedback`** | User-invoked only: turns a concern about a lirbox skill into a scrubbed, structured GitHub issue on `liemle3893/lirbox`. Never auto-invoked. |
 | **`lane-config`** | Set up or change the per-project orchestration config that decides which harness, model and reasoning effort each lane profile runs on, plus lane caps, timeouts and the setup commands every brief carries. Stored per repo (keyed like the lane ledger), written only through validating subcommands — `detect` measures, `init` scaffolds with **no** profiles, `validate` refuses a config that cannot decide a lane. Profiles are the user's judgement, asked once, never guessed per spawn. |
 | **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over the word budget or dense with long prose), unbalanced/missing XML structural tags, weak frontmatter triggers, and oversized inline flowcharts or reference files. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
 
 ### Agents
 
-Generic, public-ready subagents (in `plugins/lirbox/agents/`) — the default enforcement-gate
-agents for `conductor`, also usable standalone:
+Generic, public-ready subagents (in `plugins/lirbox/agents/`) — the default lanes/gates for a
+`lirbox-herdr-orchestrator` run, also usable standalone:
 
 | Agent | Role |
 |-------|------|
@@ -66,14 +64,11 @@ diagram the components of <service>  # component-diagram
 sequence-diagram the login flow      # sequence-diagram
 C4 model of <system>                # c4-model (LikeC4; needs docker)
 help me deeply understand PR 1059   # deep-understanding (interactive, quizzes you)
-implement <plan/spec> with resume   # conductor (durable, crash-safe multi-subagent run)
-make the /search endpoint faster    # prospector (proposes a metric + gate, confirms once)
-improve the flowchart skill         # whetstone (overnight, eval-gated, from a backlog)
-which conductor config wins         # arena (pairwise leaderboard over frozen fixtures)
+verify this migration plan          # plan-check (pressure-tests it, GO/NO-GO report)
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:conductor`, `lirbox:prospector`, `lirbox:whetstone`, `lirbox:arena`, `lirbox:lane-config`, `lirbox:skill-lint`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
 
 ## Test locally (no install)
 
@@ -100,18 +95,11 @@ pushing new commits is enough for installed users to pick up updates on
 
 ## Guides
 
-- [Making a skill whetstone-ready](./docs/whetstone-ready.md) — the floor + acceptance-check
-  scaffolding a skill needs before `whetstone` can grind it.
-- [Skill-improvement cookbook](./docs/skill-improvement-cookbook.md) — the end-to-end SkillOpt-style
-  flow: scored tasks (train/val) → harvest failures into a backlog → `whetstone` with a compaction
-  pass → review the auto-PR. Worked example with real before/after numbers.
-- [`skill-train` recipe](./plugins/lirbox/skills/prospector/references/skill-train.md) — point
-  `prospector` at a skill to hill-climb its held-out task-pass-rate.
-- [Running the arena](./docs/arena-guide.md) — how to run `arena` (skill + manual orchestration),
-  add fixture tasks, compare conductor **versions** via `--plugin-dir`, and read the leaderboard.
-  Includes a worked run (current vs baseline conductor) and the live-run gotchas.
-- [SkillOpt exploration](./docs/skillopt-exploration.md) — why these controls exist (the Microsoft
-  SkillOpt mapping onto `prospector`/`whetstone`) and the empirical run that validated them.
+Getting a skill to Tier 2 (floor + acceptance-checks) and the check-gate discipline for changing
+one afterward are covered in [CONTRIBUTING.md](./CONTRIBUTING.md#testing). (The
+whetstone/prospector/arena Workflow-tool loops that used to automate parts of this — and the
+`docs/*.md` guides written for them — were removed along with the Workflow tool; that discipline
+is now done by hand, or by whatever loop replaces them next.)
 
 ## Extending
 

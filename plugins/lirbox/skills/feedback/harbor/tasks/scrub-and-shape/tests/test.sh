@@ -37,7 +37,7 @@ if [ "$body_exists" = 1 ]; then
     process.exit(0);
   ' "$BODY" >>"$OUT/parse.log" 2>&1 && json_block=1
 
-  # 2. the record carries the fields a whetstone backlog entry needs
+  # 2. the record carries the fields a backlog entry needs
   if [ "$json_block" = 1 ]; then
     node -e '
       const fs=require("fs");

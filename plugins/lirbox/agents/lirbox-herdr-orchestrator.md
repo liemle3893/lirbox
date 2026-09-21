@@ -217,11 +217,12 @@ context — usually the most expensive part of the run.
   adds latency, not evidence. A 9–90 minute end-to-end suite runs once per wave against the merged
   result — never once per lane, and never to confirm a change it could not detect. Name the scope
   you chose and why it could catch this change.
-- The other two records are filed the same way and by the same script: a lane closes with
-  `evidence.mjs report`, which refuses while its branch carries no commits over base, and the code
-  gate files `evidence.mjs gate`, which runs the build itself and derives `gate_passed` from the
-  exit it observed. **No lane ever writes an evidence JSON by hand** — the fields the contract
-  distrusts are exactly the ones a hand-written record gets to invent.
+- The other record is filed the same way and by the same script: the code gate files
+  `evidence.mjs gate`, which runs the build itself and derives `gate_passed` from the exit it
+  observed. **No lane ever writes an evidence JSON by hand** — the fields the contract distrusts
+  are exactly the ones a hand-written record gets to invent. (`evidence.mjs report` — a branch
+  ahead-of-base check for a workflow-shaped lane's own commits — has no current dispatcher; it was
+  only ever invoked by the `conductor` lane type, which is gone with the skill it drove.)
 - **Spawn a verifier against a SHA, never against a schedule.** No SHA, nothing to verify.
 - Pre-warming is legal: start it, install, build, **park it idle**. Giving a parked pane work to
   fill its time is not. Every collision on record came from work invented for an early spawn.
@@ -271,9 +272,8 @@ LANES=${CLAUDE_PLUGIN_ROOT}/scripts/lanes
 - Picking up a run you did not start: `reconcile.mjs` first, then the board, then match live panes on
   `agent_name`. Trust the artifacts over any summary you were handed.
 - **`.orchestration/` is gitignored — run scratch, not deliverable.** At publish, promote the
-  rendered `implementation-notes.html` into `docs/changes/<run>/` so it rides the PR, the way
-  conductor promotes its writeup. Skip that step and the one durable account of the run is deleted
-  by the ignore rule.
+  rendered `implementation-notes.html` into `docs/changes/<run>/` so it rides the PR. Skip that
+  step and the one durable account of the run is deleted by the ignore rule.
 
 # Notes to the user
 
@@ -358,7 +358,6 @@ LANE=${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh
 
 $LANE start   <name> --profile <p> --run <slug> [--branch <b>] [--base <ref>] [--dry-run]
 $LANE restart <name> --run <slug> [--profile <p>] [--force]
-$LANE conductor <lane> --run <slug> --goal '<goal>' [--profile <p>]
 $LANE brief   <name> <brief-file>
 $LANE close   <name> [--force]
 ```
@@ -375,14 +374,6 @@ second worktree. It reads the dispatch record for the pane, re-applies the **pro
 `/clear` drops `--agent` back to the harness default, which once ran a whole track with no
 invariants), and refuses while the old agent still reports `working`/`blocked`. Roughly half of all
 spawns are this.
-
-**`conductor` dispatches a lane whose work is a workflow, not a diff it types** — a slice that
-needs to fan out into phases. It writes the brief itself, like `gate` does, because one line of it
-is not thinnable: conductor commits to its own branch `wf/<lane>`, **not** to the lane's branch,
-and the code gate is bound to the branch the dispatch record names. Left unlanded, that gate
-reviews an empty diff and reports a clean pass. It also fixes the workflow's run name to the lane name, so a re-brief
-after a restart resumes instead of forking a second run. Claude profiles only — the skill does not
-resolve on another harness, and that lane implements the goal by hand instead.
 
 `brief` submits and **confirms it submitted** — a lane left `idle` has not been briefed. `close`
 refuses a lane still `working`/`blocked`, or one with uncommitted work in its checkout, unless you

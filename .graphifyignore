@@ -5,8 +5,7 @@
 # .gitignore already dropped. Only ever add excludes below.
 #
 # Already handled elsewhere — do not repeat here:
-#   .gitignore      .workflows/ .optimize/ .improve/ .arena/ .worktrees/
-#                   implementation-notes/ docs/superpowers/ and the generated
+#   .gitignore      implementation-notes/ docs/superpowers/ and the generated
 #                   *-flowchart/-codewalk/-plan-deck/-component/-sequence/-c4 HTML
 #   graphify built-in  graphify-out/ .graphify/ node_modules/ .git/ dist/ build/
 #                      __pycache__/ .venv/ and the usual cache dirs
@@ -16,14 +15,6 @@
 # which pushed the corpus past graphify's 500-file gate on its own.
 jobs/
 plugins/lirbox/skills/*/harbor/tasks/*/environment/skill/
-
-# Arena delivery fixtures: notes-app v3/v4/v5 are three near-identical copies of
-# one synthetic toy app, present only as a task substrate for arena runs. In the
-# 2026-07-29 build their 42 files produced EVERY top god node (NoteService 16
-# edges, Replica 15, Store 12) and three of the fifteen largest communities were
-# their test harnesses — triplicated fixture code outranking the real plugin on
-# centrality. Drop this line if you want to query the fixtures themselves.
-plugins/lirbox/skills/conductor/arena/fixtures/
 
 # NOTE: skills/*/evals/fixtures/ is deliberately NOT excluded. Those are
 # single-line mutations of a clean baseline, each pinning one validator rule, and

@@ -44,10 +44,10 @@ export const NOT_MEASURED = 'NOT_MEASURED'
 // ---------------------------------------------------------------------------
 export const CHEAPEST = 'inline'
 
-// Thresholds. HIGH is 0.8 because that is already this repo's bar for "confident enough to act
-// on" — jev-replay.mjs keeps a code-review finding at incumbent >= 80 — and a second, differently
-// drawn line for the same idea is a line someone reconciles at 3am. MEDIUM is 0.5 because below
-// an even split the answer carries no information at all; it is noise wearing a number.
+// Thresholds. HIGH is 0.8 because that is this repo's bar for "confident enough to act on" —
+// pick a different number here and it is a second, differently drawn line for the same idea, one
+// someone reconciles at 3am. MEDIUM is 0.5 because below an even split the answer carries no
+// information at all; it is noise wearing a number.
 export const HIGH = 0.8
 export const MEDIUM = 0.5
 

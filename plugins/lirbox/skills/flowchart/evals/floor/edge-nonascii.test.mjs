@@ -2,7 +2,7 @@
 //
 // Asserts the behavior validate.mjs ALREADY has, so it can never go red without a
 // regression: non-ASCII in an EDGE label is flagged, and a clean file is not. The
-// floor is the safety net the whetstone loop must keep green on every kept change;
+// floor is the safety net any kept change must keep green;
 // a fix that breaks this characterization is reverted.
 //
 // Locked (evals/**): the fixer may never edit this file.

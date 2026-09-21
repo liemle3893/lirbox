@@ -2,42 +2,35 @@
 
 Personal Claude Code **plugin marketplace**. One plugin, `lirbox`, under `plugins/lirbox/`:
 `skills/<name>/SKILL.md` (+ optional `scripts/`, `references/`, `assets/`), `agents/<name>.md`
-(subagents; the default gates for `conductor`), `.claude-plugin/marketplace.json` (skills are
-auto-discovered, not listed).
+(subagents; the default lanes/gates for a `lirbox-herdr-orchestrator` run), `.claude-plugin/marketplace.json`
+(skills are auto-discovered, not listed).
 
 Skill catalog → [README.md](./README.md). Adding a skill/agent/plugin, and all testing detail →
 [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-## Two skill families
+## Skills
 
 **HTML-artifact** (`codewalk`, `flowchart`, `component-diagram`, `sequence-diagram`, `plan-deck`,
 `pr-writeup`, `c4-model`) — one self-contained HTML file. `flowchart` ships a headless
 `assets/validate.mjs`; run it on output (`node .../validate.mjs <file>.html`) — it catches Mermaid
-label-escaping bugs. `deep-understanding` is an interactive tutor (no artifact).
+label-escaping bugs. `deep-understanding` is an interactive tutor (no artifact). `plan-check` verifies
+a plan against the real repo and emits a GO/NO-GO report. `skill-lint` audits skills for bloat/structure
+(reports only, never edits). `lane-config` and `feedback` are operational: the former sets up
+per-repo orchestration config, the latter files a scrubbed GitHub issue about a lirbox skill.
 
-**Orchestration loops** (`conductor`, `prospector`, `whetstone`, `arena`) — a deterministic
-JS *conductor* (the generated `.js`) driving full-tool *worker* subagents. Hard rules:
-
-- **The conductor layer is pure JS: NO `fs`/`git`/`require`/`Date.now()`/`Math.random()`.** Every
-  side effect lives inside an `agent()` worker prompt; `test-*.cjs` enforces this with a string scan.
-- **Never hand-edit a generated loop script** — change `scripts/scaffold-*.cjs`, regenerate `--force`.
-- After touching a generator, run its net: conductor → `test-scaffold.cjs`, prospector →
-  `test-optimize.cjs`, whetstone → `test-improve.cjs`, arena → `test-arena.cjs`.
-- **Never auto-merge.** prospector/whetstone finalize by opening a **PR** with the run report as the
-  body (fall back to leaving the branch when there's no remote); conductor leaves a `wf/` branch.
-  Run branches are per-run and timestamped (`opt/<goal>-<ts>`, `improve/<skill>-<ts>`) — the run slug
-  keys state/config/report/branch/worktree, so concurrent runs never collide. whetstone's backlog
-  stays keyed by skill (`feedback/<skill>.jsonl`).
+Herdr-orchestrated delivery (`lirbox-herdr-orchestrator` + `orch-lane.sh` + the lane agents under
+`plugins/lirbox/agents/`) is the current multi-agent delivery mechanism — see
+[`lanes` skill](./plugins/lirbox/skills/lane-config/SKILL.md) and the orchestrator agent's own doc.
+There is no Workflow-tool-driven loop skill in this repo (conductor/prospector/whetstone/arena were
+removed with the Workflow tool they were built on).
 
 ## Runtime artifacts are gitignored — never commit them
 
-`.workflows/`, `.optimize/`, `.improve/`, `.arena/`, `.worktrees/`, generated
-`*-flowchart/codewalk/plan-deck.html`, `implementation-notes/` (worker scratch).
+Generated `*-flowchart/codewalk/plan-deck/component/sequence/c4.html`, `implementation-notes/`
+(per-lane worker scratch), `.orchestration/` (herdr run ledger).
 
-**Two exceptions, un-ignored on purpose so they ride the PR:** arena's `Finalize` promotes
-`leaderboard.html` + `report.md` into `docs/arena/<name>/`; conductor's `Writeup` promotes the kept
-`implementation-notes/*.html` plus `writeup.html` + `design.html` + DocsGate `summary.md` into
-`docs/changes/<name>/`.
+**Exception, un-ignored on purpose so it rides the PR:** the herdr orchestrator's Finish step (via
+`lirbox-docs-writer`) promotes a run's `implementation-notes.html` into `docs/changes/<name>/`.
 
 ## Validate
 
@@ -47,26 +40,25 @@ keep it specific; it decides when Claude invokes it. Skills resolve as `lirbox:<
 ## Changing a skill — the rule ([why](./CONTRIBUTING.md#changing-a-shipped-skill--the-check-gate))
 
 > **Every skill change lands behind a discrimination-gated frozen check and a green floor.**
-> Whether `whetstone` or a human executes it is a **cost decision**, not a rule.
+> Whether it's done by hand or by a future eval-gated improvement loop is a **cost decision**, not
+> a rule.
 
-- Prove the check RED on the baseline *first*:
-  `node plugins/lirbox/skills/whetstone/scripts/check-baseline.cjs "<check cmd>"` → `DISCRIMINATING`.
-  A check never seen failing is not a gate.
+- Prove the check RED on the baseline *first* — run the check command against the unfixed baseline
+  and confirm it fails (`<check cmd>; test $? -ne 0 && echo DISCRIMINATING`). A check never seen
+  failing is not a gate.
 - Register it in the skill's `evals/checks-manifest.json` **with `mutations`**, and keep it
   measuring: `node scripts/prove-checks.mjs --skill <skill>` breaks the invariant each check claims
   to guard and requires RED. Undeclared checks report `UNPROVEN`, not good. Anchor checks to the
   invariant, never to incidental structure (a variable name, a nearby token).
 - Floor stays green: `node scripts/evals-all.mjs --fast`.
-- Running `whetstone`? **Push the frozen checks first** — its worktree is cut from the pushed remote
-  tip, so local-only checks are invisible and the floor silently runs a smaller set. It also
-  **cannot fix a stale check** (`evals/**` is locked to it). After the improve-PR merges, prune
-  resolved items from `feedback/<skill>.jsonl` — it is the queue of OPEN concerns only.
+- After a fix's concern is resolved, prune it from `feedback/<skill>.jsonl` — it is the queue of
+  OPEN concerns only.
 
 ## Shipping a skill — three tiers (detail: [CONTRIBUTING.md](./CONTRIBUTING.md#testing))
 
 **Tier 1** validate + smoke-test + `skill-lint`. **Tier 2** evals (`evals/floor/`, `evals/checks/`,
 `evals/checks-manifest.json`, green under `node scripts/evals-all.mjs --fast`). **Tiers 1–2 are
-required** — a skill with no floor is ungated forever *and* unimprovable by `whetstone`.
+required** — a skill with no floor is ungated forever and cannot be regression-tested.
 
 **Tier 3 — Harbor (containerised behavioural test): REQUIRED for a skill change, not offered.**
 Tier 2 is artifact-level only; swap the model and every tier-2 check stays green. **A new feature or

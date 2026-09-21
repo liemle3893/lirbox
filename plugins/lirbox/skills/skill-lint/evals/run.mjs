@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // FLOOR RUNNER (scaffolded by scaffold-readiness.cjs). Runs every floor/*.test.mjs and exits 0 iff
-// all pass. The floor is whetstone's always-on correctness fence: GREEN on baseline, kept green on
-// every kept change. Acceptance-checks live separately under checks/ (RED on baseline) and are run
-// one-at-a-time by the loop — they must NOT live in floor/.
+// all pass. The floor is the always-on correctness fence: GREEN on baseline, kept green on every
+// kept change. Acceptance-checks live separately under checks/ (RED on baseline) and are run
+// one-at-a-time — they must NOT live in floor/.
 //
-// Locked (evals/**): the whetstone fixer may NEVER edit this file.
+// Locked (evals/**): an automated fixer may NEVER edit this file.
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

@@ -60,8 +60,8 @@ jobs:
           if [ "$fails" -gt 0 ]; then echo "GATE RED — $fails skill(s) have a check that no longer measures"; exit 1; fi
           echo "GATE GREEN — every declared mutation produced a RED"
 
-  # Generator regression nets (scripts/test-*.cjs). Slower — arena's clones fixture bundles and
-  # runs their npm suites — so it is a separate job and does not hold up the fast gate.
+  # Generator regression nets (scripts/test-*.cjs). Kept as a separate job so a slow one (cloning
+  # fixture bundles, running an npm suite) never holds up the fast gate above.
   nets:
     name: generator regression nets
     runs-on: ubuntu-latest
