@@ -23,8 +23,8 @@ setopt no_nomatch
 die() { print -u2 -r -- "orch-config: $1"; exit 1 }
 
 # The harness table. Which kinds exist, and which flag carries the profile, the
-# model and the effort on each — one file, shared with orch-lane.sh and
-# hooks/model-policy.sh. This used to be `(claude|opencode)` written out here
+# model and the effort on each — one file, shared with orch-lane.sh.
+# This used to be `(claude|opencode)` written out here
 # and in two other places, which is how a third harness becomes a three-file
 # change instead of a one-line one.
 # HARNESS_KINDS_OVERRIDE is the mutation-testing escape hatch scripts/prove-checks.mjs
@@ -271,10 +271,8 @@ validate)
   [[ "$(jq -r '.setup.baseline // ""' "$CFG")" != "" ]] || problems+=("setup.baseline is empty — a lane cannot tell a real red from an inherited one")
   [[ "$(jq -r '.lanes.base_branch // ""' "$CFG")" != "" ]] || problems+=("lanes.base_branch is empty — every worktree is cut from it, so start refuses without it")
   # This used to be unchecked, so a config validated clean and then died at the
-  # one step that cannot be skipped: gate-guard.sh refuses push, PR and
-  # merge-onto-base for a lane with no code_gate, and `orch-lane.sh gate`
-  # cannot start without a profile to run the gate on. A config that validates
-  # and cannot ship is a config that lied.
+  # gate: `orch-lane.sh gate` cannot start without a profile to run the gate on.
+  # A config that validates and cannot ship is a config that lied.
   local gp; gp=$(jq -r '.lanes.gate_profile // ""' "$CFG")
   if [[ -z "$gp" ]]; then
     problems+=("lanes.gate_profile is empty — no work can leave this repo without a gate, so this is not optional. Set it: $0 set-lanes --gate-profile <p>")

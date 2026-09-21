@@ -22,7 +22,6 @@
 // finding counts, phase outcomes, forks, a summary. Judgement in, bookkeeping
 // taken.
 //
-// Same shape as notes.mjs, which already owns its files for the same reason.
 //
 //   evidence.mjs gate   <lane> --run <slug> --build "<cmd>" [--critical N] [--high N]
 //                              [--skipped "title::reason"]... --summary S

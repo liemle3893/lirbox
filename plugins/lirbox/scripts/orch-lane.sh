@@ -22,8 +22,8 @@ die() { print -u2 -r -- "orch-lane: $1"; exit 1 }
 h()   { HERDR_ENV=1 herdr "$@" }
 
 # Which harnesses exist, and which flag carries the profile / model / effort on
-# each. Shared with orch-config.sh and hooks/model-policy.sh — see the header of
-# that file for why `--agent` is no longer written out by hand here.
+# each. Shared with orch-config.sh — see harness-kinds.sh for why `--agent` is no
+# longer written out by hand here.
 # HARNESS_KINDS_OVERRIDE is the mutation-testing escape hatch scripts/prove-checks.mjs
 # needs: a check that guards this table can only be proven if the table it loads
 # can be pointed somewhere else. Unset in every real run.
@@ -84,7 +84,7 @@ $1"
 SUB="${1:-}"; shift 2>/dev/null || true
 [[ -n "$SUB" ]] || die "usage: orch-lane.sh [start|restart|gate|brief|close] ..."
 
-# Same key as the ledger and the config — see hooks/lane-ledger.sh.
+# Same key as the config.
 KEY=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 [[ -n "$KEY" ]] || KEY="$PWD"
 SLUG=$(print -rn -- "$KEY" | shasum | cut -c1-12)
@@ -559,9 +559,11 @@ restart)
 gate)
   # Dispatch the code gate for a lane.
   #
-  # The invariant is one line, and gate-guard.sh enforces exactly it: the verdict
-  # must carry `produced_by != <the implementor lane>`, `gate_passed == true` and
-  # `build_exit == 0`. It never asks HOW the gate ran. A self-report can never be
+  # The invariant is one line: the verdict must carry `produced_by != <the
+  # implementor lane>`, `gate_passed == true` and `build_exit == 0`, and it never
+  # asks HOW the gate ran. evidence.mjs refuses a self-report at the record; the
+  # hook that refused the PUSH (gate-guard.sh) was retired with the orchestrator
+  # agent it keyed on, so this invariant is now filed, not enforced outward. A self-report can never be
   # a gate; a separate CONTEXT is what that requires, not a separate machine.
   #
   # So the default is the cheap way to satisfy it: an in-session subagent on the

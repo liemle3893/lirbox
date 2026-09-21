@@ -68,8 +68,8 @@ Ask these together, not one per turn. Offer the recommendation; take the answer.
 - **Default profile** for a lane that names none.
 - **Lane cap** — `detect` suggests cpus/2, and `init` writes it. Confirm or override.
 - **Gate profile** — which profile reviews AND fixes before work leaves. `init` defaults it to
-  `verifier`. It is not optional: `gate-guard.sh` refuses every push, PR and merge-onto-base
-  for a lane with no `code_gate`, so `validate` refuses a config without one.
+  `verifier`. It is not optional: `orch-lane.sh gate` has no profile to dispatch without one, so
+  `validate` refuses a config that omits it.
 - **Suite baseline** — exact pass/fail/skip counts a green run gives on the base branch. `detect`
   cannot supply it and a lane most needs it: without it a lane cannot tell its own red from an
   inherited one. If the user does not know, say the config is incomplete and offer to measure it.

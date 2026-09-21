@@ -1,6 +1,6 @@
 #!/bin/zsh
-# The harness table. Sourced by scripts/orch-lane.sh,
-# skills/lane-config/scripts/orch-config.sh and hooks/model-policy.sh.
+# The harness table. Sourced by scripts/orch-lane.sh and
+# skills/lane-config/scripts/orch-config.sh.
 #
 # Before this file, "which flag carries the bounded-context profile" was the
 # literal string `--agent` written into orch-lane.sh's arg vector, and "which
@@ -82,7 +82,7 @@ hk_known() { [[ -n "${HK_AGENT_ARG[$1]-}" ]] }
 # This is a static field rather than a probe of herdr because the ONLY place
 # herdr prints its enum is `herdr agent start --help` — a command indistinguish-
 # able from a spawn to anything watching herdr calls, which is most of this
-# plugin: pane-guard.sh denies raw `agent start`, and the spawn-door check reads
+# plugin: the spawn-door check used to read
 # any `agent start` as a spawn and failed on exactly that. A probe on the normal
 # path would be a fake spawn in every healthy run.
 #

@@ -31,8 +31,8 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 
 ### Agents
 
-Generic, public-ready subagents (in `plugins/lirbox/agents/`). Most are dispatched as lanes or gates
-by `lirbox-herdr-orchestrator`; all ten are usable standalone:
+Generic, public-ready subagents (in `plugins/lirbox/agents/`). Nine standalone subagents — invoke
+any of them directly, or let `do` route a `lane` through `orch-lane.sh`:
 
 | Agent | Role |
 |-------|------|
@@ -44,7 +44,6 @@ by `lirbox-herdr-orchestrator`; all ten are usable standalone:
 | **`lirbox-code-reviewer`** | Reviews changed code (correctness/security/rules/quality) **and fixes** Critical/High, keeping the build green. |
 | **`lirbox-docs-writer`** | Writes a concise implementation summary into `docs/changes/` from the diff + goal + notes. |
 | **`lirbox-web-verifier`** | Web half of the frontend verification gate: writes Playwright E2E specs for assertable criteria and captures per-viewport screenshot/console evidence for judged ones; engine chain playwright → browser-MCP → OS-script, tooling failure never silently passes. |
-| **`lirbox-herdr-orchestrator`** | Runs a multi-agent session across Herdr panes — scopes work, writes success criteria *before* either lane starts, delegates to implementor and verifier panes, adjudicates their reports, commits and pushes. Never edits code, never verifies with its own hands, never believes a self-report. Drives `plugins/lirbox/scripts/orch-lane.sh` and the append-only run store in `plugins/lirbox/scripts/lanes/`. |
 | **`lirbox-mobile-verifier`** | Mobile half of the frontend verification gate: detects RN/Flutter/native, writes Maestro/Appium E2E flows, falls back to raw `simctl`/`adb` evidence capture on simulators/emulators; raw tier is honestly flagged evidence-only. |
 
 ## Install
