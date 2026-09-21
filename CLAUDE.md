@@ -2,7 +2,7 @@
 
 Personal Claude Code **plugin marketplace**. One plugin, `lirbox`, under `plugins/lirbox/`:
 `skills/<name>/SKILL.md` (+ optional `scripts/`, `references/`, `assets/`, `evals/`, `harbor/`),
-`agents/<name>.md` (10 subagents), `hooks/` (6 registered hooks), `scripts/` (the orchestration
+`agents/<name>.md` (9 subagents), `hooks/` (1 registered hook), `scripts/` (the orchestration
 runtime), `.claude-plugin/marketplace.json` (skills are auto-discovered, not listed).
 
 **13 skills**: 12 plus `do`. There is no Workflow tool here and no `conductor` / `loom` /
@@ -50,10 +50,12 @@ never buys the expensive route: a low-confidence `lane` downgrades to `inline`, 
 **`route-guard.sh`** (PreToolUse/Bash) is the half that binds: it refuses `orch-lane.sh start` when
 `route.json` is absent, or says `reject` or `scope`. It fails open, loudly, on any internal error.
 
-> **Known gap — do not fix here.** All hooks except `route-guard.sh` gate on
-> `agent_type == lirbox:lirbox-herdr-orchestrator` (`pane-guard`, `gate-guard`, `model-policy`,
-> `lane-ledger`, `lane-gate`). From an ordinary main session that value doesn't match, so
-> `pane-guard` and `gate-guard` **do not fire** — only `route-guard` does.
+> **`route-guard.sh` is the only hook.** The other five (`pane-guard`, `gate-guard`,
+> `model-policy`, `lane-ledger`, `lane-gate`) gated on
+> `agent_type == lirbox:lirbox-herdr-orchestrator`. From an ordinary main session that value never
+> matched, so none of them could fire; they were retired with the agent rather than left registered
+> against an id that no longer exists. If you re-add an enforcement hook, gate it on the tool call,
+> not on who is making it.
 
 ## `jev.mjs` — typed judgment
 

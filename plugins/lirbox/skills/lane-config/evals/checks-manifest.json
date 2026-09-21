@@ -21,7 +21,7 @@
           "replace": "HM_CAP=acme-ultra-9;  HM_CHEAP=acme-mini-9"
         },
         {
-          "why": "without the gate_profile guard a config validates clean and then dies at the one step that cannot be skipped — gate-guard.sh refuses every push, PR and merge for a lane with no code_gate",
+          "why": "without the gate_profile guard a config validates clean and then dies at the gate: `orch-lane.sh gate` has no profile to dispatch, so no lane can produce a verdict",
           "env": "ORCH_CONFIG_OVERRIDE",
           "file": "scripts/orch-config.sh",
           "find": "    problems+=(\"lanes.gate_profile is empty — no work can leave this repo without a gate, so this is not optional. Set it: $0 set-lanes --gate-profile <p>\")",

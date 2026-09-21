@@ -100,10 +100,9 @@ run('set-lanes', '--gate-profile', 'p1');
 const ok = run('validate');
 if (ok.code !== 0) fail(`validate refused a complete config: ${ok.out}`);
 
-// gate_profile is not optional and used to be unchecked: gate-guard.sh refuses
-// push, PR and merge-onto-base for a lane with no code_gate, and the gate cannot
-// start without a profile to run on. A config that validates and cannot ship is
-// a config that lied.
+// gate_profile is not optional and used to be unchecked: `orch-lane.sh gate`
+// cannot start without a profile to run the gate on. A config that validates and
+// cannot ship is a config that lied.
 patch((c) => { delete c.lanes.gate_profile; });
 if (run('validate').code === 0) fail('validate blessed a config with no lanes.gate_profile — no work can leave without a gate');
 run('set-lanes', '--gate-profile', 'p1');

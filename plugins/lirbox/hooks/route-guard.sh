@@ -3,14 +3,15 @@
 #
 # Advisory guidance in this repo does not bind. Prose telling an orchestrator how to size work has
 # been walked past repeatedly, which is why intake.mjs on its own would change nothing: the hook is
-# the half that matters. gate-guard.sh holds the OUTWARD door (nothing leaves ungated); this holds
-# the INWARD one (nothing expensive starts unrouted). Same shape, same escape, opposite end.
+# the half that matters. This holds the INWARD door: nothing expensive starts unrouted. The
+# OUTWARD door (nothing leaves ungated) was gate-guard.sh, retired with the orchestrator agent it
+# keyed on — it could never fire from an ordinary session. Nothing replaced it yet.
 #
 # What it refuses: `orch-lane.sh start` when .orchestration/<slug>/route.json is absent, or says
 # `reject`, or says `scope`. Nothing else. `restart`, `gate`, `brief` and `close` all
 # act on a lane that already exists — the decision they would be gating was made at `start`.
 #
-# Parsing is pure zsh for the reason gate-guard.sh gives at length: `grep` is a shell function in
+# Parsing is pure zsh for one reason worth restating: `grep` is a shell function in
 # some contexts and ugrep in others, and an interpolated ERE through a pipeline returns EMPTY
 # rather than erroring, which in a deny-by-default gate silently means allow.
 #
@@ -32,8 +33,7 @@ IN=$(cat) || pass_on_error "could not read the hook payload from stdin"
 CMD=$(print -r -- "$IN" | jq -r '.tool_input.command // ""')
 (( $? == 0 )) || pass_on_error "jq could not parse the hook payload"
 
-# Deny is a demand to say it out loud, not a veto on judgement — the same escape gate-guard.sh,
-# the spawn door and the model policy all use.
+# Deny is a demand to say it out loud, not a veto on judgement.
 [[ "$CMD" == *POLICY-OVERRIDE* ]] && exit 0
 
 typeset -a TOK
