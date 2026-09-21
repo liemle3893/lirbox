@@ -26,7 +26,7 @@ const tmp = mkdtempSync(join(tmpdir(), 'intake-selfcheck-'))
 // connection refused that a retry could mask.
 const server = createServer(() => {})
 await new Promise((r) => server.listen(0, '127.0.0.1', r))
-const HANGING = `http://127.0.0.1:${server.address().port}/api/v1/systemone`
+const HANGING = `http://127.0.0.1:${server.address().port}/api` // a BASE; jev appends /v1/systemone
 
 const results = []
 const check = (name, fn) => {
@@ -60,7 +60,7 @@ const runIntake = (slug, extra, env = {}) => {
   const root = mkdtempSync(join(tmp, 'root-'))
   const r = spawnSync(process.execPath,
     [INTAKE, '--task', TASK, '--run', slug, '--out-root', root, ...extra],
-    { encoding: 'utf8', env: { ...process.env, OPENROUTER_API_TOKEN: 'test-token', ...env } })
+    { encoding: 'utf8', env: { ...process.env, TYPESAFE_API_KEY: 'test-token', ...env } })
   let route = null
   try { route = JSON.parse(readFileSync(join(root, '.orchestration', slug, 'route.json'), 'utf8')) }
   catch (e) { route = { _unreadable: e.message } }
@@ -95,7 +95,7 @@ check('b: low-confidence `reject` becomes `scope`, never `reject`', () => {
 
 // (c) intake must never block a human, whatever the API does.
 check('c: total Jev failure -> cheapest route, exit 0, decided_by fallback', () => {
-  const { status, route } = runIntake('c-dead', ['--timeout-ms', '150'], { JEV_API_URL: HANGING })
+  const { status, route } = runIntake('c-dead', ['--timeout-ms', '150'], { TYPESAFE_BASE_URL: HANGING })
   assert.equal(status, 0, `intake must exit 0 even when Jev is dead, got ${status}`)
   assert.equal(route.route, 'inline', `expected the cheapest route, got ${route.route}`)
   assert.equal(route.decided_by, 'fallback', `expected fallback, got ${route.decided_by}`)
@@ -124,7 +124,7 @@ check('c2: a jev that dies without writing never reuses the last run\'s answers'
 
   const r = spawnSync(process.execPath,
     [INTAKE, '--task', TASK, '--run', 'c2-stale', '--out-root', root],
-    { encoding: 'utf8', env: { ...process.env, OPENROUTER_API_TOKEN: 'test-token', INTAKE_JEV_OVERRIDE: deadJev } })
+    { encoding: 'utf8', env: { ...process.env, TYPESAFE_API_KEY: 'test-token', INTAKE_JEV_OVERRIDE: deadJev } })
   const route = JSON.parse(readFileSync(join(runDir, 'route.json'), 'utf8'))
   assert.equal(r.status, 0, `intake must still exit 0, got ${r.status}`)
   assert.notEqual(route.route, 'lane', 'a stale scratch file must never buy the expensive route')

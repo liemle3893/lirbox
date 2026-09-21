@@ -13,7 +13,10 @@ import { parseArgs } from 'node:util'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-export const ENDPOINT = process.env.JEV_API_URL || 'https://openrouter.ai/api/v1/systemone'
+// TypeSafe's own env contract, not one invented here: TYPESAFE_BASE_URL is a BASE and the client
+// appends /v1/systemone, exactly as the SDKs do. https://openrouter.ai/docs/guides/community/typesafe-sdk
+export const BASE_URL = (process.env.TYPESAFE_BASE_URL || 'https://openrouter.ai/api').replace(/\/+$/, '')
+export const ENDPOINT = `${BASE_URL}/v1/systemone`
 // Pinned on purpose. A floating alias (`jev-latest`) silently rescales the metric between runs,
 // which is exactly why judge.toml pins models too. Override per-call with --model.
 export const DEFAULT_MODEL = 'jev-1.13'
@@ -34,15 +37,15 @@ const estTokens = (s) => Math.ceil((typeof s === 'string' ? s : JSON.stringify(s
 export const reportedCost = (usage) =>
   usage && typeof usage.cost === 'number' ? usage.cost : null
 
-/** Reads OPENROUTER_API_TOKEN, falling back to the repo-root .env (gitignored). */
+/** Reads TYPESAFE_API_KEY (via OpenRouter it holds the OpenRouter key), falling back to the repo-root .env (gitignored). */
 export function apiToken() {
-  if (!process.env.OPENROUTER_API_TOKEN) {
+  if (!process.env.TYPESAFE_API_KEY) {
     const envFile = join(HERE, '..', '..', '..', '.env')
     if (existsSync(envFile)) {
       try { process.loadEnvFile(envFile) } catch { /* malformed .env is just a missing key */ }
     }
   }
-  return process.env.OPENROUTER_API_TOKEN
+  return process.env.TYPESAFE_API_KEY
 }
 
 /** Throws a clear refusal (naming the limit and the observed value) if the request cannot fit. */
@@ -120,7 +123,7 @@ export async function askJev({
   if (fixture) return JSON.parse(readFileSync(fixture, 'utf8'))
 
   const token = apiToken()
-  if (!token) throw new Error('OPENROUTER_API_TOKEN is not set (looked at the environment and the repo-root .env)')
+  if (!token) throw new Error('TYPESAFE_API_KEY is not set (looked at the environment and the repo-root .env)')
 
   const body = JSON.stringify({ model, state, questions })
   let lastErr = null

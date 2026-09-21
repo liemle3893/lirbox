@@ -8,10 +8,10 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const JEV = join(HERE, 'jev.mjs')
@@ -21,7 +21,8 @@ const tmp = mkdtempSync(join(tmpdir(), 'jev-selfcheck-'))
 let requests = 0
 const server = createServer(() => { requests++ /* never responds */ })
 await new Promise((r) => server.listen(0, '127.0.0.1', r))
-const url = `http://127.0.0.1:${server.address().port}/api/v1/systemone`
+// A BASE, as TYPESAFE_BASE_URL is: the client appends /v1/systemone itself.
+const base = `http://127.0.0.1:${server.address().port}/api`
 
 const QUESTIONS = join(tmp, 'questions.json')
 writeFileSync(QUESTIONS, JSON.stringify({
@@ -31,12 +32,12 @@ writeFileSync(QUESTIONS, JSON.stringify({
 const STATE = join(tmp, 'state.txt')
 writeFileSync(STATE, 'a small diff')
 
-// JEV_API_URL points the client at the hanging server; the token is a placeholder so the run
-// never touches the real .env key.
+// TYPESAFE_BASE_URL points the client at the hanging server; TYPESAFE_API_KEY is a placeholder,
+// and because it is SET, apiToken() never falls through to the real key in the repo-root .env.
 const run = (args, env = {}) => {
   const r = spawnSync(process.execPath, [JEV, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, OPENROUTER_API_TOKEN: 'test-token', JEV_API_URL: url, ...env },
+    env: { ...process.env, TYPESAFE_API_KEY: 'test-token', TYPESAFE_BASE_URL: base, ...env },
   })
   return { status: r.status, stderr: r.stderr, stdout: r.stdout }
 }
@@ -128,6 +129,39 @@ check('f: 11-level score ladder refused, zero requests sent', () => {
   assert.match(r.stderr, /has 11 levels, limit is 2\.\.10/, `refusal did not name the limit: ${r.stderr}`)
   assert.ok(allNotMeasured(outOf(out).answers), 'expected all NOT_MEASURED')
   assert.equal(requests - before, 0, `expected 0 requests, server saw ${requests - before}`)
+})
+
+// (g) the env contract is TypeSafe's own, not one invented here. The SDKs read TYPESAFE_API_KEY
+// and TYPESAFE_BASE_URL, and the base URL is a BASE — the client appends /v1/systemone.
+// https://openrouter.ai/docs/guides/community/typesafe-sdk
+// Run against a COPY of jev.mjs in an empty temp tree, so the repo-root .env (which holds a real
+// key) can never answer on the module's behalf and make an unset variable look set.
+check('g: TYPESAFE_API_KEY / TYPESAFE_BASE_URL, and nothing invented', () => {
+  const root = mkdtempSync(join(tmpdir(), 'jev-env-'))
+  const dir = join(root, 'plugins', 'lirbox', 'scripts')
+  mkdirSync(dir, { recursive: true })
+  copyFileSync(JEV, join(dir, 'jev.mjs'))
+  const probe = (env) => {
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) =>
+      !/^(TYPESAFE_|OPENROUTER_API_TOKEN$|JEV_API_URL$)/.test(k)))
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `const m = await import(${JSON.stringify(pathToFileURL(join(dir, 'jev.mjs')).href)});` +
+      `console.log(JSON.stringify({ token: m.apiToken() ?? null, endpoint: m.ENDPOINT }))`],
+      { encoding: 'utf8', env: { ...clean, ...env } })
+    assert.equal(r.status, 0, `probe failed to run: ${r.stderr}`)
+    return JSON.parse(r.stdout)
+  }
+  assert.equal(probe({ TYPESAFE_API_KEY: 'k1' }).token, 'k1', 'TYPESAFE_API_KEY is not read')
+  assert.equal(probe({}).endpoint, 'https://openrouter.ai/api/v1/systemone', 'default endpoint wrong')
+  assert.equal(probe({ TYPESAFE_BASE_URL: 'http://x.test/api/' }).endpoint, 'http://x.test/api/v1/systemone',
+    'TYPESAFE_BASE_URL must be a BASE with /v1/systemone appended (and a trailing slash tolerated)')
+  // The invented names are gone, not aliased: a key under the old name must not authenticate.
+  assert.equal(probe({ OPENROUTER_API_TOKEN: 'old' }).token, null, 'the invented OPENROUTER_API_TOKEN still authenticates')
+  assert.equal(probe({ JEV_API_URL: 'http://old.test' }).endpoint, 'https://openrouter.ai/api/v1/systemone',
+    'the invented JEV_API_URL still redirects requests')
+  // The .env fallback reads the same standard name.
+  writeFileSync(join(root, '.env'), 'TYPESAFE_API_KEY=from-dotenv\n')
+  assert.equal(probe({}).token, 'from-dotenv', 'the repo-root .env fallback does not read TYPESAFE_API_KEY')
 })
 
 server.close()
