@@ -81,6 +81,13 @@
           "file": "scripts/orch-config.sh",
           "find": "agent:\"lirbox:lirbox-planner\"",
           "replace": "agent:\"lirbox-planner\""
+        },
+        {
+          "why": "issue #91: merging the name-carried branch back into the file-carried one makes init invent `lirbox-planner` for opencode too, which opencode's own registry has never heard of — a config its own validate refuses, with no resolvable fixup",
+          "env": "ORCH_CONFIG_OVERRIDE",
+          "file": "scripts/orch-config.sh",
+          "find": "elif [[ -n \"$HK\" && \"${HK_AGENT_ARG[$HK]-}\" == file ]]; then",
+          "replace": "elif [[ -n \"$HK\" ]]; then"
         }
       ]
     }
