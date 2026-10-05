@@ -24,10 +24,17 @@ is noise.
 ## Hubs (the opposite problem)
 
 A module imported nearly everywhere (`config`, `db`, `types`, `ids`, a utils barrel) makes the import
-graph select almost the whole suite. Options, in order of preference:
+graph select almost the whole suite. A composition root that statically imports every domain does
+the same through one route (`references/case-study.md`). `hubs --changed` ranks the nodes the chains
+pass through and counts the tests reached ONLY through each. Options, in order of preference:
 1. A **type-only** change is proven by the typechecker; route it to `checks`, not to tests.
-2. Split the hub so most importers depend on a stable slice.
-3. Accept it as a run-everything trigger and say so — a broad selection that is honest beats a
+2. **Refactor the hub** so tests mount only what they use (inject, per-test composition); the graph
+   becomes honest and nothing needs maintaining.
+3. Split the hub so most importers depend on a stable slice.
+4. Interim, or when a refactor is impossible: `graphCuts` for the hub, after
+   `mutate --prove-irrelevant` showed the dropped tests do not fail when the changed code breaks;
+   `coverage` then requires every module behind the cut to be owned by a part.
+5. Accept it as a run-everything trigger and say so — a broad selection that is honest beats a
    narrow one that skips.
 
 ## Run-everything triggers that are usually too broad

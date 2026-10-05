@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 // test-scope: path-aware test selection. Node >= 20, no dependencies.
-//   detect | select | run | coverage | replay | misses | rules      (see SKILL.md <scripts>)
-// Exit: 0 ok, 1 test/check failed or problems found, 2 internal error, 3 uncovered changed files, 64 usage.
+//   detect | select | run | coverage | replay | misses | rules | measure | changecov | mutate | trace | hubs | doctor
+//   (see SKILL.md <scripts>)
+// Exit: 0 ok, 1 test/check failed or problems found, 2 internal error, 3 uncovered changed files,
+//       4 not measurable (no coverage tool / no graph for the runner), 64 usage.
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { cmdMeasure } from './measure.mjs';
+import { cmdChangecov } from './changecov.mjs';
+import { cmdMutate } from './mutate.mjs';
+import { cmdTrace, cmdHubs, buildGraph, cutPredicate, reaching, cutProblems } from './graph.mjs';
+import { cmdDoctor } from './doctor.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -178,7 +185,7 @@ export function loadConfig(root, configArg) {
       name, dir, runner,
       testGlobs: p.testGlobs || DEFAULT_TEST_GLOBS[runner] || [],
       exclude: p.exclude || [],
-      cmd: p.cmd, wrapper: p.wrapper, relatedCmd: p.relatedCmd,
+      cmd: p.cmd, wrapper: p.wrapper, relatedCmd: p.relatedCmd, coverage: p.coverage,
     };
   }
   const names = Object.keys(pkgs);
@@ -188,7 +195,7 @@ export function loadConfig(root, configArg) {
     const add = (pkg, globs) => { if (Array.isArray(globs)) tests[pkg] = [...(tests[pkg] || []), ...globs]; };
     if (Array.isArray(p.tests)) { if (names.length === 1) add(names[0], p.tests); else warnings.push(`part ${pname}: "tests" is a list but there are ${names.length} packages; use {package: [globs]}`); }
     else for (const [k, v] of Object.entries(p.tests || {})) add(k, v);
-    for (const k of Object.keys(p)) if (!['description', 'paths', 'tests', 'checks'].includes(k) && names.includes(k)) add(k, p[k]); // msn shape: top-level "<package>": [globs]
+    for (const k of Object.keys(p)) if (!['description', 'paths', 'tests', 'checks'].includes(k) && names.includes(k)) add(k, p[k]); // shorthand: top-level "<package>": [globs] on the part
     for (const k of Object.keys(tests)) if (!pkgs[k]) { warnings.push(`part ${pname}: tests for unknown package "${k}" ignored`); delete tests[k]; }
     parts[pname] = { description: p.description || '', paths: p.paths || [], tests, checks: p.checks || [] };
   }
@@ -197,7 +204,7 @@ export function loadConfig(root, configArg) {
   for (const p of Object.values(pkgs)) {
     if (!DEFAULT_TEST_GLOBS[p.runner] && !['custom', 'none'].includes(p.runner)) warnings.push(`package ${p.name}: unknown runner "${p.runner}": parts only, no import graph`);
   }
-  return { file, raw, base: raw.base, noTests: raw.noTests || [], runAll: raw.runAll || [], graphOnly, packages: pkgs, parts, warnings };
+  return { file, raw, base: raw.base, noTests: raw.noTests || [], runAll: raw.runAll || [], graphCuts: raw.graphCuts || [], graphOnly, packages: pkgs, parts, warnings };
 }
 
 // ───────────────────────── inventory ─────────────────────────
@@ -232,7 +239,7 @@ function partTests(cfg, part, pkg, all) {
 // ───────────────────────── selection ─────────────────────────
 function emptySel(cfg) {
   const per = (v) => Object.fromEntries(Object.keys(cfg.packages).map((n) => [n, v()]));
-  return { parts: [], entries: [], related: per(() => []), srcHits: {}, graph: {}, checks: [], uncovered: [], noTests: [], runAll: false, warnings: [] };
+  return { parts: [], entries: [], related: per(() => []), srcHits: {}, graph: {}, cutApplied: {}, cutDropped: [], checks: [], uncovered: [], noTests: [], runAll: false, warnings: [] };
 }
 const short = (files) => (files.length <= 2 ? files.join(', ') : `${files.slice(0, 2).join(', ')} +${files.length - 2}`);
 const addEntry = (sel, e) => { if (!sel.entries.some((x) => x.pkg === e.pkg && x.file === e.file)) sel.entries.push(e); };
@@ -488,6 +495,28 @@ function resolveGraph(cfg, root, sel, all, { resolveHeavy = false } = {}) {
     if (!rels.length) continue;
     const ad = ADAPTERS[pkg.runner];
     if (!ad) { sel.graph[pkg.name] = 'none'; sel.warnings.push(`package ${pkg.name}: runner "${pkg.runner}" has no adapter, parts only`); continue; }
+    if (cfg.graphCuts.length && !sel.runAll) {
+      // graphCuts: our own graph (esbuild / py / go) replaces the runner's, minus every path that crosses a cut
+      const H = hostBag(root, cfg, all);
+      const g = buildGraph(H, pkg);
+      if (g.error) sel.warnings.push(`package ${pkg.name}: graphCuts not applied (${g.error}); the runner's full graph is used`);
+      else {
+        const cut = cutPredicate(H, pkg, g);
+        const live = (t) => all[pkg.name].includes(t) && !isExcluded(cfg, pkg.name, t);
+        const repo = (rel) => (pkg.dir === '.' ? rel : `${pkg.dir}/${rel}`);
+        sel.graph[pkg.name] = 'resolved';
+        sel.cutApplied[pkg.name] = true;
+        for (const rel of rels) {
+          const target = g.nodeOf(rel);
+          const kept = reaching(g, [target], cut).tests;
+          const tests = [...kept].filter(live).sort();
+          for (const t of tests) addEntry(sel, { part: '(graph)', pkg: pkg.name, file: t, reason: `related: ${repo(rel)} (graphCuts applied)` });
+          for (const t of [...reaching(g, [target]).tests].filter((x) => live(x) && !kept.has(x))) if (!sel.cutDropped.some((d) => d.pkg === pkg.name && d.file === t)) sel.cutDropped.push({ pkg: pkg.name, file: t, source: repo(rel) });
+          if (!tests.length && !(sel.srcHits[repo(rel)] || []).length) sel.uncovered.push(repo(rel));
+        }
+        continue;
+      }
+    }
     if (!ad.local && !resolveHeavy) { sel.graph[pkg.name] = 'runtime'; continue; }
     const r = ad.resolve(pkg, root, rels, all[pkg.name]);
     if (r.error) { sel.graph[pkg.name] = 'runtime'; sel.warnings.push(`package ${pkg.name}: graph not resolved (${r.error}); the runner resolves it at run time`); continue; }
@@ -510,8 +539,48 @@ function resolveGraph(cfg, root, sel, all, { resolveHeavy = false } = {}) {
   return sel;
 }
 
+// ───────────────────────── host bag for the extra subcommands ─────────────────────────
+/** Selection + one runner invocation per package, for the subcommands that run the selected tests themselves. */
+function planRuns(a, root, cfg, all) {
+  if (!a.changed) throw new Usage('give --changed [base] [--to ref]');
+  const base = resolveBase(root, cfg, a.base);
+  const cf = changedFiles(root, base, a.to);
+  const { sel, meta } = selectionFromArgs(a, root, cfg, all, cf);
+  resolveGraph(cfg, root, sel, all, { resolveHeavy: !!a.resolve });
+  sel.warnings.unshift(...cfg.warnings);
+  const runs = [];
+  for (const pkg of Object.values(cfg.packages)) {
+    const tests = sel.entries.filter((e) => e.pkg === pkg.name).map((e) => e.file);
+    const related = sel.cutApplied[pkg.name] ? [] : sel.related[pkg.name];
+    if (tests.length || related.length) runs.push({ pkg, tests, related });
+  }
+  return { sel, meta, runs, deleted: cf.deleted };
+}
+
+function hostBag(root, cfg, all) {
+  return {
+    root, cfg, all, HERE, Usage, MANIFEST, lines,
+    wrapped, runCapture, goPackages, relTo, shellWords, fill, pct,
+    wrapperArgv: (pkg) => wrapperArgv(root, pkg),
+    pkgOf: (f) => pkgOf(cfg, f),
+    matchAny, matchesPaths,
+    isExcluded: (pkg, rel) => isExcluded(cfg, pkg, rel),
+    isTestFile: (f) => { const p = pkgOf(cfg, f); return !!p && matchAny(p.rel, p.pkg.testGlobs); },
+    gitOk: (args) => gitOk(root, args),
+    plan: (a) => planRuns(a, root, cfg, all),
+    changedSel: (a) => planRuns(a, root, cfg, all),
+    runArgv: (run) => { const ad = ADAPTERS[run.pkg.runner]; return ad ? ad.argv(run.pkg, root, { tests: run.tests, related: run.related }) : null; },
+    replayStats: (n, resolve) => replayStats(root, cfg, all, n, resolve),
+    coverageStats: () => computeCoverage(root, cfg, all, repoFiles(root)),
+    coverageCmd: () => cmdCoverage(root, cfg, all, repoFiles(root)),
+    rulesCmd: (a) => cmdRules(a, root, cfg),
+    selectCmd: (a) => cmdSelect(a, root, cfg, all, { quiet: true }),
+    missesCmd: (a) => cmdMisses(a, root, cfg, all),
+  };
+}
+
 // ───────────────────────── args ─────────────────────────
-const VALUE_FLAGS = new Set(['config', 'to', 'part', 'commits', 'results', 'since', 'source', 'out', 'root', 'limit']);
+const VALUE_FLAGS = new Set(['config', 'to', 'part', 'commits', 'results', 'since', 'source', 'out', 'root', 'limit', 'label', 'wall', 'threshold', 'prove-irrelevant', 'max-mutants', 'timeout', 'metrics']);
 const OPT_VALUE_FLAGS = new Set(['changed']);
 function parseArgs(argv) {
   const a = { _: [] };
@@ -519,7 +588,8 @@ function parseArgs(argv) {
     const x = argv[i];
     if (!x.startsWith('--')) { a._.push(x); continue; }
     const k = x.slice(2);
-    if (VALUE_FLAGS.has(k)) { const v = argv[++i]; if (v === undefined) throw new Usage(`--${k} needs a value`); a[k] = v; }
+    if (k === 'compare') { a.compare = [argv[++i], argv[++i]]; if (!a.compare[0] || !a.compare[1]) throw new Usage('--compare needs two labels'); }
+    else if (VALUE_FLAGS.has(k)) { const v = argv[++i]; if (v === undefined) throw new Usage(`--${k} needs a value`); a[k] = v; }
     else if (OPT_VALUE_FLAGS.has(k)) { a[k] = true; if (argv[i + 1] && !argv[i + 1].startsWith('--')) a.base = argv[++i]; }
     else a[k] = true;
   }
@@ -544,6 +614,7 @@ function render(cfg, sel, header, all) {
   out.push(`checks: ${sel.checks.join(', ') || '(none)'}`);
   if (sel.noTests.length) out.push(`no tests needed: ${sel.noTests.length} file(s)`, ...sel.noTests.map((f) => `  ${f}`));
   if (sel.uncovered.length) out.push('uncovered changed files (no test selected, not in noTests):', ...sel.uncovered.map((f) => `  ${f}`));
+  if (sel.cutDropped.length) out.push(`graphCuts dropped ${sel.cutDropped.length} graph-only test(s) that reach the change only through a cut: ${short(sel.cutDropped.map((d) => d.file))}`);
   for (const w of sel.warnings) out.push(`warning: ${w}`);
   return out.join('\n');
 }
@@ -593,7 +664,7 @@ function cmdRun(a, root, cfg, all) {
   const results = [];
   for (const pkg of Object.values(cfg.packages)) {
     const tests = sel.entries.filter((e) => e.pkg === pkg.name).map((e) => e.file);
-    const related = sel.related[pkg.name];
+    const related = sel.cutApplied[pkg.name] ? [] : sel.related[pkg.name];
     if (!tests.length && !related.length) continue;
     const ad = ADAPTERS[pkg.runner];
     const argv = ad && ad.argv(pkg, root, { tests, related });
@@ -614,7 +685,7 @@ function cmdRun(a, root, cfg, all) {
   return results.every((r) => r.ok) ? 0 : 1;
 }
 
-function cmdCoverage(root, cfg, all, files) {
+function computeCoverage(root, cfg, all, files) {
   const problems = [];
   const unowned = [], dead = [];
   for (const pkg of Object.keys(cfg.packages)) {
@@ -628,14 +699,21 @@ function cmdCoverage(root, cfg, all, files) {
     if (!all[pkg].length) problems.push(`package ${pkg}: no test files found (testGlobs ${JSON.stringify(cfg.packages[pkg].testGlobs)})`);
   }
   for (const [pn, part] of Object.entries(cfg.parts)) for (const g of part.paths) if (!g.startsWith('!') && !files.some((f) => matchGlob(f, g))) dead.push(`parts.${pn}.paths: ${g}`);
-  for (const k of ['noTests', 'runAll']) for (const g of cfg[k]) if (!files.some((f) => matchGlob(f, g))) dead.push(`${k}: ${g}`);
+  for (const k of ['noTests', 'runAll', 'graphCuts']) for (const g of cfg[k]) if (!files.some((f) => matchGlob(f, g))) dead.push(`${k}: ${g}`);
   const total = Object.values(all).reduce((n, v) => n + v.length, 0);
+  const cut = cutProblems(hostBag(root, cfg, all));
+  return { total, unowned, dead, problems, cut };
+}
+
+function cmdCoverage(root, cfg, all, files) {
+  const { total, unowned, dead, problems, cut } = computeCoverage(root, cfg, all, files);
   console.log(`test files: ${total} in ${Object.keys(cfg.packages).length} package(s); parts: ${Object.keys(cfg.parts).length}`);
   if (unowned.length) console.log(`UNOWNED test files (${unowned.length}): add to a part's tests or to graphOnly\n${unowned.map((x) => `  ${x}`).join('\n')}`);
   if (dead.length) console.log(`DEAD globs (${dead.length}): match nothing, so they select nothing\n${dead.map((x) => `  ${x}`).join('\n')}`);
+  if (cut.problems.length) console.log(`CUT-UNOWNED modules (${cut.problems.length}): behind a graphCut, so no import chain selects their tests; give each a part with paths\n${cut.problems.map((x) => `  ${x}`).join('\n')}`);
   for (const p of problems) console.log(`PROBLEM ${p}`);
-  for (const w of cfg.warnings) console.log(`warning: ${w}`);
-  if (unowned.length || dead.length || problems.length) return 1;
+  for (const w of [...cfg.warnings, ...cut.warnings]) console.log(`warning: ${w}`);
+  if (unowned.length || dead.length || problems.length || cut.problems.length) return 1;
   console.log('coverage clean');
   return 0;
 }
@@ -658,13 +736,12 @@ function selectForCommit(root, cfg, all, sha, resolveHeavy) {
 
 const pct = (xs, q) => { const s = [...xs].sort((x, y) => x - y); return s.length ? s[Math.max(0, Math.ceil(q * s.length) - 1)] : 0; };
 
-function cmdReplay(a, root, cfg, all) {
-  const n = parseInt(a.commits || '10', 10);
+function replayStats(root, cfg, all, n, resolve) {
   if (!(n > 0)) throw new Usage('--commits needs a positive number');
   const total = Object.values(all).reduce((k, v) => k + v.length, 0);
   const rows = [];
   for (const sha of commitRange(root, n)) {
-    const { files, sel } = selectForCommit(root, cfg, all, sha, !!a.resolve);
+    const { files, sel } = selectForCommit(root, cfg, all, sha, resolve);
     const selected = sel.entries.length;
     const lower = Object.values(sel.graph).includes('runtime');
     rows.push({
@@ -673,7 +750,12 @@ function cmdReplay(a, root, cfg, all) {
     });
   }
   const sizes = rows.map((r) => r.selected), pcts = rows.map((r) => r.percent);
-  const summary = { commits: rows.length, totalTestFiles: total, median: pct(sizes, 0.5), p90: pct(sizes, 0.9), max: Math.max(0, ...sizes), medianPercent: pct(pcts, 0.5), p90Percent: pct(pcts, 0.9), maxPercent: Math.max(0, ...pcts), runAllCommits: rows.filter((r) => r.runAll).length, lowerBoundCommits: rows.filter((r) => r.lowerBound).length };
+  const summary = { commits: rows.length, totalTestFiles: total, median: pct(sizes, 0.5), p90: pct(sizes, 0.9), max: Math.max(0, ...sizes), medianPercent: pct(pcts, 0.5), p90Percent: pct(pcts, 0.9), maxPercent: Math.max(0, ...pcts), runAllCommits: rows.filter((r) => r.runAll).length, uncoveredCommits: rows.filter((r) => r.uncovered).length, lowerBoundCommits: rows.filter((r) => r.lowerBound).length };
+  return { rows, summary, total };
+}
+
+function cmdReplay(a, root, cfg, all) {
+  const { rows, summary, total } = replayStats(root, cfg, all, parseInt(a.commits || '10', 10), !!a.resolve);
   if (a.json) { console.log(JSON.stringify({ summary, commits: rows }, null, 2)); return 0; }
   console.log(`replay: last ${rows.length} first-parent commit(s); graph resolved against the checked-out tree; full suite = ${total} test file(s)`);
   for (const r of rows) console.log(`${r.sha}  ${String(r.changed).padStart(3)} files  ${String(r.selected).padStart(4)} / ${total} tests  ${String(r.percent).padStart(5)}%${r.lowerBound ? '+' : ' '}${r.runAll ? '  [run-all]' : ''}${r.uncovered ? `  [${r.uncovered} uncovered]` : ''}  ${r.subject.slice(0, 60)}`);
@@ -896,10 +978,31 @@ function cmdDetect(a, root) {
 }
 
 // ───────────────────────── main ─────────────────────────
-const USAGE = `usage: test-scope.mjs <detect|select|run|coverage|replay|misses|rules> [options]
+const USAGE = `usage: test-scope.mjs <detect|select|run|coverage|replay|misses|rules|measure|changecov|mutate|trace|hubs|doctor> [options]
   select --changed [base] [--to ref] [--list|--json] [--resolve]   run --part a,b | --changed [base] [--to ref] [--dry-run]
   coverage   replay --commits N [--json] [--resolve]   misses --results <file> [--since ref] [--commits N]   rules --write|--check
+  measure [--commits N] [--resolve] [--label L] [--wall S] [--results <file>] [--no-write] | measure --compare <A> <B>
+  changecov --changed [base] [--to ref] [--threshold P] [--timeout S] [--dry-run] [--json]
+  mutate --changed [base] [--to ref] [--prove-irrelevant <globs|@file>] [--max-mutants N] [--timeout S] [--allow-dirty] [--dry-run]
+  trace <test-file> <source-file>   hubs --changed [base] [--to ref] | --source <file[,file]>
+  doctor [--changed [base] [--to ref]] [--no-changecov] [--no-mutate] [--allow-unmeasured]
   global: --config <path>  --root <dir>`;
+
+const SUBS = ['select', 'run', 'coverage', 'replay', 'misses', 'rules', 'measure', 'changecov', 'mutate', 'trace', 'hubs', 'doctor'];
+
+/** Run fn with console output collected (for doctor / measure, which fold other subcommands' output into one report). */
+export function capture(fn) {
+  const lines_ = [];
+  const { log, error } = console;
+  console.log = (...x) => lines_.push(x.join(' '));
+  console.error = (...x) => lines_.push(x.join(' '));
+  const done = (code) => { console.log = log; console.error = error; return { code, text: lines_.join('\n') }; };
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') return r.then(done, (e) => { done(); throw e; });
+    return done(r);
+  } catch (e) { done(); throw e; }
+}
 
 export function main(argv) {
   const a = parseArgs(argv);
@@ -907,20 +1010,29 @@ export function main(argv) {
   if (!sub || sub === 'help' || a.help) { console.log(USAGE); return sub ? 0 : 64; }
   const root = a.root ? path.resolve(a.root) : repoRoot(process.cwd());
   if (sub === 'detect') return cmdDetect(a, root);
-  if (!['select', 'run', 'coverage', 'replay', 'misses', 'rules'].includes(sub)) throw new Usage(`unknown subcommand: ${sub}`);
+  if (!SUBS.includes(sub)) throw new Usage(`unknown subcommand: ${sub}`);
+  if (sub === 'doctor') {
+    return cmdDoctor(a, { root, Usage, capture, load: () => { try { const cfg = loadConfig(root, a.config); return { cfg, H: hostBag(root, cfg, listAllTests(cfg, repoFiles(root))) }; } catch (e) { if (e instanceof Usage) return { error: e.message }; throw e; } } });
+  }
   const cfg = loadConfig(root, a.config);
   if (sub === 'rules') return cmdRules(a, root, cfg);
   const files = repoFiles(root);
   const all = listAllTests(cfg, files);
+  const H = hostBag(root, cfg, all);
   if (sub === 'select') return cmdSelect(a, root, cfg, all).code;
   if (sub === 'run') return cmdRun(a, root, cfg, all);
   if (sub === 'coverage') return cmdCoverage(root, cfg, all, files);
   if (sub === 'replay') return cmdReplay(a, root, cfg, all);
-  return cmdMisses(a, root, cfg, all);
+  if (sub === 'misses') return cmdMisses(a, root, cfg, all);
+  if (sub === 'measure') return cmdMeasure(a, H, { capture });
+  if (sub === 'changecov') return cmdChangecov(a, H);
+  if (sub === 'mutate') return cmdMutate(a, H);
+  if (sub === 'trace') return cmdTrace(a, H);
+  return cmdHubs(a, H);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { process.exit(main(process.argv.slice(2))); }
+  try { process.exit(await main(process.argv.slice(2))); }
   catch (e) {
     if (e instanceof Usage) { console.error(`test-scope: ${e.message}`); process.exit(64); }
     console.error(`test-scope: ${e && e.stack ? e.stack : e}`); process.exit(2);

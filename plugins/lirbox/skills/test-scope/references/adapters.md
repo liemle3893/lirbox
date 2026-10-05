@@ -16,6 +16,25 @@ Changed sources are passed relative to the package dir. Parts are always added o
 `<pm>` is `pnpm exec` when a `pnpm-lock.yaml` is found at or above the package, `yarn` for `yarn.lock`,
 else `npx --no-install`; override with `packages.*.cmd`. `wrapper` prefixes every invocation.
 
+## Coverage (`changecov`) and import chains (`trace`, `hubs`, `graphCuts`)
+
+| Runner | `changecov` runs the selection with | Coverage file | `trace` / `hubs` / `graphCuts` graph |
+|---|---|---|---|
+| `vitest` | `--coverage.enabled --coverage.provider=v8 --coverage.reporter=json --coverage.include=<changed>` (needs `@vitest/coverage-v8`) | istanbul `coverage-final.json` | esbuild metafile via `scripts/esbuild_graph.mjs`, using the package's own `esbuild` (a vite dependency, usually resolvable); not resolvable -> "not measurable", exit 4 |
+| `jest` | `--coverage --coverageReporters=json --collectCoverageFrom=<changed>` | istanbul | same as vitest |
+| `pytest` | `--cov=. --cov-report=json:<file>` (needs `pytest-cov`) | coverage.py json | `py_related.py` in `edges` mode (static imports) |
+| `go` | `go test -coverprofile=<file> <pkg dirs>` | coverprofile | `go list -deps -test`: nodes are package dirs plus test files |
+| `custom` | `packages.*.coverage` (`file`, `format`, optional `cmd` with `{out}`) | any of the four formats, lcov included | none |
+
+No coverage support for a runner = `not measurable` (exit 4), never a pass. Function-level reading
+(`changecov`, `mutate`) covers JS/TS, Python and Go sources only; other changed files are listed as
+"not measured". Function detection is lexical (strings, comments and regex literals blanked, braces or
+indentation matched): a function it misses shows up as "not mutable", a false positive as an
+`INCONCLUSIVE` mutant (the run failed without the marker), never as a pass. `mutate` edits the working
+tree: it refuses uncommitted target files without `--allow-dirty` and restores through `finally`,
+signal handlers and a journal in the git dir that the next run replays; it never overwrites a file
+something else changed meanwhile (the original stays in the journal).
+
 ## What "resolved at run time" costs
 
 When list mode cannot resolve (vitest/jest without `--resolve`), `select --list` shows the parts' tests

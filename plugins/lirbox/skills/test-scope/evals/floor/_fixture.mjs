@@ -62,7 +62,9 @@ export function makeRepo({ parts = PARTS } = {}) {
 }
 
 export function ts(dir, args, { json = false } = {}) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8' });
+  // a fixture's own `node --test` must not think it is a child of the runner that is running this floor
+  const { NODE_TEST_CONTEXT, ...env } = process.env;
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env });
   const out = { code: r.status, stdout: r.stdout, stderr: r.stderr };
   if (json) { try { out.json = JSON.parse(r.stdout); } catch { out.json = null; } }
   return out;

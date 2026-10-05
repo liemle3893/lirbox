@@ -4,6 +4,7 @@
 stdin : {"root": "<package dir>", "tests": ["tests/test_a.py", ...], "changed": ["pkg/mod.py", ...]}
         paths are relative to root.
 stdout: {"map": {"<changed file>": ["<test file>", ...]}}
+        with "edges": true in the request, the import graph instead: {"edges": {"<file>": ["<file it imports>", ...]}}
 
 A test is related to a changed module when it imports it, directly or through any chain of
 imports. A changed conftest.py relates to every test under its directory. A changed test file
@@ -90,6 +91,7 @@ def main():
         for n in module_names(rel):
             by_name.setdefault(n, rel)
     importers = {}  # file -> set(files that import it)
+    forward = {}  # file -> set(files it imports)
     for rel in files:
         for name in imports_of(os.path.join(root, rel), rel, by_name):
             parts = name.split(".")
@@ -98,6 +100,10 @@ def main():
                 target = by_name.get(".".join(parts[:i]))
                 if target and target != rel:
                     importers.setdefault(target, set()).add(rel)
+                    forward.setdefault(rel, set()).add(target)
+    if req.get("edges"):
+        json.dump({"edges": {k: sorted(v) for k, v in forward.items()}}, sys.stdout)
+        return
     result = {}
     for ch in changed:
         seen, stack = {ch}, [ch]
