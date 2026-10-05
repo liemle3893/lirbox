@@ -1,0 +1,26 @@
+{
+  "_comment": "Test selection for this repo (schema: references/parts-schema.md). Every changed source goes to the import graph first; parts below add the links imports cannot see.",
+  "base": "main",
+  "packages": {
+    "server": { "dir": "server", "runner": "vitest", "testGlobs": ["src/**/*.test.ts", "test/**/*.test.ts"], "wrapper": "scripts/heavy.sh", "exclude": ["test/**/*.live.test.ts"] },
+    "web": { "dir": "web", "runner": "vitest", "testGlobs": ["src/**/*.test.{ts,tsx}"] }
+  },
+  "noTests": ["docs/**", "**/*.md", "deploy/**", "**/Dockerfile"],
+  "runAll": ["server/vitest.config.ts", "server/src/db.ts", "pnpm-lock.yaml"],
+  "graphOnly": { "server": ["test/util/**/*.test.ts"] },
+  "parts": {
+    "db": {
+      "description": "Schema migrations and every domain test that queries the touched tables",
+      "paths": ["server/migrations/**", "server/src/generated/db.ts"],
+      "tests": { "server": ["test/migrations/**/*.test.ts", "test/domains/**/*.test.ts"] },
+      "checks": ["server:typecheck"],
+      "_comment": "migration -> raw SQL in domains/* naming the tables (grep evidence: server/src/domains/files.ts:88)"
+    },
+    "contract": {
+      "description": "API types shared by web and server, generated handlers and fakes",
+      "paths": ["web/src/data/types/**", "!web/src/data/types/internal/**"],
+      "tests": { "server": ["test/http/**/*.test.ts"], "web": ["src/data/**/*.test.ts"] },
+      "checks": ["server:typecheck", "web:typecheck"]
+    }
+  }
+}
