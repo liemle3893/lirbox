@@ -119,12 +119,35 @@ function depsFingerprint(file, text) {
   if (b === 'go.mod') return text.split('\n').map((l) => l.trim()).filter((l) => /^(require\s+)?[\w./~-]+\s+v[\w.+-]+/.test(l)).join('\n');
   return text.trim();
 }
-/** Manifests among `files` whose dependency fields differ between base and to (or the working tree). */
+/** Whether a manifest's text declares any dependency at all. Unparseable or unknown → true (run-all is the safe side). */
+function declaresDeps(file, text) {
+  const b = path.basename(file);
+  if (b === 'package.json') {
+    try {
+      const j = JSON.parse(text);
+      return [j.dependencies, j.devDependencies, j.peerDependencies, j.optionalDependencies].some((x) => x && Object.keys(x).length);
+    } catch { return true; }
+  }
+  if (b === 'go.mod') return depsFingerprint(file, text) !== '';
+  if (/^requirements/.test(b)) return text.split('\n').some((l) => l.trim() && !l.trim().startsWith('#'));
+  // TOML (pyproject.toml, Pipfile, Cargo.toml): a non-empty dependency table or array
+  const lines = text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  let inDeps = false;
+  for (const l of lines) {
+    if (l.startsWith('[')) { inDeps = /^\[+[^\]]*(dependencies|packages)[^\]]*\]+$/.test(l); continue; }
+    if (inDeps) return true;
+  }
+  return /^\s*[\w-]*dependencies\s*=\s*[[{]\s*[^\]}\s]/m.test(text.replace(/#.*$/gm, ''));
+}
+/** Manifests among `files` whose dependency fields differ between base and to (or the working tree).
+ *  A manifest absent on one side counts only if the side that exists declares dependencies. */
 function depsChanged(root, files, base, to) {
   const show = (ref, f) => gitOk(root, ['show', `${ref}:${f}`]);
   return files.filter((f) => MANIFEST.test(f)).filter((f) => {
     const now = to ? show(to, f) : fs.existsSync(path.join(root, f)) ? fs.readFileSync(path.join(root, f), 'utf8') : null;
-    return depsFingerprint(f, show(base, f)) !== depsFingerprint(f, now);
+    const was = show(base, f);
+    if (was === null || now === null) return declaresDeps(f, was ?? now ?? '');
+    return depsFingerprint(f, was) !== depsFingerprint(f, now);
   });
 }
 

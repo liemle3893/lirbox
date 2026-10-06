@@ -9,5 +9,46 @@
     "A check file missing from this manifest FAILS the gate.",
     "LOCKED (evals/**): improvement loops may never edit this file."
   ],
-  "checks": {}
+  "checks": {
+    "new-manifest-no-deps": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "without the absent-side rule, a manifest new in the range is compared against 'null' and forces run-all even with no dependencies (the 242/249 regression)",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "    if (was === null || now === null) return declaresDeps(f, was ?? now ?? '');\n",
+          "replace": ""
+        },
+        {
+          "why": "over-correction: treating every added/deleted manifest as no change hides real dependency additions and removals",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "return declaresDeps(f, was ?? now ?? '');",
+          "replace": "return false;"
+        },
+        {
+          "why": "an added package.json with an empty dependencies {} object declares nothing and must not force run-all",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": ".some((x) => x && Object.keys(x).length)",
+          "replace": ".some((x) => x)"
+        },
+        {
+          "why": "a requirements file holding only comments declares no dependency",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "l.trim() && !l.trim().startsWith('#')",
+          "replace": "l.trim()"
+        },
+        {
+          "why": "a go.mod with only module/go directives declares no dependency",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "if (b === 'go.mod') return depsFingerprint(file, text) !== '';",
+          "replace": "if (b === 'go.mod') return true;"
+        }
+      ]
+    }
+  }
 }
