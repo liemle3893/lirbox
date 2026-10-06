@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cmdMeasure } from './measure.mjs';
 import { cmdChangecov } from './changecov.mjs';
 import { cmdMutate } from './mutate.mjs';
-import { cmdTrace, cmdHubs, buildGraph, cutPredicate, reaching, cutProblems } from './graph.mjs';
+import { cmdTrace, cmdHubs, buildGraph, cutPredicate, reaching, cutProblems, hubOnlyVia } from './graph.mjs';
 import { cmdDoctor } from './doctor.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -593,7 +593,8 @@ function hostBag(root, cfg, all) {
     plan: (a) => planRuns(a, root, cfg, all),
     changedSel: (a) => planRuns(a, root, cfg, all),
     runArgv: (run) => { const ad = ADAPTERS[run.pkg.runner]; return ad ? ad.argv(run.pkg, root, { tests: run.tests, related: run.related }) : null; },
-    replayStats: (n, resolve) => replayStats(root, cfg, all, n, resolve),
+    replayStats: (n, resolve, onSel) => replayStats(root, cfg, all, n, resolve, onSel),
+    hubOnlyVia: (sel) => hubOnlyVia(hostBag(root, cfg, all), sel),
     coverageStats: () => computeCoverage(root, cfg, all, repoFiles(root)),
     coverageCmd: () => cmdCoverage(root, cfg, all, repoFiles(root)),
     rulesCmd: (a) => cmdRules(a, root, cfg),
@@ -603,7 +604,7 @@ function hostBag(root, cfg, all) {
 }
 
 // ───────────────────────── args ─────────────────────────
-const VALUE_FLAGS = new Set(['config', 'to', 'part', 'commits', 'results', 'since', 'source', 'out', 'root', 'limit', 'label', 'wall', 'threshold', 'prove-irrelevant', 'max-mutants', 'timeout', 'metrics']);
+const VALUE_FLAGS = new Set(['config', 'to', 'part', 'commits', 'results', 'since', 'source', 'out', 'root', 'limit', 'label', 'wall', 'runs', 'threshold', 'prove-irrelevant', 'max-mutants', 'timeout', 'metrics']);
 const OPT_VALUE_FLAGS = new Set(['changed']);
 function parseArgs(argv) {
   const a = { _: [] };
@@ -759,12 +760,13 @@ function selectForCommit(root, cfg, all, sha, resolveHeavy) {
 
 const pct = (xs, q) => { const s = [...xs].sort((x, y) => x - y); return s.length ? s[Math.max(0, Math.ceil(q * s.length) - 1)] : 0; };
 
-function replayStats(root, cfg, all, n, resolve) {
+function replayStats(root, cfg, all, n, resolve, onSel) {
   if (!(n > 0)) throw new Usage('--commits needs a positive number');
   const total = Object.values(all).reduce((k, v) => k + v.length, 0);
   const rows = [];
   for (const sha of commitRange(root, n)) {
     const { files, sel } = selectForCommit(root, cfg, all, sha, resolve);
+    if (onSel) onSel(sel);
     const selected = sel.entries.length;
     const lower = Object.values(sel.graph).includes('runtime');
     rows.push({
@@ -1004,7 +1006,7 @@ function cmdDetect(a, root) {
 const USAGE = `usage: test-scope.mjs <detect|select|run|coverage|replay|misses|rules|measure|changecov|mutate|trace|hubs|doctor> [options]
   select --changed [base] [--to ref] [--list|--json] [--resolve]   run --part a,b | --changed [base] [--to ref] [--dry-run]
   coverage   replay --commits N [--json] [--resolve]   misses --results <file> [--since ref] [--commits N]   rules --write|--check
-  measure [--commits N] [--resolve] [--label L] [--wall S] [--results <file>] [--no-write] | measure --compare <A> <B>
+  measure [--commits N] [--resolve] [--label L] [--runs <jsonl>] [--wall S] [--results <file>] [--no-write] | measure --compare <A> <B>
   changecov --changed [base] [--to ref] [--threshold P] [--timeout S] [--dry-run] [--json]
   mutate --changed [base] [--to ref] [--prove-irrelevant <globs|@file>] [--max-mutants N] [--timeout S] [--allow-dirty] [--dry-run]
   trace <test-file> <source-file>   hubs --changed [base] [--to ref] | --source <file[,file]>

@@ -62,7 +62,7 @@ node $TS replay --commits N           selection size per commit vs. full suite (
 node $TS misses --results <junit.xml|vitest.json|go-test.json> [--since <ref>]
                                       backstop failures the responsible commit's selection skipped
 node $TS rules  --write|--check       optional: .opencodereview/rule.json `Test parts:` lines
-node $TS measure [--commits N] [--resolve] [--label L] [--wall S]   record -> .test-scope/metrics.jsonl
+node $TS measure [--commits N] [--resolve] [--label L] [--runs <jsonl>]   record -> .test-scope/metrics.jsonl
 node $TS measure --compare A B        lift per metric, B over A
 node $TS changecov --changed [base]   selected tests with coverage: changed code none executes
 node $TS mutate --changed [base] [--prove-irrelevant <globs|@file>]   would tests notice a break
@@ -114,16 +114,16 @@ point.
 </improve>
 
 <measure>
-For `init`, `improve`, and any change to the selection or the code it depends on (a hub refactor).
-Standard set: parity, mutant still caught, known-commit selection size, replay
-median/p90, selected-run wall time, codegen current, typecheck/lint clean (`references/measurement.md`).
-1. Plan each metric as a command + expected value BEFORE editing (`select --resolve` on a known
-   commit: 90 -> <=44; `mutate --changed`: no survivor).
+For `init`, `improve`, and any change to the selection or code it depends on (a hub refactor).
+Primary: real selected-run time per change (median/p90, `--runs`), tests reached only via a hub
+(`--resolve`; target 0), parity. File-count percentiles are informational. Broad changes
+select many files honestly; a count target punishes that (`references/measurement.md`).
+1. Plan each metric as a command + expected value BEFORE editing (`mutate --changed`: no survivor).
 2. Baseline: `measure --label before`. No edits while it runs.
 3. Change; `doctor --changed`.
 4. After: `measure --label after`, same flags (vitest/jest: `--resolve`, else lower bounds).
-5. Report the lift: `measure --compare before after` against each expectation, never a bare score.
-The one justified full run: the parity check, when the composition root or shared infra changes.
+5. Report the lift: `measure --compare before after` per expectation, never a bare score.
+The one justified full run: parity, when the composition root or shared infra changes.
 </measure>
 
 <per-change>

@@ -49,6 +49,60 @@
           "replace": "if (b === 'go.mod') return true;"
         }
       ]
+    },
+    "measure-time-and-hubs-primary": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "file-count p90 judged again: an honestly broad commit reads as a regression (the 175 -> 176 trap)",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "['selection.p90', 'selection p90 (files)', 'info']",
+          "replace": "['selection.p90', 'selection p90 (files)', 'secondary']"
+        },
+        {
+          "why": "info rows get a verdict: file counts count toward worse",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "verdict: tier === 'info' ? 'info' : delta",
+          "replace": "verdict: delta"
+        },
+        {
+          "why": "compare no longer ranks time and hub-only first",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "const rows = METRICS.map(",
+          "replace": "const rows = [...METRICS].reverse().map("
+        },
+        {
+          "why": "a failed (bailed) run counted as a duration",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "    if (r.ok === false) { failed++; continue; }\n",
+          "replace": ""
+        },
+        {
+          "why": "run-time p90 computed as the median",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "p90: pct(secs, 0.9)",
+          "replace": "p90: pct(secs, 0.5)"
+        },
+        {
+          "why": "hub-only tests not summed over the measured commits",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "hubOnlyVia += h.count;",
+          "replace": ""
+        },
+        {
+          "why": "hub-only count ignores the hubs ranking (always 0)",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/graph.mjs",
+          "find": "(r.hubs.find((h) => h.onlyVia > 0)?.onlyVia || 0)",
+          "replace": "0"
+        }
+      ]
     }
   }
 }

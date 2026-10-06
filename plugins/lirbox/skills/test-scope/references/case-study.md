@@ -78,3 +78,24 @@ The result is reported as a lift (`measure --compare before after`), never as a 
 3. `mutate --prove-irrelevant` before dropping a test from a selection; `mutate` and `changecov` on
    every change so "tests run" also means "tests execute the change".
 4. A measurement phase around every structural change: plan, baseline, change, after, lift.
+
+## Second round (2026-10-06): the p90 target was the wrong metric
+
+Two composition roots and four re-export barrels were removed, so tests mount only the domains and
+services they use. Per-commit selections for the targeted commits halved (116 -> 67, 116 -> 53). The
+p90 of selected file counts over 20 commits did not move (175 -> 176): it was set by a genuinely
+broad 26-file feature commit and by changes to the HTTP layer every app test uses. Totals over the
+same commit window fell 15 %, 23 % excluding run-all commits.
+
+The "p90 -50%" expectation above punished honest breadth. What the refactor was for, and what is
+now measured as primary (`references/measurement.md`):
+
+| Metric | Command | Expected |
+|---|---|---|
+| selected test time per change, median and p90 | `measure --runs <jsonl>` over real selected runs | down, or not worse |
+| tests reached only via a composition root or barrel | `measure --resolve` (`hubOnlyVia`) | 0 |
+| per-test parity when shared infra changes | the one full run, before and after, diffed | identical |
+
+File counts and window totals stay as information. **Conclusion: stop refactoring when the remaining
+breadth is real coupling** — when `hubs` finds no module that is the only way to a test, a wide
+selection is the code's actual dependency shape, not a hub to remove.

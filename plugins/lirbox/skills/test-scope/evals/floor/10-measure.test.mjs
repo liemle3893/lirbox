@@ -46,7 +46,7 @@ test('measure --compare A B prints the lift per metric (better / worse / same) f
   const r = ts(dir, ['measure', '--compare', 'base', 'after']);
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /lift after .* vs base/);
-  assert.match(r.stdout, /selection p90 \(files\)\s+2 ->\s+1\s+-1 \(-50%\)\s+better/);
+  assert.match(r.stdout, /selection p90 \(files\)\s+2 ->\s+1\s+-1 \(-50%\)\s+info/, 'file counts are informational, never judged');
   assert.match(r.stdout, /parts\s+3 ->\s+2/);
   assert.equal(ts(dir, ['measure', '--compare', 'base', 'nope']).code, 64, 'an unknown label is a usage error, not a silent zero');
   assert.doesNotMatch(r.stdout, /not like with like/);

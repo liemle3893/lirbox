@@ -120,6 +120,37 @@ export function cmdTrace(a, H) {
   return 0;
 }
 
+/** Hub ranking per package: perPkg = Map(name -> {pkg, sources:[rel]}), partTests = Set("pkg:file"). -> {report, errors} */
+function hubReport(H, perPkg, partTests = new Set()) {
+  const report = [], errors = [];
+  for (const { pkg, sources } of perPkg.values()) {
+    const g = buildGraph(H, pkg);
+    if (g.error) { errors.push({ pkg: pkg.name, error: g.error }); continue; }
+    const targets = [...new Set(sources.map(g.nodeOf))];
+    const full = reaching(g, targets);
+    const counts = new Map();
+    for (const t of full.tests) for (const n of chainFrom(full.parent, t).slice(1, -1)) counts.set(n, (counts.get(n) || 0) + 1);
+    const ranked = [...counts].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 10).map(([node, chains]) => {
+      const cut = reaching(g, targets, (n) => n === node);
+      const only = [...full.tests].filter((t) => !cut.tests.has(t));
+      return { node: repoPath(pkg, node), chains, share: Math.round((1000 * chains) / (full.tests.size || 1)) / 10, onlyVia: only.length, keptByParts: only.filter((t) => partTests.has(`${pkg.name}:${t}`)).length };
+    });
+    const chains = [...full.tests].sort().map((t) => ({ test: repoPath(pkg, t), chain: chainFrom(full.parent, t).map((n) => repoPath(pkg, n)) }));
+    report.push({ package: pkg.name, sources: sources.map((s) => repoPath(pkg, s)), graphTests: full.tests.size, hubs: ranked, chains, graph: g.kind });
+  }
+  return { report, errors };
+}
+
+/** For `measure`: tests a selection reaches ONLY through its top hub (the node `hubs` would name for a cut),
+ *  summed over packages. -> {count, unmeasured: [package names without a graph]} */
+export function hubOnlyVia(H, sel) {
+  const perPkg = new Map();
+  for (const [name, rels] of Object.entries(sel.related)) if (rels.length) perPkg.set(name, { pkg: H.cfg.packages[name], sources: [...rels] });
+  if (!perPkg.size) return { count: 0, unmeasured: [] };
+  const { report, errors } = hubReport(H, perPkg);
+  return { count: report.reduce((k, r) => k + (r.hubs.find((h) => h.onlyVia > 0)?.onlyVia || 0), 0), unmeasured: errors.map((e) => e.pkg) };
+}
+
 /** hubs --changed [base] [--to ref] | --source <file[,file]> */
 export function cmdHubs(a, H) {
   const perPkg = new Map(); // pkg name -> {pkg, sources: [rel]}
@@ -133,23 +164,9 @@ export function cmdHubs(a, H) {
     partTests = new Set(sel.entries.filter((e) => !e.part.startsWith('(')).map((e) => `${e.pkg}:${e.file}`));
   } else throw new H.Usage('hubs needs --changed [base] [--to ref] or --source <file>');
   if (!perPkg.size) { console.log('hubs: no changed source file reaches the import graph (nothing to trace)'); return 0; }
-  const report = [];
-  let code = 0;
-  for (const { pkg, sources } of perPkg.values()) {
-    const g = buildGraph(H, pkg);
-    if (g.error) { console.log(`not measurable: hubs (${pkg.name}): ${g.error}`); code = 4; continue; }
-    const targets = [...new Set(sources.map(g.nodeOf))];
-    const full = reaching(g, targets);
-    const counts = new Map();
-    for (const t of full.tests) for (const n of chainFrom(full.parent, t).slice(1, -1)) counts.set(n, (counts.get(n) || 0) + 1);
-    const ranked = [...counts].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 10).map(([node, chains]) => {
-      const cut = reaching(g, targets, (n) => n === node);
-      const only = [...full.tests].filter((t) => !cut.tests.has(t));
-      return { node: repoPath(pkg, node), chains, share: Math.round((1000 * chains) / (full.tests.size || 1)) / 10, onlyVia: only.length, keptByParts: only.filter((t) => partTests.has(`${pkg.name}:${t}`)).length };
-    });
-    const chains = [...full.tests].sort().map((t) => ({ test: repoPath(pkg, t), chain: chainFrom(full.parent, t).map((n) => repoPath(pkg, n)) }));
-    report.push({ package: pkg.name, sources: sources.map((s) => repoPath(pkg, s)), graphTests: full.tests.size, hubs: ranked, chains, graph: g.kind });
-  }
+  const { report, errors } = hubReport(H, perPkg, partTests);
+  for (const e of errors) console.log(`not measurable: hubs (${e.pkg}): ${e.error}`);
+  const code = errors.length ? 4 : 0;
   if (a.json) { console.log(JSON.stringify(report, null, 2)); return code; }
   for (const r of report) {
     console.log(`hubs: package ${r.package}: ${r.sources.length} source(s) -> ${r.graphTests} test(s) reached by the ${r.graph} graph`);
