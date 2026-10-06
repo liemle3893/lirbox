@@ -27,6 +27,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`plan-check`** | Rigorously verify a plan (ops/infra runbook or code-change plan) against the real repo/docs before it's executed — pressure-tests claims, surfaces unknowns, emits a self-contained HTML report with a GO / GO-WITH-CONDITIONS / NO-GO verdict. Read-only; never runs commands against live systems. |
 | **`feedback`** | User-invoked only: turns a concern about a lirbox skill into a scrubbed, structured GitHub issue on `liemle3893/lirbox`. Never auto-invoked. |
 | **`lane-config`** | Set up or change the per-project orchestration config that decides which harness, model and reasoning effort each lane profile runs on, plus lane caps, timeouts and the setup commands every brief carries. Stored per repo (keyed like the lane ledger), written only through validating subcommands — `detect` measures, `init` scaffolds with **no** profiles, `validate` refuses a config that cannot decide a lane. Profiles are the user's judgement, asked once, never guessed per spawn. |
+| **`test-scope`** | Set up and continuously improve path-aware test selection for a repo whose full suite or CI is too slow: run only what a change can affect — import graph first (`vitest related` / jest / pytest / go), explicit `parts` for the links imports cannot see — with an uncovered-file gate (exit 3), `replay` numbers, a backstop-`misses` loop that turns missed failures into new rules, a `measure` phase (metrics record + lift) around every change to the selection, per-change `changecov` / `mutate` / `doctor` checks that the selected tests execute and would notice the change, `hubs` / `trace` / `graphCuts` for over-broad import graphs, and optional OpenCodeReview rule routing. Dependency-free node scripts. |
 | **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over the word budget or dense with long prose), unbalanced/missing XML structural tags, weak frontmatter triggers, and oversized inline flowcharts or reference files. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
 
 ### Agents
@@ -72,7 +73,7 @@ verify this migration plan          # plan-check (pressure-tests it, GO/NO-GO re
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:do`, `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:do`, `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:test-scope`, `lirbox:skill-lint`, `lirbox:feedback`).
 
 ## Test locally (no install)
 

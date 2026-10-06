@@ -1,0 +1,223 @@
+{
+  "_comment": [
+    "Expectation manifest for test-scope's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern). MUST exit 0 or 1.",
+    "",
+    "A check file missing from this manifest FAILS the gate.",
+    "LOCKED (evals/**): improvement loops may never edit this file."
+  ],
+  "checks": {
+    "new-manifest-no-deps": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "without the absent-side rule, a manifest new in the range is compared against 'null' and forces run-all even with no dependencies (the 242/249 regression)",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "    if (was === null || now === null) return declaresDeps(f, was ?? now ?? '');\n",
+          "replace": ""
+        },
+        {
+          "why": "over-correction: treating every added/deleted manifest as no change hides real dependency additions and removals",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "return declaresDeps(f, was ?? now ?? '');",
+          "replace": "return false;"
+        },
+        {
+          "why": "an added package.json with an empty dependencies {} object declares nothing and must not force run-all",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": ".some((x) => x && Object.keys(x).length)",
+          "replace": ".some((x) => x)"
+        },
+        {
+          "why": "a requirements file holding only comments declares no dependency",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "l.trim() && !l.trim().startsWith('#')",
+          "replace": "l.trim()"
+        },
+        {
+          "why": "a go.mod with only module/go directives declares no dependency",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "if (b === 'go.mod') return depsFingerprint(file, text) !== '';",
+          "replace": "if (b === 'go.mod') return true;"
+        }
+      ]
+    },
+    "measure-time-and-hubs-primary": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "file-count p90 judged again: an honestly broad commit reads as a regression (the 175 -> 176 trap)",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "['selection.p90', 'selection p90 (files)', 'info']",
+          "replace": "['selection.p90', 'selection p90 (files)', 'secondary']"
+        },
+        {
+          "why": "info rows get a verdict: file counts count toward worse",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "verdict: tier === 'info' ? 'info' : delta",
+          "replace": "verdict: delta"
+        },
+        {
+          "why": "compare no longer ranks time and hub-only first",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "const rows = METRICS.map(",
+          "replace": "const rows = [...METRICS].reverse().map("
+        },
+        {
+          "why": "a failed (bailed) run counted as a duration",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "    if (r.ok === false) { failed++; continue; }\n",
+          "replace": ""
+        },
+        {
+          "why": "run-time p90 computed as the median",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "p90: pct(secs, 0.9)",
+          "replace": "p90: pct(secs, 0.5)"
+        },
+        {
+          "why": "hub-only tests not summed over the measured commits",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/measure.mjs",
+          "find": "hubOnlyVia += h.count;",
+          "replace": ""
+        },
+        {
+          "why": "hub-only count ignores the hubs ranking (always 0)",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/graph.mjs",
+          "find": "(r.hubs.find((h) => h.onlyVia > 0)?.onlyVia || 0)",
+          "replace": "0"
+        }
+      ]
+    },
+    "workspace-dependents": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "a changed file reaches only its own package's related lookup again (the original gap)",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "    if (ws && !deleted.has(file)) addDependents(cfg, ws, sel, file, all);\n",
+          "replace": ""
+        },
+        {
+          "why": "dependency edges between workspace packages not built: no package has dependents",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/workspace.mjs",
+          "find": "      rev.get(dep).add(p.name);\n",
+          "replace": ""
+        },
+        {
+          "why": "dependents only one level deep: c (depends on b, not on a) is never reached",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/workspace.mjs",
+          "find": "out.push(pkgs.get(d)); q.push(d); }",
+          "replace": "out.push(pkgs.get(d)); }"
+        },
+        {
+          "why": "a dependent's source alias ignored: exports decide alone, so an aliasing dependent is treated as a dist consumer",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/workspace.mjs",
+          "find": "    via(P, D) { return aliasesSrc(D, P) ? 'src' : P.via; },",
+          "replace": "    via(P, D) { return P.via; },"
+        },
+        {
+          "why": "dist consumers handed the changed src file, which their graph (stopped at dist) never contains",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "const srcs = via === 'src' ? [file] : P.targets;",
+          "replace": "const srcs = [file];"
+        },
+        {
+          "why": "dist consumption never marks the upstream package for a prebuild",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "    if (via === 'dist') {",
+          "replace": "    if (false) {"
+        },
+        {
+          "why": "prebuild runs AFTER the tests (the checks-after-tests ordering)",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "  for (const st of sel.prebuild) {",
+          "replace": "  for (const st of (runsOf(cfg, sel).forEach(({ pkg, tests, related }) => { const ad = ADAPTERS[pkg.runner]; const argv = ad && ad.argv(pkg, root, { tests, related }); if (argv) runCommand('early', [...wrapperArgv(root, pkg), ...argv], path.join(root, pkg.dir), a['dry-run']); }), sel.prebuild)) {"
+        },
+        {
+          "why": "a failed prebuild does not stop the dependents' tests",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "    if (!ok) for (const b of st.blocks) if (!blocked.has(b)) blocked.set(b, st.label);\n",
+          "replace": ""
+        },
+        {
+          "why": "the configured prebuild template is ignored for the package-manager default",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "    const tpl = (cfg.workspace && cfg.workspace.prebuild) || PREBUILD_TEMPLATES[ws.pm] || PREBUILD_TEMPLATES.npm;",
+          "replace": "    const tpl = PREBUILD_TEMPLATES[ws.pm] || PREBUILD_TEMPLATES.npm;"
+        },
+        {
+          "why": "no name-scan fallback: a dependent whose runner cannot resolve selects nothing, silently",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "    const hits = scanTests(ws.root, ws.files, D, tests, names.filter((n) => n !== D.name));",
+          "replace": "    const hits = [];"
+        },
+        {
+          "why": "dependent tests carry the generic related reason, not \"dependent of <P> (via dist|src)\"",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "const why = (rel, fallback) => { const d = depOf(rel); return d ? `dependent of ${d.of} (via ${d.via})` : fallback; };",
+          "replace": "const why = (rel, fallback) => fallback;"
+        }
+      ]
+    },
+    "workspace-doctor-coverage": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "coverage treats every workspace package as configured",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "    if (Object.values(cfg.packages).some((p) => p.dir === w.dir)) continue;",
+          "replace": "    continue;"
+        },
+        {
+          "why": "an unconfigured workspace package with tests is listed but does not fail coverage",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/test-scope.mjs",
+          "find": "|| unconfigured.length) return 1;",
+          "replace": ") return 1;"
+        },
+        {
+          "why": "doctor never reports a dist-exporting package",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/workspace.mjs",
+          "find": "        if (P.via !== 'dist') continue;",
+          "replace": "        continue;"
+        },
+        {
+          "why": "runner-config source aliases not detected: an aliasing dependent still gets the stale-build warning",
+          "env": "TEST_SCOPE_OVERRIDE",
+          "file": "scripts/workspace.mjs",
+          "find": "    let hit = texts.some((t) => named.test(t) && /\\bsrc\\b/.test(t));",
+          "replace": "    let hit = false;"
+        }
+      ]
+    }
+  }
+}
