@@ -99,3 +99,13 @@ now measured as primary (`references/measurement.md`):
 File counts and window totals stay as information. **Conclusion: stop refactoring when the remaining
 breadth is real coupling** — when `hubs` finds no module that is the only way to a test, a wide
 selection is the code's actual dependency shape, not a hub to remove.
+
+## Third round: a workspace monorepo where the graph stopped at a package boundary
+
+A pnpm monorepo of ~10 packages, most exporting their `dist/`. A change selected only tests of its
+own package: dependents' tests were never selected, and those a runner could have reached went through
+`dist/`, so they would have run against a stale build. The repo's existing hook (`build`, then
+`--filter "...[base]"`) was safer than the selection. `checks` ran after tests, so "build first" could not
+be said either. Now: dependents are selected (`dependent of <P> (via dist|src)`), dist consumers trigger a
+prebuild of the changed upstream before their tests, and `doctor` names each stale-build risk. Frozen
+checks: `workspace-dependents`, `workspace-doctor-coverage`.

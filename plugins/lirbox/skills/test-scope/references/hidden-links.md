@@ -19,6 +19,7 @@ is noise.
 | Dynamic imports | `import()`, `require(variable)`, `importlib`, `plugin.Open` | modules loaded by computed path | tests of the loader + the loaded modules |
 | Shared test infra | test helpers, global setup, test DB bootstrap, mocks | every test using them (often via config, not import) | usually a run-everything trigger — keep the list short |
 | Infra / scripts | Dockerfiles, compose, CI, shell scripts | no unit tests | `noTests` + a named manual/smoke check, never silence |
+| Cross-package build output | a source in a workspace package whose exports/main point at `dist/` | dependents importing it by name: their runner graph stops at the built file, so they test the last build | handled by test-scope (dependents `via dist` + prebuild); a source alias in the dependents' runner config is cheaper; `doctor` lists the risk |
 | Cross-language | a TS type mirrored in Go/Python, a SQL view used by another service | the other language's code | parts spanning both packages |
 
 ## Hubs (the opposite problem)

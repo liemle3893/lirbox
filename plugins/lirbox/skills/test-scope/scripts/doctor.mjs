@@ -38,6 +38,14 @@ export async function cmdDoctor(a, { root, Usage, capture, load }) {
   mark(cov.code ? 'FAIL' : 'ok', 'coverage (drift)', cov.code ? head(cov.text, 10) : cov.text.split('\n').filter((l) => /^test files|clean/.test(l)).join(' | '),
     cov.code ? 'run `test-scope coverage` and fix: give every test file a part (or graphOnly), delete dead globs, own modules behind a graphCut' : null);
 
+  const ws = H.workspace();
+  if (ws) {
+    const risks = ws.staleRisks();
+    mark(risks.length ? 'WARN' : 'ok', 'workspace (build freshness)', risks.length
+      ? risks.map((r) => `stale-build risk: ${r.pkg} exports its build (${r.entry}) and ${r.dependents.length <= 4 ? r.dependents.join(', ') : `${r.dependents.slice(0, 4).join(', ')} +${r.dependents.length - 4}`} ${r.dependents.length === 1 ? 'has' : 'have'} no source alias for it: \`run\` prebuilds ${r.pkg} first, a bare runner call tests its last build`).join('\n')
+      : `${ws.pkgs.size} workspace package(s); every dependent sees its upstream's sources`);
+  }
+
   if (fs.existsSync(path.join(root, '.test-scope/rules.source.json'))) {
     const r = capture(() => H.rulesCmd({ check: true }));
     mark(r.code ? 'FAIL' : 'ok', 'rules --check', r.text.split('\n')[0], r.code ? 'run `test-scope rules --write` (then review the diff of .opencodereview/rule.json)' : null);

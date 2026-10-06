@@ -4,10 +4,9 @@ description: Set up and continuously improve path-aware test selection for a rep
 ---
 
 <purpose>
-A full suite per change does not scale; "run the files the change touches" by hand misses things.
-Test selection is three layers plus a backstop, and the backstop's misses are the input to the next
-improvement. `init` builds the layers once; `improve` turns evidence into rules, forever; `measure`
-and `per-change` keep both honest.
+A full suite per change does not scale; picking files by hand misses things. Selection is three
+layers plus a backstop whose misses feed the next improvement. `init` builds the layers once;
+`improve` turns evidence into rules, forever; `measure` and `per-change` keep both honest.
 </purpose>
 
 <model>
@@ -27,6 +26,8 @@ and `per-change` keep both honest.
    entry. This loop is what keeps selection honest as the repo grows.
 5. **Hubs.** A composition root on most import chains makes layer 1 select everything: refactor
    it; `graphCuts` only as interim (`references/case-study.md`).
+6. **Workspaces.** Changed sources also reach workspace dependents' lookups (src or dist);
+   dist-consumed upstreams build first (`prebuild`, `references/adapters.md`).
 </model>
 
 <hard-rules>
@@ -76,8 +77,8 @@ Exit 3 = uncovered changed file; 4 = not measurable, never a pass. Config: `.tes
 
 <init>
 1. `detect`; plan the metrics first (measure). Note every package, runner, wrapper
-   (lock/nice script, CI matrix) and the suite's size; time the full suite if a recent duration is
-   not already known — do not run it to find out if CI or logs say.
+   (lock/nice script, CI matrix) and the suite's size; time the full suite only if CI or logs
+   do not already say.
 2. Draft parts from the **test tree** (test folders/names cluster into domains) and map **source
    dirs** onto them. Then walk `references/hidden-links.md` against this repo, grepping for each
    link class; each confirmed link becomes a `paths` glob with the evidence in a `_comment`.
@@ -105,7 +106,7 @@ selection, a repo that grew. Measure steps 1-2 first. Order:
 3. **Over-selection.** `replay`: commits selecting far more than their diff suggests — a hub module
    or trigger; `hubs --changed` names it: refactor it (`graphCuts` interim), split the part, or move
    a type-only hub to the typecheck instead of the tests.
-4. **Slow parts.** From runner timings, the slowest files/parts; propose splitting or a separate
+4. **Slow parts.** From runner timings, the slowest files/parts: propose splitting or a separate
    schedule. Never drop a test to save time without the user's decision.
 5. Present one diff (parts.json, rules, docs) with the evidence per change; after approval write,
    re-run `coverage` and `rules --check`, then measure steps 4-5.

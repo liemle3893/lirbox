@@ -14,6 +14,7 @@ import { cmdChangecov } from './changecov.mjs';
 import { cmdMutate } from './mutate.mjs';
 import { cmdTrace, cmdHubs, buildGraph, cutPredicate, reaching, cutProblems, hubOnlyVia } from './graph.mjs';
 import { cmdDoctor } from './doctor.mjs';
+import { detectWorkspace, scanTests, PREBUILD_TEMPLATES } from './workspace.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -208,7 +209,7 @@ export function loadConfig(root, configArg) {
       name, dir, runner,
       testGlobs: p.testGlobs || DEFAULT_TEST_GLOBS[runner] || [],
       exclude: p.exclude || [],
-      cmd: p.cmd, wrapper: p.wrapper, relatedCmd: p.relatedCmd, coverage: p.coverage,
+      cmd: p.cmd, wrapper: p.wrapper, relatedCmd: p.relatedCmd, coverage: p.coverage, prebuild: [].concat(p.prebuild || []),
     };
   }
   const names = Object.keys(pkgs);
@@ -218,16 +219,27 @@ export function loadConfig(root, configArg) {
     const add = (pkg, globs) => { if (Array.isArray(globs)) tests[pkg] = [...(tests[pkg] || []), ...globs]; };
     if (Array.isArray(p.tests)) { if (names.length === 1) add(names[0], p.tests); else warnings.push(`part ${pname}: "tests" is a list but there are ${names.length} packages; use {package: [globs]}`); }
     else for (const [k, v] of Object.entries(p.tests || {})) add(k, v);
-    for (const k of Object.keys(p)) if (!['description', 'paths', 'tests', 'checks'].includes(k) && names.includes(k)) add(k, p[k]); // shorthand: top-level "<package>": [globs] on the part
+    for (const k of Object.keys(p)) if (!['description', 'paths', 'tests', 'checks', 'prebuild'].includes(k) && names.includes(k)) add(k, p[k]); // shorthand: top-level "<package>": [globs] on the part
     for (const k of Object.keys(tests)) if (!pkgs[k]) { warnings.push(`part ${pname}: tests for unknown package "${k}" ignored`); delete tests[k]; }
-    parts[pname] = { description: p.description || '', paths: p.paths || [], tests, checks: p.checks || [] };
+    parts[pname] = { description: p.description || '', paths: p.paths || [], tests, checks: p.checks || [], prebuild: [].concat(p.prebuild || []) };
   }
   const graphOnly = {};
   for (const [k, v] of Object.entries(raw.graphOnly || {})) if (pkgs[k]) graphOnly[k] = v;
   for (const p of Object.values(pkgs)) {
     if (!DEFAULT_TEST_GLOBS[p.runner] && !['custom', 'none'].includes(p.runner)) warnings.push(`package ${p.name}: unknown runner "${p.runner}": parts only, no import graph`);
   }
-  return { file, raw, base: raw.base, noTests: raw.noTests || [], runAll: raw.runAll || [], graphCuts: raw.graphCuts || [], graphOnly, packages: pkgs, parts, warnings };
+  const workspace = raw.workspace === false ? false : { prebuild: (raw.workspace && raw.workspace.prebuild) || null };
+  return { file, raw, base: raw.base, noTests: raw.noTests || [], runAll: raw.runAll || [], graphCuts: raw.graphCuts || [], graphOnly, packages: pkgs, parts, workspace, warnings };
+}
+
+/** The repo's workspace (memoised on the config), or null: not a workspace, or "workspace": false. */
+export function workspaceOf(root, cfg, files) {
+  if (cfg.workspace === false) return null;
+  if (cfg._ws === undefined) {
+    try { const fl = files || repoFiles(root); cfg._ws = detectWorkspace(root, fl, matchGlob); if (cfg._ws) cfg._ws.files = fl; }
+    catch (e) { if (e instanceof Usage) throw e; cfg._ws = null; cfg.warnings.push(`workspace detection failed (${e.message}): dependents are not selected`); }
+  }
+  return cfg._ws;
 }
 
 // ───────────────────────── inventory ─────────────────────────
@@ -262,7 +274,7 @@ function partTests(cfg, part, pkg, all) {
 // ───────────────────────── selection ─────────────────────────
 function emptySel(cfg) {
   const per = (v) => Object.fromEntries(Object.keys(cfg.packages).map((n) => [n, v()]));
-  return { parts: [], entries: [], related: per(() => []), srcHits: {}, graph: {}, cutApplied: {}, cutDropped: [], checks: [], uncovered: [], noTests: [], runAll: false, warnings: [] };
+  return { parts: [], entries: [], related: per(() => []), dependents: per(() => []), prebuildFor: {}, prebuild: [], depCovered: [], srcHits: {}, graph: {}, cutApplied: {}, cutDropped: [], checks: [], uncovered: [], noTests: [], runAll: false, warnings: [] };
 }
 const short = (files) => (files.length <= 2 ? files.join(', ') : `${files.slice(0, 2).join(', ')} +${files.length - 2}`);
 const addEntry = (sel, e) => { if (!sel.entries.some((x) => x.pkg === e.pkg && x.file === e.file)) sel.entries.push(e); };
@@ -281,7 +293,7 @@ export function selectParts(cfg, names, all) {
   return sel;
 }
 
-export function selectChanged(cfg, { files, deleted = new Set(), depsChanged: dc = [], all }) {
+export function selectChanged(cfg, { files, deleted = new Set(), depsChanged: dc = [], all, ws = null }) {
   const sel = emptySel(cfg);
   const depsSet = new Set(dc);
   const testSets = Object.fromEntries(Object.entries(all).map(([k, v]) => [k, new Set(v)]));
@@ -306,13 +318,14 @@ export function selectChanged(cfg, { files, deleted = new Set(), depsChanged: dc
     if (manifest) { if (!hit.length) sel.noTests.push(file); continue; } // manifest edit that changed no dependency
     if (!hit.length && matchAny(file, cfg.noTests)) { sel.noTests.push(file); continue; }
     sel.srcHits[file] = hit;
+    if (ws && !deleted.has(file)) addDependents(cfg, ws, sel, file, all);
     // every changed source goes to the import graph; parts are added on top of it, never instead
     if (p && p.pkg.runner !== 'none' && !deleted.has(file)) sel.related[p.pkg.name].push(p.rel);
     else if (!hit.length) sel.uncovered.push(file + (deleted.has(file) ? ' (deleted)' : ''));
   }
   if (forced.length) {
     sel.runAll = true;
-    for (const n of Object.keys(sel.related)) sel.related[n] = [];
+    for (const n of Object.keys(sel.related)) { sel.related[n] = []; sel.dependents[n] = []; }
     for (const n of Object.keys(cfg.parts)) addPart(cfg, sel, n, all, `run-all: ${short(forced)}`);
     for (const [pkg, tests] of Object.entries(all)) for (const file of tests) if (!isExcluded(cfg, pkg, file)) addEntry(sel, { part: '(run-all)', pkg, file, reason: `run-all: ${short(forced)}` });
     sel.uncovered = [];
@@ -322,6 +335,106 @@ export function selectChanged(cfg, { files, deleted = new Set(), depsChanged: dc
   for (const [n, fs_] of reasons) addPart(cfg, sel, n, all, `paths: ${short(fs_)}`);
   for (const d of direct) addEntry(sel, { part: d.part, pkg: d.pkg, file: d.file, reason: 'changed test file' });
   sel.parts.sort();
+  return sel;
+}
+
+// ───────────────────────── workspace dependents ─────────────────────────
+const graphable = (pkg) => !!ADAPTERS[pkg.runner] && pkg.runner !== 'none' && !(pkg.runner === 'custom' && !pkg.relatedCmd);
+const relFrom = (dir, repoPath) => path.posix.relative(dir === '.' ? '.' : dir, repoPath) || '.';
+
+/** A changed source in workspace package P reaches the related-test lookup of every transitive dependent D:
+ *  as itself when D sees P's sources (alias, exports -> src), as P's entry files when D sees dist (P is then
+ *  prebuilt), and by a name scan of D's tests when neither the mapping nor D's runner can tell. */
+function addDependents(cfg, ws, sel, file, all) {
+  const P = ws.pkgOfFile(file);
+  if (!P) return;
+  const deps = ws.dependentsOf(P.name);
+  const names = [P.name, ...deps.map((d) => d.name)];
+  for (const D of deps) {
+    const dc = pkgOf(cfg, D.dir + '/package.json');
+    if (!dc) {
+      if (!sel.warnings.some((w) => w.startsWith(`workspace package ${D.name} `))) sel.warnings.push(`workspace package ${D.name} (${D.dir}) depends on ${P.name} but no "packages" entry contains it: its tests are not selected (see coverage)`);
+      continue;
+    }
+    const tests = all[dc.pkg.name].filter((t) => !isExcluded(cfg, dc.pkg.name, t)).map((t) => (dc.pkg.dir === '.' ? t : `${dc.pkg.dir}/${t}`)).filter((t) => t.startsWith(D.dir + '/'));
+    if (!tests.length) continue; // every test of D is excluded (or it has none): nothing of it can run
+    const via = ws.via(P, D);
+    if (via === 'dist') {
+      const u = (sel.prebuildFor[P.name] ||= { name: P.name, consumers: [] });
+      if (!u.consumers.includes(dc.pkg.name)) u.consumers.push(dc.pkg.name);
+    }
+    if (via && graphable(dc.pkg)) {
+      const srcs = via === 'src' ? [file] : P.targets;
+      for (const s of srcs) {
+        const rel = relFrom(dc.pkg.dir, s);
+        const have = sel.dependents[dc.pkg.name].find((d) => d.rel === rel);
+        if (have) { if (!have.srcs.includes(file)) have.srcs.push(file); }
+        else sel.dependents[dc.pkg.name].push({ rel, of: P.name, via, srcs: [file] });
+      }
+      continue;
+    }
+    const hits = scanTests(ws.root, ws.files, D, tests, names.filter((n) => n !== D.name));
+    const why = `dependent of ${P.name} (via name scan${via ? `, ${via}` : ''})`;
+    for (const t of hits) addEntry(sel, { part: '(graph)', pkg: dc.pkg.name, file: relFrom(dc.pkg.dir, t), reason: why });
+    if (hits.length) { if (!sel.depCovered.includes(file)) sel.depCovered.push(file); }
+    else if (!sel.warnings.some((w) => w.startsWith(`dependent ${D.name} of ${P.name}:`))) sel.warnings.push(`dependent ${D.name} of ${P.name}: no test imports ${names.filter((n) => n !== D.name).join(' / ')} (name scan): none selected`);
+  }
+}
+
+/** One runner invocation per package: its tests plus the sources its runner resolves at run time. */
+function runsOf(cfg, sel) {
+  const runs = [];
+  for (const pkg of Object.values(cfg.packages)) {
+    const tests = sel.entries.filter((e) => e.pkg === pkg.name).map((e) => e.file);
+    const dep = sel.graph[pkg.name] === 'runtime' ? sel.dependents[pkg.name].map((d) => d.rel) : [];
+    const related = sel.cutApplied[pkg.name] ? [] : [...new Set([...sel.related[pkg.name], ...dep])];
+    if (tests.length || related.length) runs.push({ pkg, tests, related });
+  }
+  return runs;
+}
+
+/** A check or prebuild entry: `<package>:<script>` runs the package manager's script in that package, anything
+ *  else is a command line at the repo root. */
+function stepArgv(root, cfg, c) {
+  const [head, ...rest] = c.split(':');
+  const pkg = cfg.packages[head];
+  if (pkg && rest.length) {
+    const pm = pmPrefix(root, pkg)[0];
+    return { argv: [pm === 'pnpm' ? 'pnpm' : pm === 'yarn' ? 'yarn' : 'npm', 'run', rest.join(':')], cwd: path.join(root, pkg.dir), pkg };
+  }
+  return { argv: shellWords(c), cwd: root, pkg: null };
+}
+
+/** Ordered pre-steps, each blocking the packages whose tests need it: changed upstream workspace packages whose
+ *  selected dependents consume dist (upstream first), then packages.*.prebuild, then parts.*.prebuild. */
+function planPrebuild(cfg, root, sel, ws) {
+  const running = new Set(runsOf(cfg, sel).map((r) => r.pkg.name));
+  const steps = [];
+  const add = (s) => {
+    const same = steps.find((x) => x.cwd === s.cwd && x.argv.join('\0') === s.argv.join('\0'));
+    if (same) { for (const b of s.blocks) if (!same.blocks.includes(b)) same.blocks.push(b); } else steps.push(s);
+  };
+  const ups = Object.values(sel.prebuildFor).filter((u) => u.consumers.some((c) => running.has(c))).map((u) => u.name);
+  for (const name of ws && ups.length ? ws.order(ups) : []) {
+    const P = ws.pkgs.get(name);
+    const blocks = sel.prebuildFor[name].consumers.filter((c) => running.has(c));
+    if (!P.hasBuild) { sel.warnings.push(`workspace package ${name}: ${blocks.join(', ')} consume its build output but it has no "build" script: they run against whatever its dist holds`); continue; }
+    const tpl = (cfg.workspace && cfg.workspace.prebuild) || PREBUILD_TEMPLATES[ws.pm] || PREBUILD_TEMPLATES.npm;
+    const own = pkgOf(cfg, P.dir + '/package.json');
+    const argv = shellWords(tpl).map((w) => w.replaceAll('{name}', name).replaceAll('{dir}', P.dir));
+    add({ label: name, argv: [...(own ? wrapperArgv(root, own.pkg) : []), ...argv], cwd: root, blocks, why: 'dependents consume its build output' });
+  }
+  for (const pkg of Object.values(cfg.packages)) if (running.has(pkg.name)) for (const c of pkg.prebuild) {
+    const s = stepArgv(root, cfg, c);
+    add({ label: `${pkg.name}: ${c}`, argv: [...wrapperArgv(root, s.pkg || pkg), ...s.argv], cwd: s.pkg ? s.cwd : path.join(root, pkg.dir), blocks: [pkg.name], why: `packages.${pkg.name}.prebuild` });
+  }
+  for (const n of sel.parts) for (const c of cfg.parts[n].prebuild) {
+    const blocks = [...new Set(sel.entries.filter((e) => e.part === n).map((e) => e.pkg))].filter((p) => running.has(p));
+    if (!blocks.length) continue;
+    const s = stepArgv(root, cfg, c);
+    add({ label: `${n}: ${c}`, argv: [...(s.pkg ? wrapperArgv(root, s.pkg) : []), ...s.argv], cwd: s.cwd, blocks, why: `parts.${n}.prebuild` });
+  }
+  sel.prebuild = steps;
   return sel;
 }
 
@@ -513,9 +626,15 @@ const ADAPTERS = {
 
 /** Fill the import-graph half of a selection. resolveHeavy: also call adapters that start the runner (vitest, jest). */
 function resolveGraph(cfg, root, sel, all, { resolveHeavy = false } = {}) {
+  const covered = new Set(sel.depCovered);
   for (const pkg of Object.values(cfg.packages)) {
-    const rels = sel.related[pkg.name];
+    const own = sel.related[pkg.name];
+    const dep = sel.dependents[pkg.name];
+    const rels = [...new Set([...own, ...dep.map((d) => d.rel)])];
     if (!rels.length) continue;
+    const depOf = (rel) => (own.includes(rel) ? null : dep.find((d) => d.rel === rel));
+    const why = (rel, fallback) => { const d = depOf(rel); return d ? `dependent of ${d.of} (via ${d.via})` : fallback; };
+    const hitBy = (rel, n) => { const d = dep.find((x) => x.rel === rel); if (d && n) d.srcs.forEach((f) => covered.add(f)); };
     const ad = ADAPTERS[pkg.runner];
     if (!ad) { sel.graph[pkg.name] = 'none'; sel.warnings.push(`package ${pkg.name}: runner "${pkg.runner}" has no adapter, parts only`); continue; }
     if (cfg.graphCuts.length && !sel.runAll) {
@@ -533,9 +652,10 @@ function resolveGraph(cfg, root, sel, all, { resolveHeavy = false } = {}) {
           const target = g.nodeOf(rel);
           const kept = reaching(g, [target], cut).tests;
           const tests = [...kept].filter(live).sort();
-          for (const t of tests) addEntry(sel, { part: '(graph)', pkg: pkg.name, file: t, reason: `related: ${repo(rel)} (graphCuts applied)` });
+          for (const t of tests) addEntry(sel, { part: '(graph)', pkg: pkg.name, file: t, reason: why(rel, `related: ${repo(rel)}`) + ' (graphCuts applied)' });
           for (const t of [...reaching(g, [target]).tests].filter((x) => live(x) && !kept.has(x))) if (!sel.cutDropped.some((d) => d.pkg === pkg.name && d.file === t)) sel.cutDropped.push({ pkg: pkg.name, file: t, source: repo(rel) });
-          if (!tests.length && !(sel.srcHits[repo(rel)] || []).length) sel.uncovered.push(repo(rel));
+          hitBy(rel, tests.length);
+          if (!tests.length && !depOf(rel) && !(sel.srcHits[repo(rel)] || []).length) sel.uncovered.push(repo(rel));
         }
         continue;
       }
@@ -549,16 +669,19 @@ function resolveGraph(cfg, root, sel, all, { resolveHeavy = false } = {}) {
     if (r.map) {
       for (const rel of rels) {
         const tests = (r.map[rel] || []).filter(live);
-        for (const t of tests) addEntry(sel, { part: '(graph)', pkg: pkg.name, file: t, reason: `related: ${repo(rel)}` });
-        if (!tests.length && !(sel.srcHits[repo(rel)] || []).length) sel.uncovered.push(repo(rel));
+        for (const t of tests) addEntry(sel, { part: '(graph)', pkg: pkg.name, file: t, reason: why(rel, `related: ${repo(rel)}`) });
+        hitBy(rel, tests.length);
+        if (!tests.length && !depOf(rel) && !(sel.srcHits[repo(rel)] || []).length) sel.uncovered.push(repo(rel));
       }
     } else {
       const tests = r.set.filter(live);
-      for (const t of tests) addEntry(sel, { part: '(graph)', pkg: pkg.name, file: t, reason: 'related' });
-      if (!tests.length) for (const rel of rels) if (!(sel.srcHits[repo(rel)] || []).length) sel.uncovered.push(repo(rel));
+      const reason = own.length ? 'related' : [...new Set(dep.map((d) => `dependent of ${d.of} (via ${d.via})`))].join('; ');
+      for (const t of tests) addEntry(sel, { part: '(graph)', pkg: pkg.name, file: t, reason });
+      if (tests.length && !own.length) for (const d of dep) hitBy(d.rel, 1);
+      if (!tests.length) for (const rel of own) if (!(sel.srcHits[repo(rel)] || []).length) sel.uncovered.push(repo(rel));
     }
   }
-  sel.uncovered = [...new Set(sel.uncovered)].sort();
+  sel.uncovered = [...new Set(sel.uncovered)].filter((f) => !covered.has(f)).sort();
   return sel;
 }
 
@@ -596,6 +719,7 @@ function hostBag(root, cfg, all) {
     replayStats: (n, resolve, onSel) => replayStats(root, cfg, all, n, resolve, onSel),
     hubOnlyVia: (sel) => hubOnlyVia(hostBag(root, cfg, all), sel),
     coverageStats: () => computeCoverage(root, cfg, all, repoFiles(root)),
+    workspace: () => workspaceOf(root, cfg),
     coverageCmd: () => cmdCoverage(root, cfg, all, repoFiles(root)),
     rulesCmd: (a) => cmdRules(a, root, cfg),
     selectCmd: (a) => cmdSelect(a, root, cfg, all, { quiet: true }),
@@ -627,14 +751,17 @@ function render(cfg, sel, header, all) {
   for (const pkg of Object.keys(cfg.packages)) {
     const es = sel.entries.filter((e) => e.pkg === pkg);
     const total = all[pkg].length;
-    if (!es.length && !sel.related[pkg].length) continue;
+    const dep = sel.dependents[pkg];
+    if (!es.length && !sel.related[pkg].length && !dep.length) continue;
     out.push(`${pkg} tests: ${es.length}${total ? ` of ${total}` : ''}`);
     for (const e of es) out.push(`  ${e.part.padEnd(14)} ${e.file}   (${e.reason})`);
-    if (sel.related[pkg].length) {
-      out.push(`  import graph sources: ${sel.related[pkg].join(', ')}`);
+    if (sel.related[pkg].length) out.push(`  import graph sources: ${sel.related[pkg].join(', ')}`);
+    if (dep.length) out.push(`  dependent sources: ${dep.map((d) => `${d.rel} (dependent of ${d.of} (via ${d.via}))`).join(', ')}`);
+    if (sel.related[pkg].length || dep.length) {
       if (sel.graph[pkg] === 'runtime') out.push(`  (${pkg}: related tests resolved by the ${cfg.packages[pkg].runner} runner at run time; pass --resolve to list them here)`);
     }
   }
+  for (const s of sel.prebuild) out.push(`prebuild ${s.label}: $ ${s.argv.join(' ')}   (before ${s.blocks.join(', ')} tests: ${s.why})`);
   out.push(`checks: ${sel.checks.join(', ') || '(none)'}`);
   if (sel.noTests.length) out.push(`no tests needed: ${sel.noTests.length} file(s)`, ...sel.noTests.map((f) => `  ${f}`));
   if (sel.uncovered.length) out.push('uncovered changed files (no test selected, not in noTests):', ...sel.uncovered.map((f) => `  ${f}`));
@@ -648,16 +775,17 @@ function selectionFromArgs(a, root, cfg, all, files0) {
   if (!a.changed) throw new Usage('give --changed [base] [--to ref] or --part a,b');
   const base = resolveBase(root, cfg, a.base);
   const { files, deleted } = files0 || changedFiles(root, base, a.to);
-  const sel = selectChanged(cfg, { files, deleted, depsChanged: depsChanged(root, files, base, a.to), all });
+  const sel = selectChanged(cfg, { files, deleted, depsChanged: depsChanged(root, files, base, a.to), all, ws: workspaceOf(root, cfg) });
   return { sel, header: [`base: ${base}  to: ${a.to ?? 'working tree'}  changed files: ${files.length}`], meta: { mode: 'changed', base, to: a.to ?? 'working tree', changedFiles: files } };
 }
 
-const publicSel = (sel) => { const { srcHits, ...rest } = sel; return rest; };
+const publicSel = (sel) => { const { srcHits, prebuildFor, depCovered, ...rest } = sel; return { ...rest, prebuild: rest.prebuild.map(({ label, argv, blocks, why }) => ({ label, argv, blocks, why })) }; };
 
 // ───────────────────────── subcommands ─────────────────────────
 function cmdSelect(a, root, cfg, all, { quiet = false } = {}) {
   const { sel, header, meta } = selectionFromArgs(a, root, cfg, all);
   if (a.changed) resolveGraph(cfg, root, sel, all, { resolveHeavy: !!a.resolve });
+  planPrebuild(cfg, root, sel, workspaceOf(root, cfg));
   sel.warnings.unshift(...cfg.warnings);
   if (!quiet) {
     if (a.json) console.log(JSON.stringify({ ...meta, selection: publicSel(sel), counts: Object.fromEntries(Object.keys(cfg.packages).map((p) => [p, sel.entries.filter((e) => e.pkg === p).length])) }, null, 2));
@@ -686,21 +814,21 @@ function cmdRun(a, root, cfg, all) {
   const { sel, code } = cmdSelect(a, root, cfg, all);
   if (code) { console.error(`\ntest-scope: ${sel.uncovered.length} uncovered changed file(s): add them to a part's paths or to noTests`); return 3; }
   const results = [];
-  for (const pkg of Object.values(cfg.packages)) {
-    const tests = sel.entries.filter((e) => e.pkg === pkg.name).map((e) => e.file);
-    const related = sel.cutApplied[pkg.name] ? [] : sel.related[pkg.name];
-    if (!tests.length && !related.length) continue;
+  const blocked = new Map();
+  for (const st of sel.prebuild) {
+    const ok = runCommand(`prebuild ${st.label}`, st.argv, st.cwd, a['dry-run']);
+    results.push({ label: `prebuild ${st.label} (before ${st.blocks.join(', ')})`, ok });
+    if (!ok) for (const b of st.blocks) if (!blocked.has(b)) blocked.set(b, st.label);
+  }
+  for (const { pkg, tests, related } of runsOf(cfg, sel)) {
+    if (blocked.has(pkg.name)) { results.push({ label: `${pkg.name} tests: not run, prebuild ${blocked.get(pkg.name)} failed`, ok: false }); continue; }
     const ad = ADAPTERS[pkg.runner];
     const argv = ad && ad.argv(pkg, root, { tests, related });
-    if (!argv) { results.push({ label: `${pkg.name}: no runner command (runner "${pkg.runner}")`, ok: !tests.length && !related.length ? true : false }); continue; }
+    if (!argv) { results.push({ label: `${pkg.name}: no runner command (runner "${pkg.runner}")`, ok: false }); continue; }
     results.push({ label: `${pkg.name} tests (${related.length} related sources, ${tests.length} test files)`, ok: runCommand(`${pkg.name} tests`, [...wrapperArgv(root, pkg), ...argv], path.join(root, pkg.dir), a['dry-run']) });
   }
   for (const c of sel.checks) {
-    const [head, ...rest] = c.split(':');
-    const pkg = cfg.packages[head];
-    let argv, cwd = root;
-    if (pkg && rest.length) { argv = [...(pmPrefix(root, pkg)[0] === 'pnpm' ? ['pnpm'] : pmPrefix(root, pkg)[0] === 'yarn' ? ['yarn'] : ['npm']), 'run', rest.join(':')]; cwd = path.join(root, pkg.dir); }
-    else argv = shellWords(c);
+    const { argv, cwd } = stepArgv(root, cfg, c);
     results.push({ label: `check ${c}`, ok: runCommand(`check ${c}`, argv, cwd, a['dry-run']) });
   }
   console.log('\n== summary');
@@ -726,18 +854,27 @@ function computeCoverage(root, cfg, all, files) {
   for (const k of ['noTests', 'runAll', 'graphCuts']) for (const g of cfg[k]) if (!files.some((f) => matchGlob(f, g))) dead.push(`${k}: ${g}`);
   const total = Object.values(all).reduce((n, v) => n + v.length, 0);
   const cut = cutProblems(hostBag(root, cfg, all));
-  return { total, unowned, dead, problems, cut };
+  // workspace packages with no "packages" entry of their own: no change there reaches their tests' runner
+  const ws = workspaceOf(root, cfg, files);
+  const unconfigured = [], untested = [];
+  if (ws) for (const w of [...ws.pkgs.values()].sort((x, y) => x.dir.localeCompare(y.dir))) {
+    if (Object.values(cfg.packages).some((p) => p.dir === w.dir)) continue;
+    (w.hasTest ? unconfigured : untested).push(`${w.name} (${w.dir})`);
+  }
+  return { total, unowned, dead, problems, cut, unconfigured, untested };
 }
 
 function cmdCoverage(root, cfg, all, files) {
-  const { total, unowned, dead, problems, cut } = computeCoverage(root, cfg, all, files);
+  const { total, unowned, dead, problems, cut, unconfigured, untested } = computeCoverage(root, cfg, all, files);
   console.log(`test files: ${total} in ${Object.keys(cfg.packages).length} package(s); parts: ${Object.keys(cfg.parts).length}`);
   if (unowned.length) console.log(`UNOWNED test files (${unowned.length}): add to a part's tests or to graphOnly\n${unowned.map((x) => `  ${x}`).join('\n')}`);
   if (dead.length) console.log(`DEAD globs (${dead.length}): match nothing, so they select nothing\n${dead.map((x) => `  ${x}`).join('\n')}`);
   if (cut.problems.length) console.log(`CUT-UNOWNED modules (${cut.problems.length}): behind a graphCut, so no import chain selects their tests; give each a part with paths\n${cut.problems.map((x) => `  ${x}`).join('\n')}`);
+  if (unconfigured.length) console.log(`UNCONFIGURED workspace packages (${unconfigured.length}): a "test" script but no "packages" entry, so no change selects their tests\n${unconfigured.map((x) => `  ${x}`).join('\n')}`);
+  if (untested.length) console.log(`info: ${untested.length} workspace package(s) with no test script and no "packages" entry: ${untested.join(', ')}`);
   for (const p of problems) console.log(`PROBLEM ${p}`);
   for (const w of [...cfg.warnings, ...cut.warnings]) console.log(`warning: ${w}`);
-  if (unowned.length || dead.length || problems.length || cut.problems.length) return 1;
+  if (unowned.length || dead.length || problems.length || cut.problems.length || unconfigured.length) return 1;
   console.log('coverage clean');
   return 0;
 }
@@ -751,7 +888,7 @@ function selectForCommit(root, cfg, all, sha, resolveHeavy) {
   const parent = gitOk(root, ['rev-parse', '--verify', '-q', `${sha}~1`]);
   const base = parent ? parent.trim() : EMPTY_TREE;
   const { files, deleted } = changedFiles(root, base, sha);
-  const sel = selectChanged(cfg, { files, deleted, depsChanged: depsChanged(root, files, base, sha), all });
+  const sel = selectChanged(cfg, { files, deleted, depsChanged: depsChanged(root, files, base, sha), all, ws: workspaceOf(root, cfg) });
   // resolved against the checked-out tree: files that no longer exist are skipped by the adapters
   for (const p of Object.keys(sel.related)) sel.related[p] = sel.related[p].filter((rel) => fs.existsSync(path.join(root, cfg.packages[p].dir, rel)));
   resolveGraph(cfg, root, sel, all, { resolveHeavy });
