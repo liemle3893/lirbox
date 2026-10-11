@@ -6,7 +6,7 @@
 //   node jev.mjs --state <file|-> --questions <file> --out <file>
 //                [--model M] [--timeout-ms N] [--fail-open] [--fixture <file>]
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -261,7 +261,15 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// Run main() only when executed directly — compared as REAL paths. Node resolves symlinks for
+// import.meta.url but argv[1] keeps them, and a file:// URL percent-encodes spaces, so the old
+// `import.meta.url === \`file://${argv[1]}\`` was false on macOS's /var -> /private/var and on any
+// path containing a space: the script exited 0 having done nothing, which reads as success.
+const invokedDirectly = () => {
+  try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)) }
+  catch { return false }
+}
+if (invokedDirectly()) {
   main().catch((e) => {
     console.error(`jev: ${e.stack || e.message}`)
     process.exit(1)
