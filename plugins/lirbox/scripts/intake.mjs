@@ -15,7 +15,7 @@
 // model should be making.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -24,7 +24,16 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 // Overridable the same way orch-lane.sh takes TRIAGE_OVERRIDE, and for the same reason: the only
 // way to assert "jev died without writing" is to substitute a jev that does exactly that.
 const JEV = process.env.INTAKE_JEV_OVERRIDE || join(HERE, 'jev.mjs')
-const REPO_ROOT = resolve(HERE, '..', '..', '..')
+// "The repo" is the one the CALLER is in — resolved exactly as route-guard.sh resolves it
+// (`git -C "$CWD" rev-parse --show-toplevel`), because that hook is the only reader of route.json
+// that binds. It used to be resolve(HERE, '../../..'): correct only when running from a lirbox
+// checkout. Installed as a plugin, HERE is ~/.claude/plugins/cache/…, so route.json landed in the
+// cache where the hook never looks (every lane refused) and repoFacts described the plugin's files
+// instead of the user's. Outside a git repo, the cwd is the repo.
+const REPO_ROOT = (() => {
+  const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
+  return top.status === 0 && top.stdout.trim() ? top.stdout.trim() : process.cwd()
+})()
 
 export const NOT_MEASURED = 'NOT_MEASURED'
 
@@ -333,4 +342,12 @@ function main() {
   process.exit(0)
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) main()
+// Run main() only when executed directly — compared as REAL paths. Node resolves symlinks for
+// import.meta.url but argv[1] keeps them, and a file:// URL percent-encodes spaces, so the old
+// `import.meta.url === \`file://${argv[1]}\`` was false on macOS's /var -> /private/var and on any
+// path containing a space: the script exited 0 having done nothing, which reads as success.
+const invokedDirectly = () => {
+  try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)) }
+  catch { return false }
+}
+if (invokedDirectly()) main()

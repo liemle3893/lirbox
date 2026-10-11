@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -231,6 +231,47 @@ check('g: an internal error fails OPEN and says so on stderr', () => {
   })
   assert.equal(n.status, 0, 'a payload with no cwd must fail open')
   assert.match(n.stderr, /PASSING \(fail-open\)/, n.stderr)
+})
+
+// (h) "the repo" is the one the CALLER is in, not the one the script is installed in.
+// Every check above passes --out-root, a test-only flag, so the default path — the only one a real
+// user gets — was never run. Installed as a plugin, intake lives in ~/.claude/plugins/cache/…, and
+// resolving the repo from the script's own location put route.json in the cache (route-guard.sh,
+// which asks git for the CALLER's toplevel, then never found it and refused every lane) and fed
+// jev file facts about the plugin instead of the user's repo. This runs intake exactly as an
+// installed plugin does: script in a fake cache, cwd in a separate git repo, no --out-root.
+check('h: route.json and repo facts come from the caller\'s repo, not the install dir', () => {
+  // A SPACE in the install path, on purpose: it breaks a naive main-module guard on every OS,
+  // not just on macOS's symlinked /var — so CI exercises it too.
+  const cache = mkdtempSync(join(tmp, 'plugin cache-'))
+  const scripts = join(cache, 'plugins', 'lirbox', 'scripts')
+  mkdirSync(scripts, { recursive: true })
+  cpSync(HERE, scripts, { recursive: true })
+  const repo = mkdtempSync(join(tmp, 'user-repo-'))
+  mkdirSync(join(repo, 'src'))
+  writeFileSync(join(repo, 'src', 'app.js'), 'export {}\n')
+  for (const a of [['init', '-q'], ['add', '.'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init']]) {
+    assert.equal(spawnSync('git', a, { cwd: repo }).status, 0, `git ${a[0]} failed`)
+  }
+  const task = join(tmp, 'h-task.txt')
+  writeFileSync(task, 'Touch src/app.js and plugins/lirbox/scripts/board.mjs')
+  const fx = fixture('h-inline', { choice: 'inline', routeConf: 0.95, done: 0.95, cap: 0.02 })
+  const r = spawnSync(process.execPath, [join(scripts, 'intake.mjs'), '--task', task, '--run', 'h-run', '--fixture', fx],
+    { cwd: repo, encoding: 'utf8', env: { ...process.env, TYPESAFE_API_KEY: 'test-token' } })
+  assert.equal(r.status, 0, `intake failed: ${r.stderr}`)
+  assert.ok(!existsSync(join(cache, '.orchestration')),
+    'route.json was written into the plugin install dir, where route-guard.sh will never look')
+  const rf = join(repo, '.orchestration', 'h-run', 'route.json')
+  assert.ok(existsSync(rf), `route.json is not in the caller's repo at ${rf}`)
+  const rec = JSON.parse(readFileSync(rf, 'utf8'))
+  // intake spawns the jev.mjs installed beside it; if jev's own guard no-ops, intake falls back.
+  assert.equal(rec.decided_by, 'jev', `jev did not run from the install path (decided_by ${rec.decided_by}: ${rec.reason})`)
+  const facts = rec.repo_facts
+  assert.equal(facts.repo_file_count, 1, `repo facts describe some other repo (file count ${facts.repo_file_count}, caller's repo has 1)`)
+  const exists = Object.fromEntries(facts.files_named_in_task.map((f) => [f.path, f.exists]))
+  assert.equal(exists['src/app.js'], true, 'a file that IS in the caller\'s repo was reported missing')
+  assert.equal(exists['plugins/lirbox/scripts/board.mjs'], false,
+    'a file that exists only in the plugin install dir was reported as present in the caller\'s repo')
 })
 
 server.close()
