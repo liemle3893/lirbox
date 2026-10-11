@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "Expectation manifest for prompt-improve's frozen acceptance-checks.",
+    "expect \"green\" = must exit 0. A check file missing from this manifest FAILS the gate.",
+    "LOCKED (evals/**): improvement loops may never edit this file."
+  ],
+  "checks": {
+    "no-fake-grade": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "judge without a key falls through to Jev and fails with exit 1, so the skill reads it as a broken judge and stops grading instead of switching to Haiku",
+          "env": "PI_BRIEF_OVERRIDE",
+          "file": "scripts/brief.mjs",
+          "find": "process.exit(NO_JEV_EXIT); }",
+          "replace": "}"
+        },
+        {
+          "why": "a Haiku grade labelled jev reads as Jev's measurement, so the user trusts a different judge's calibration as if it were Jev's",
+          "env": "PI_BRIEF_OVERRIDE",
+          "file": "scripts/brief.mjs",
+          "find": "on: ids, by: \"haiku\" });",
+          "replace": "on: ids, by: \"jev\" });"
+        }
+      ]
+    },
+    "fallback-announced": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "without the exit-3 rule the skill cannot tell 'Jev not set up' from 'Jev failed', and never reaches the fallback",
+          "env": "PI_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "Exit 3 means Jev is not set up",
+          "replace": "A non-zero exit means Jev failed"
+        },
+        {
+          "why": "dropping the Haiku dispatch leaves a missing key with no judge at all",
+          "env": "PI_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "Dispatch one Agent with `model: \"haiku\"`",
+          "replace": "Answer the questions yourself"
+        },
+        {
+          "why": "without the announcement, Haiku's whole-level scores are read against Jev's continuous ones",
+          "env": "PI_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "Say once that grades come from Haiku, not Jev;",
+          "replace": ""
+        },
+        {
+          "why": "without the ban, a failed judge invites a guessed score dressed as a grade",
+          "env": "PI_SKILL_OVERRIDE",
+          "file": "SKILL.md",
+          "find": "Never invent a score.",
+          "replace": ""
+        }
+      ]
+    }
+  }
+}
