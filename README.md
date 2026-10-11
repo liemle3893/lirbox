@@ -24,6 +24,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`sequence-diagram`** | Draw a time-ordered interaction as a self-contained interactive HTML sequence diagram — Mermaid sequenceDiagram (autonumbered) + a numbered step list driving a clickable detail panel (who→who, sync/async, code at the call site). Note: renders via a CDN, so this one needs internet. |
 | **`c4-model`** | Model a system's architecture as a C4 model (LikeC4): one `.c4` source → landscape/container/component drill-down views, built into a single self-contained interactive HTML page (offline-viewable) + the committed `.c4` source of truth. Note: toolchain runs in a throwaway docker container (pinned image, ~1 GB first pull) — needs docker, installs nothing on the host. |
 | **`deep-understanding`** | Interactive tutor: teaches you to deeply understand a PR/change/subsystem, incrementally — assesses what you know, fills gaps, quizzes you (problem → solution → impact), and doesn't stop until mastery is verified. Not a document — a guided session. |
+| **`prompt-improve`** | Interviews you (AskUserQuestion) until a rough prompt for Claude Code / claude.ai becomes a brief graded Ready, part by part. Judged by Jev (`TYPESAFE_API_KEY`), or a Haiku subagent when Jev isn't set up; no Anthropic API key. Copies the final prompt to the clipboard. |
 | **`plan-check`** | Rigorously verify a plan (ops/infra runbook or code-change plan) against the real repo/docs before it's executed — pressure-tests claims, surfaces unknowns, emits a self-contained HTML report with a GO / GO-WITH-CONDITIONS / NO-GO verdict. Read-only; never runs commands against live systems. |
 | **`feedback`** | User-invoked only: turns a concern about a lirbox skill into a scrubbed, structured GitHub issue on `liemle3893/lirbox`. Never auto-invoked. |
 | **`lane-config`** | Set up or change the per-project orchestration config that decides which harness, model and reasoning effort each lane profile runs on, plus lane caps, timeouts and the setup commands every brief carries. Stored per repo (keyed like the lane ledger), written only through validating subcommands — `detect` measures, `init` scaffolds with **no** profiles, `validate` refuses a config that cannot decide a lane. Profiles are the user's judgement, asked once, never guessed per spawn. |
@@ -72,7 +73,7 @@ verify this migration plan          # plan-check (pressure-tests it, GO/NO-GO re
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:do`, `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:do`, `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:prompt-improve`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
 
 ## Test locally (no install)
 
