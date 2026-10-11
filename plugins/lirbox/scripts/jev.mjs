@@ -6,10 +6,11 @@
 //   node jev.mjs --state <file|-> --questions <file> --out <file>
 //                [--model M] [--timeout-ms N] [--fail-open] [--fixture <file>]
 
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseArgs } from 'node:util'
+import { parseArgs, parseEnv } from 'node:util'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -37,15 +38,25 @@ const estTokens = (s) => Math.ceil((typeof s === 'string' ? s : JSON.stringify(s
 export const reportedCost = (usage) =>
   usage && typeof usage.cost === 'number' ? usage.cost : null
 
-/** Reads TYPESAFE_API_KEY (via OpenRouter it holds the OpenRouter key), falling back to the repo-root .env (gitignored). */
+/**
+ * Reads TYPESAFE_API_KEY (via OpenRouter it holds the OpenRouter key), falling back to a gitignored
+ * .env: first the one beside a lirbox checkout, then the caller's repo root — installed as a plugin,
+ * the first is in ~/.claude/plugins/cache/… and never exists. Only the key is taken from the file;
+ * a project's .env is not ours to load into the environment.
+ */
 export function apiToken() {
-  if (!process.env.TYPESAFE_API_KEY) {
-    const envFile = join(HERE, '..', '..', '..', '.env')
-    if (existsSync(envFile)) {
-      try { process.loadEnvFile(envFile) } catch { /* malformed .env is just a missing key */ }
-    }
+  if (process.env.TYPESAFE_API_KEY) return process.env.TYPESAFE_API_KEY
+  const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
+  const roots = [join(HERE, '..', '..', '..'), top.status === 0 && top.stdout.trim()].filter(Boolean)
+  for (const root of roots) {
+    const envFile = join(root, '.env')
+    if (!existsSync(envFile)) continue
+    try {
+      const key = parseEnv(readFileSync(envFile, 'utf8')).TYPESAFE_API_KEY
+      if (key) return key
+    } catch { /* unreadable .env is just a missing key */ }
   }
-  return process.env.TYPESAFE_API_KEY
+  return undefined
 }
 
 /** Throws a clear refusal (naming the limit and the observed value) if the request cannot fit. */
