@@ -147,7 +147,7 @@ check('g: TYPESAFE_API_KEY / TYPESAFE_BASE_URL, and nothing invented', () => {
     const r = spawnSync(process.execPath, ['--input-type=module', '-e',
       `const m = await import(${JSON.stringify(pathToFileURL(join(dir, 'jev.mjs')).href)});` +
       `console.log(JSON.stringify({ token: m.apiToken() ?? null, endpoint: m.ENDPOINT }))`],
-      { encoding: 'utf8', env: { ...clean, ...env } })
+      { cwd: root, encoding: 'utf8', env: { ...clean, ...env } })
     assert.equal(r.status, 0, `probe failed to run: ${r.stderr}`)
     return JSON.parse(r.stdout)
   }
@@ -162,6 +162,27 @@ check('g: TYPESAFE_API_KEY / TYPESAFE_BASE_URL, and nothing invented', () => {
   // The .env fallback reads the same standard name.
   writeFileSync(join(root, '.env'), 'TYPESAFE_API_KEY=from-dotenv\n')
   assert.equal(probe({}).token, 'from-dotenv', 'the repo-root .env fallback does not read TYPESAFE_API_KEY')
+})
+
+// (h) Installed as a plugin, jev lives in ~/.claude/plugins/cache/…, where nobody keeps a .env.
+// The .env that holds the key is the CALLER's repo-root one — the same repo intake resolves.
+// Only the key is taken from it: a project's .env is not ours to load into the environment.
+check('h: the .env fallback is read from the caller\'s repo, and only the key', () => {
+  const cache = mkdtempSync(join(tmpdir(), 'jev plugin cache-'))
+  copyFileSync(JEV, join(cache, 'jev.mjs'))
+  const repo = mkdtempSync(join(tmpdir(), 'jev-user-repo-'))
+  assert.equal(spawnSync('git', ['init', '-q'], { cwd: repo }).status, 0, 'git init failed')
+  mkdirSync(join(repo, 'sub'))
+  writeFileSync(join(repo, '.env'), 'TYPESAFE_API_KEY=from-callers-repo\nSOME_PROJECT_VAR=leaked\n')
+  const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^TYPESAFE_/.test(k)))
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `const m = await import(${JSON.stringify(pathToFileURL(join(cache, 'jev.mjs')).href)});` +
+    `console.log(JSON.stringify({ token: m.apiToken() ?? null, leaked: process.env.SOME_PROJECT_VAR ?? null }))`],
+    { cwd: join(repo, 'sub'), encoding: 'utf8', env: clean })
+  assert.equal(r.status, 0, `probe failed to run: ${r.stderr}`)
+  const out = JSON.parse(r.stdout)
+  assert.equal(out.token, 'from-callers-repo', 'the caller\'s repo-root .env is not read when jev is installed elsewhere')
+  assert.equal(out.leaked, null, 'the whole project .env was loaded into the environment, not just the key')
 })
 
 server.close()
