@@ -5,7 +5,7 @@ description: Use when the user types /prompt-improve with a prompt, or says "imp
 
 # Prompt improve
 
-Turn the user's rough prompt into a brief that Jev grades Ready by interviewing them with AskUserQuestion until every part holds their own answer. You write the parts in their voice. Jev is the judge (TypeSafe System One, a fraction of a cent a grade); when Jev isn't set up, a Haiku subagent answers Jev's exact questions instead (see **Judge**). `assemble` adds Anthropic's guard lines. No Anthropic API key is used: you write the parts in this session.
+Turn the user's rough prompt into a brief that Jev grades Ready by interviewing them with AskUserQuestion until every part holds their own answer. You write the parts in their voice. Jev is the judge (TypeSafe System One, a fraction of a cent a grade); when Jev isn't set up, a Haiku subagent answers Jev's exact questions instead (see **Judge**). `assemble` adds the guard lines: Anthropic's, and Boris Cherny's closing line. No Anthropic API key is used: you write the parts in this session.
 
 ## The loop
 
@@ -49,7 +49,7 @@ A part where the user chose "… is your call" is answered, so the 2.9 floor doe
 - The active parts in order, each 1–4 sentences (Done & verify up to 6), in the first person, written as plain prose to a coworker. No headings, no section labels, no bullet lists except a list of checks.
 - Every fact comes from the user: their prompt, the text of an option they picked, or what they typed. When they chose "your call" or skipped a question, the part hands the choice to Claude ("The stack is your call."), with no value you picked: no hex codes, versions, paths or numbers they didn't see.
 - What and why, not how: no file layout, code structure or step-by-step plan unless the user asked for one. The grade's `over` stays at 3 or above.
-- Guard lines come from `assemble` only, quoted from Anthropic's guides. They speak of "the user" in the third person; leave them as they are.
+- Guard lines come from `assemble` only, quoted from Anthropic's guides. They speak of "the user" in the third person; leave them as they are. The one exception closes every brief except a plan-only one: Boris Cherny's "Don't stop until you're done: when you know the next step, do it instead of telling me about it." Don't add it to a part yourself; `assemble` puts it last.
 
 ## Judge
 

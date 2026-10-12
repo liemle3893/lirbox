@@ -56,6 +56,32 @@
           "replace": ""
         }
       ]
+    },
+    "keep-going-last": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "without the guard no brief closes on the keep-going line, so a long run ends turns announcing its next step instead of taking it",
+          "env": "PI_CATALOG_OVERRIDE",
+          "file": "scripts/catalog.mjs",
+          "find": "  { id: \"keep-going\", at: \"report\", snip: \"keepGoing\", when: (s) => !s.tpl.planOnly },\n",
+          "replace": ""
+        },
+        {
+          "why": "filed under an earlier part, the line lands mid-brief and the report text closes the prompt instead",
+          "env": "PI_CATALOG_OVERRIDE",
+          "file": "scripts/catalog.mjs",
+          "find": "id: \"keep-going\", at: \"report\"",
+          "replace": "id: \"keep-going\", at: \"autonomy\""
+        },
+        {
+          "why": "without the plan-only exclusion a plan brief tells the run to keep going past the plan into building",
+          "env": "PI_CATALOG_OVERRIDE",
+          "file": "scripts/catalog.mjs",
+          "find": "snip: \"keepGoing\", when: (s) => !s.tpl.planOnly",
+          "replace": "snip: \"keepGoing\", when: () => true"
+        }
+      ]
     }
   }
 }
