@@ -47,19 +47,19 @@ for (const [tplId, original] of Object.entries(ORIGINAL)) {
 
 // ── guards follow model, effort, template and options; the effort pick itself is never changed ──
 const g = (o) => ids(guardsFor({ tplId: "cli", on: partsFor("cli"), ...o }).guards);
-assert.deepEqual(g({ model: "sonnet", effort: "low" }), ["sonnet-carry", "sonnet-verify"]);
-assert.deepEqual(g({ model: "sonnet", effort: "medium" }), ["sonnet-carry"]);
-assert.deepEqual(g({ model: "sonnet", effort: "" }), [], "unset Sonnet effort = high: no carry line");
-assert.deepEqual(g({ model: "sonnet", effort: "max" }), ["sonnet-thorough"]);
-assert.deepEqual(g({ model: "opus", effort: "low" }), []);
-assert.deepEqual(g({ model: "opus", opts: { unattended: true } }), ["opus-unattended"]);
-assert.deepEqual(g({ model: "sonnet", effort: "high", opts: { strictScope: true } }), ["sonnet-strict"]);
-assert.deepEqual(g({ model: "opus", pasted: [{ text: "x" }] }), ["pasted"]);
-assert.deepEqual(g({ model: "opus", pasted: [{ text: "  " }] }), [], "an empty paste block adds nothing");
-assert.deepEqual(ids(guardsFor({ tplId: "overnight", on: partsFor("overnight"), model: "opus" }).guards), ["opus-time"]);
+assert.deepEqual(g({ model: "sonnet", effort: "low" }), ["sonnet-carry", "sonnet-verify", "keep-going"]);
+assert.deepEqual(g({ model: "sonnet", effort: "medium" }), ["sonnet-carry", "keep-going"]);
+assert.deepEqual(g({ model: "sonnet", effort: "" }), ["keep-going"], "unset Sonnet effort = high: no carry line");
+assert.deepEqual(g({ model: "sonnet", effort: "max" }), ["sonnet-thorough", "keep-going"]);
+assert.deepEqual(g({ model: "opus", effort: "low" }), ["keep-going"]);
+assert.deepEqual(g({ model: "opus", opts: { unattended: true } }), ["opus-unattended", "keep-going"]);
+assert.deepEqual(g({ model: "sonnet", effort: "high", opts: { strictScope: true } }), ["sonnet-strict", "keep-going"]);
+assert.deepEqual(g({ model: "opus", pasted: [{ text: "x" }] }), ["pasted", "keep-going"]);
+assert.deepEqual(g({ model: "opus", pasted: [{ text: "  " }] }), ["keep-going"], "an empty paste block adds nothing");
+assert.deepEqual(ids(guardsFor({ tplId: "overnight", on: partsFor("overnight"), model: "opus" }).guards), ["opus-time", "keep-going"]);
 assert.deepEqual(ids(guardsFor({ tplId: "plan", on: partsFor("plan"), model: "sonnet", effort: "low" }).guards), ["sonnet-plan"], "plan only: no carry, no verify paragraph");
-assert.deepEqual(ids(guardsFor({ tplId: "analysis", on: partsFor("analysis"), model: "opus" }).guards), ["opus-explore"]);
-assert.deepEqual(ids(guardsFor({ tplId: "analysis", on: partsFor("analysis"), model: "sonnet", effort: "low" }).guards), ["sonnet-carry"], "no code to check: no verify paragraph");
+assert.deepEqual(ids(guardsFor({ tplId: "analysis", on: partsFor("analysis"), model: "opus" }).guards), ["opus-explore", "keep-going"]);
+assert.deepEqual(ids(guardsFor({ tplId: "analysis", on: partsFor("analysis"), model: "sonnet", effort: "low" }).guards), ["sonnet-carry", "keep-going"], "no code to check: no verify paragraph");
 assert.ok(ids(guardsFor({ tplId: "game", on: ["goal", "time", "verify"], model: "opus" }).notes).includes("time-advisory"));
 assert.equal(effectiveEffort("opus", ""), "medium"); assert.equal(effectiveEffort("sonnet", ""), "high"); assert.equal(effectiveEffort("sonnet", "low"), "low");
 
@@ -70,9 +70,13 @@ assert.equal(effectiveEffort("opus", ""), "medium"); assert.equal(effectiveEffor
   assert.ok(a.text.includes(SNIPPETS.pasted.text) && a.text.includes(SNIPPETS.sonnetCarry.text) && a.text.includes(SNIPPETS.sonnetVerify.text));
   assert.ok(a.text.indexOf(SNIPPETS.sonnetVerify.text) > a.text.indexOf(TEMPLATE.cli.example.parts.verify), "verify guard after the verify part");
   const b = assemble({ tplId: "game", parts: { goal: "A game." }, on: ["goal", "verify"], model: "sonnet", effort: "low" });
-  assert.deepEqual(ids(b.sections), ["goal", "autonomy", "verify"], "autonomy is off but carries the Sonnet line");
+  assert.deepEqual(ids(b.sections), ["goal", "autonomy", "verify", "report"], "autonomy and report are off but carry the Sonnet line and the closing line");
   assert.equal(b.sections.find((s) => s.id === "autonomy").active, false);
   assert.ok(!b.text.includes("[?"), "empty parts leave no placeholder text");
+  // The keep-going line closes every brief but a plan-only one, after the report part and any other report guard.
+  const c = assemble({ tplId: "cli", parts: TEMPLATE.cli.example.parts, model: "sonnet", effort: "max" });
+  assert.ok(c.text.endsWith(SNIPPETS.keepGoing.text) && c.text.includes(SNIPPETS.sonnetThorough.text), "keep-going is the final line");
+  assert.ok(!assemble({ tplId: "plan", parts: TEMPLATE.plan.example.parts, model: "opus" }).text.includes(SNIPPETS.keepGoing.text), "plan-only: no keep-going");
 }
 
 // ── question slots ──

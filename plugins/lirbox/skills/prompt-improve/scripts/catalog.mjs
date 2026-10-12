@@ -88,6 +88,9 @@ export const SNIPPETS = {
     text: "When you change code that can be run, built, or type-checked, run a real check that exercises the change before reporting it done: the project's tests, type-checker, or build, or the changed command itself. A syntax-only check, or a check command that failed to start, does not count; if all that is missing is the project's declared dependencies, install them with its own package manager and lockfile (e.g. npm install, pip install -r requirements.txt), never via sudo or the system package manager, unless told not to. Only if no real check can run here, say which one you did not run and why instead of reporting the change as done." },
   sonnetSearch: { src: `${SONNET} · Tool use in chat and knowledge work`,
     text: "Use the search tool to check specifics that may have changed since your training, such as what is allowed, required or charged, even when you feel confident. For researched work such as a report or a comparison, gather current sources rather than writing from your training knowledge." },
+  // Not Anthropic's guides: the close of Boris Cherny's own long-run prompt ("don't stop until you're done"), plus its point.
+  keepGoing: { src: "Boris Cherny · YC Startup School 2026 (21:38)",
+    text: "Don't stop until you're done: when you know the next step, do it instead of telling me about it." },
 };
 
 // Guard lines: added under a part when the model / effort / template call for them. s = { model, eff, on:Set, tpl, opts, pasted }
@@ -102,6 +105,8 @@ export const GUARDS = [
   { id: "opus-time", at: "time", snip: "opusTime", when: (s) => s.model === "opus" && s.on.has("time") },
   { id: "sonnet-verify", at: "verify", snip: "sonnetVerify", when: (s) => s.model === "sonnet" && s.eff === "low" && s.tpl.code !== false },
   { id: "sonnet-thorough", at: "report", snip: "sonnetThorough", when: (s) => s.model === "sonnet" && ["xhigh", "max"].includes(s.eff) },
+  // Last on purpose: the brief's final line. Off for plan-only briefs, where stopping to hand over the plan is the job.
+  { id: "keep-going", at: "report", snip: "keepGoing", when: (s) => !s.tpl.planOnly },
 ];
 // Shown to the owner, never added to the prompt.
 export const NOTES = [
