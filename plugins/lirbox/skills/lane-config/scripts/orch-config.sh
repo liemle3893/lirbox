@@ -196,16 +196,30 @@ init)
       builder:  {kind:$k, model:$cheap, effort:"medium", agent:"lirbox:lirbox-builder"}
     }')
     dflt='"builder"'; gate='"verifier"'
-  elif [[ -n "$HK" ]]; then
+  elif [[ -n "$HK" && "${HK_AGENT_ARG[$HK]-}" == file ]]; then
     # The harness is known, the model ids are not — naming one would be the
     # guess this file refuses to make. Declare the roles anyway so the shape is
-    # there, and let validate name the one missing field.
+    # there, and let validate name the one missing field. Safe only for a
+    # file-carried harness (omp): hk_agent_file resolves the bare role name
+    # straight off the plugin's agents/ directory, no registry involved.
     profiles=$(jq -n --arg k "$HK" '{
       planner: {kind:$k, model:"", agent:"lirbox-planner"},
       verifier:{kind:$k, model:"", agent:"lirbox-verifier"},
       builder: {kind:$k, model:"", agent:"lirbox-builder"}
     }')
     dflt='"builder"'; gate='"verifier"'
+  elif [[ -n "$HK" ]]; then
+    # Known harness, NAME-carried agent (opencode today), no capable model.
+    # Unlike omp's file lookup, a name-carried harness resolves the agent
+    # against ITS OWN registry — and that registry has never heard of
+    # `lirbox-planner` etc; lirbox ships no agent config for it. Writing those
+    # names here is exactly the bug this branch used to have (issue #91):
+    # init hands over a config its own validate refuses, and the natural
+    # fixup (`set-profile --agent`, which defaults to the profile name) is
+    # refused for the same reason. Leave profiles empty — validate already
+    # says "no profiles declared" and names the fix — rather than invent an
+    # agent id that cannot resolve on this harness.
+    :
   fi
 
   write "$(jq -n --argjson d "$d" --argjson p "$profiles" --argjson df "$dflt" --argjson g "$gate" '{

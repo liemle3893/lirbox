@@ -114,4 +114,21 @@ const scenario = (setup) => {
   if (/agent registry/.test(r.out)) fail(`init wrote profiles its own validate refuses: ${r.out}`);
 }
 
+// -- opencode: init must NEVER invent an agent id opencode's own registry has
+// no way to carry (issue #91). opencode resolves --agent by NAME against its
+// own registry, which has never heard of lirbox's role names — unlike omp,
+// which carries the agent as a FILE and resolves the bare name straight off
+// the plugin's agents/ directory. Conflating the two meant init handed an
+// opencode-only machine a config its own validate refused, with no
+// resolvable fixup (set-profile --agent defaults to the same bad name).
+{
+  const { run, cleanup } = scenario((bin) => fakeOpencode(bin, [
+    'build (primary)', 'compaction (subagent)', 'explore (subagent)',
+    'general (subagent)', 'plan (subagent)', 'summary (subagent)', 'title (subagent)',
+  ]));
+  const r = run('validate');
+  cleanup();
+  if (/agent registry/.test(r.out)) fail(`init invented an opencode agent id its own registry does not have: ${r.out}`);
+}
+
 console.log('GREEN agent-name-checked');
