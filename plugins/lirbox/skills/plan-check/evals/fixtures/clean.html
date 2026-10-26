@@ -1,19 +1,17 @@
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>Plan check — Ceph OSD swap</title></head><body>
-<div class="verdict" data-verdict="GO-WITH-CONDITIONS"><span class="badge">GO-WITH-CONDITIONS</span><span class="summary">No refutations; two open risks to clear.</span></div>
+<div class="verdict" data-verdict="GO-WITH-CONDITIONS"><span class="badge">GO-WITH-CONDITIONS</span><span class="summary">No refutations; three open rows to clear.</span></div>
 <ul class="conditions">
   <li class="condition">Confirm cluster is HEALTH_OK with no active backfill (run <code>ceph -s</code>).</li>
   <li class="condition">Confirm the <code>noout</code> flag is cleared after the swap.</li>
+  <li class="condition">Add a data-availability criterion to the DoD.</li>
 </ul>
-<ul class="risks"><li><span class="q">unknown-unknown</span> noout may be left set on failure mid-procedure.</li></ul>
+<ul class="risks"><li><span class="q">blind spot</span> noout may be left set on failure mid-procedure.</li></ul>
 <table><tbody>
   <p id="goal"><strong>Goal:</strong> drain and replace the failing OSD without losing data availability</p>
-  <tr class="claim" data-quadrant="known-known" data-status="VERIFIED"><td><code>ceph osd out N</code> drains the OSD</td><td>known-known</td><td>VERIFIED</td><td>docs.ceph.com/reef</td><td>high</td></tr>
-  <tr class="claim" data-quadrant="known-unknown" data-status="UNVERIFIED"><td>cluster is healthy at start</td><td>known-unknown</td><td>UNVERIFIED (needs: ceph -s) <span class="fix">fix: needs-decision</span></td><td>—</td><td>—</td></tr>
-  <tr class="claim" data-goal-coverage="true" data-quadrant="unknown-known" data-status="UNSTATED-ASSUMPTION"><td>Meeting every DoD criterion achieves the goal</td><td>unknown-known</td><td>UNSTATED-ASSUMPTION</td><td>the DoD checks OSD state, never data availability</td><td>med</td></tr>
-  <tr class="claim" data-quadrant="unknown-unknown" data-status="BLIND-SPOT-RISK"><td>noout not cleared on partial failure</td><td>unknown-unknown</td><td>BLIND-SPOT-RISK <span class="fix">fix: mechanical</span></td><td>reasoning</td><td>med</td></tr>
+  <tr class="claim" data-status="VERIFIED"><td><code>ceph osd out N</code> drains the OSD</td><td>VERIFIED</td><td>docs.ceph.com/reef</td><td>high</td></tr>
+  <tr class="claim" data-status="UNVERIFIED"><td>cluster is healthy at start</td><td>UNVERIFIED (needs: ceph -s) <span class="fix">fix: needs-decision</span></td><td>—</td><td>—</td></tr>
+  <tr class="claim" data-goal-coverage="true" data-status="UNSTATED-ASSUMPTION"><td>Meeting every DoD criterion achieves the goal</td><td>UNSTATED-ASSUMPTION <span class="fix">fix: needs-decision</span></td><td>the DoD checks OSD state, never data availability</td><td>med</td></tr>
+  <tr class="claim" data-status="BLIND-SPOT-RISK"><td>noout not cleared on partial failure</td><td>BLIND-SPOT-RISK <span class="fix">fix: mechanical</span></td><td>reasoning</td><td>med</td></tr>
 </tbody></table>
 <script type="application/json" id="dod">{"criteria":[{"id":"ac1","text":"OSD swap complete: replacement OSD is up/in and rebalance finished","tier":"checkable","check":"ceph osd safe-to-destroy osd.N"},{"id":"ac2","text":"no client-visible interruption during the swap","tier":"judged"}]}</script>
-<!-- An ops runbook declares no task graph: all three arrays empty. Exercises the legal
-     empty case, so "no tasks" cannot be confused with "block missing". -->
-<script type="application/json" id="taskgraph">{"nodes":[],"edges":[],"levels":[]}</script>
 </body></html>

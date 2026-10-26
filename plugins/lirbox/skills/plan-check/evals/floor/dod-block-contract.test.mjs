@@ -42,11 +42,10 @@ const report = (dodBlock) => `<!DOCTYPE html><html><head><meta charset="utf-8"><
 <div class="verdict" data-verdict="GO"><span class="badge">GO</span></div>
 <p id="goal"><strong>Goal:</strong> keep the service available during the upgrade</p>
 <table><tbody>
-  <tr class="claim" data-quadrant="known-known" data-status="VERIFIED"><td>a claim</td></tr>
-  <tr class="claim" data-goal-coverage="true" data-quadrant="known-known" data-status="VERIFIED"><td>the DoD, fully met, achieves the goal</td></tr>
+  <tr class="claim" data-status="VERIFIED"><td>a claim</td></tr>
+  <tr class="claim" data-goal-coverage="true" data-status="VERIFIED"><td>the DoD, fully met, achieves the goal</td></tr>
 </tbody></table>
 ${dodBlock}
-<script type="application/json" id="taskgraph">{"nodes":[],"edges":[],"levels":[]}</script>
 </body></html>
 `;
 

@@ -31,6 +31,10 @@
 // RED on baseline (53059a0): validate.mjs has no rule, template.html has no slot and no .fix
 // class, and step 8 — the step that actually writes the HTML — never mentions the disposition.
 //
+// 2026-10-26: the rule widened to every non-VERIFIED row. UNSTATED-ASSUMPTION is now open (an
+// assumption nobody checked is a condition, not a pass), and on a REFUTED row the class decides
+// the verdict — needs-decision is NO-GO, mechanical is a condition (see verdict-by-fix-class).
+//
 // Locked (evals/**): the fixer may never edit this file.
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -65,7 +69,7 @@ const FIX_M = ' <span class="fix">fix: mechanical</span>';
 const FIX_D = ' <span class="fix">fix: needs-decision</span>';
 
 const row = (status, extra = '') =>
-  `<tr class="claim" data-quadrant="known-known" data-status="${status}"><td>p</td><td>q</td>` +
+  `<tr class="claim" data-status="${status}"><td>p</td>` +
   `<td><span class="s-${status}">${status}</span>${extra}</td><td>e</td><td>c</td></tr>`;
 
 // A report that satisfies every OTHER rule, so only the disposition is under test.
@@ -75,11 +79,10 @@ const report = (rows, verdict, conds) => `<!DOCTYPE html><html><head><style>.fix
 <div class="verdict" data-verdict="${verdict}"><span class="badge">${verdict}</span></div>
 <ul class="conditions">${'<li class="condition"><div class="cbody">c</div></li>'.repeat(conds)}</ul>
 <table><tbody>
-<tr class="claim" data-goal-coverage="true" data-quadrant="known-known" data-status="VERIFIED"><td>DoD reaches the goal</td></tr>
+<tr class="claim" data-goal-coverage="true" data-status="VERIFIED"><td>DoD reaches the goal</td></tr>
 ${rows.join('\n')}
 </tbody></table>
 <script type="application/json" id="dod">{"criteria":[{"id":"c1","text":"t","tier":"judged"}]}</script>
-<script type="application/json" id="taskgraph">{"nodes":[],"edges":[],"levels":[]}</script>
 </body></html>`;
 
 let n = 0;
@@ -111,7 +114,7 @@ const assertions = [
   {
     id: 'emit-step-carries-the-disposition',
     where: 'SKILL.md step 8',
-    ok: /\bfix:/.test(emitStep) && /open row/i.test(emitStep),
+    ok: /\bfix:/.test(emitStep) && /non-`?VERIFIED`? row/i.test(emitStep),
     want:
       'step 8 (emit the report) must restate the per-open-row disposition — step 7 alone has ' +
       'measured 4/10, because nothing reaches the model at the moment it writes the HTML',
@@ -139,27 +142,34 @@ const assertions = [
   {
     id: 'demands-disposition-on-refuted',
     where: 'assets/validate.mjs',
-    // REFUTED is where the disposition MATTERS most: autofix's gate is the fix class, so a
-    // refutation that carries none leaves the one decision autofix depends on unstated. It used
-    // to be exempt here, which made "REFUTED + mechanical" inexpressible and forced the ban that
-    // exemption was written to justify.
+    // REFUTED is where the disposition MATTERS most: it decides the verdict. A refutation that
+    // carries none leaves NO-GO vs condition unstated.
     ok: verdictOn(report([row('REFUTED')], 'NO-GO', 0)) === 1,
-    want: 'a REFUTED row with no fix disposition must be REJECTED — the fix class is what gates autofix',
+    want: 'a REFUTED row with no fix disposition must be REJECTED — the fix class decides the verdict',
   },
   {
     id: 'accepts-mechanical-refuted',
     where: 'assets/validate.mjs',
     // The capability the re-axing exists for: a refutation whose correction is fully determined
     // must be EXPRESSIBLE. A validator that rejected this would reinstate the ban structurally.
-    ok: verdictOn(report([row('REFUTED', FIX_M)], 'NO-GO', 0)) === 0,
+    ok: verdictOn(report([row('REFUTED', FIX_M)], 'GO-WITH-CONDITIONS', 1)) === 0,
     want: 'a REFUTED row tagged "fix: mechanical" must be ACCEPTED — autofix must be able to act on it',
   },
   {
-    id: 'scoped-to-adjudicable-rows-only',
+    id: 'verified-needs-no-disposition',
     where: 'assets/validate.mjs',
-    // VERIFIED / UNSTATED-ASSUMPTION have nothing to repair; demanding a disposition is noise.
-    ok: verdictOn(report([row('VERIFIED'), row('UNSTATED-ASSUMPTION')], 'GO', 0)) === 0,
-    want: 'VERIFIED / UNSTATED-ASSUMPTION rows need no disposition — the rule must not demand one',
+    // VERIFIED has nothing to repair; demanding a disposition is noise.
+    ok: verdictOn(report([row('VERIFIED')], 'GO', 0)) === 0,
+    want: 'a VERIFIED row needs no disposition — the rule must not demand one',
+  },
+  {
+    id: 'rejects-untagged-unstated-assumption',
+    where: 'assets/validate.mjs',
+    // An unchecked assumption is open; it needs a disposition like any other open row.
+    // GO with no conditions: if the row were exempted it would also stop counting as open, so a
+    // GO-WITH-CONDITIONS report would fail on the condition count — for the wrong reason.
+    ok: verdictOn(report([row('UNSTATED-ASSUMPTION')], 'GO', 0)) === 1,
+    want: 'an UNSTATED-ASSUMPTION row with no fix disposition must be REJECTED',
   },
   {
     id: 'rejects-partial-tagging',

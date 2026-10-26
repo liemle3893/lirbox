@@ -15,42 +15,49 @@
   "checks": {
     "autofix-bounded": {
       "expect": "green",
-      "note": "Added 2026-08-03; re-axed 2026-09-21. Autofix turns findings whose repair is determined by the finding itself into edits. The original boundary banned autofix on the REFUTED *status*, which is the wrong axis: the doc's own mechanical list holds refutations (a moved symbol, a command form proven not to work), so it forbade repairs it had just authorised, and made REFUTED+mechanical inexpressible downstream -- half of six Harbor trials responded by not autofixing at all. The gate is now the FIX CLASS (needs-decision is excluded; authorship, not transcription). The anti-laundering property is carried where it always belonged: a verdict may improve ONLY because a row was re-checked against reality, never because the text was edited. This check guards that boundary, not the feature: the input plan is never overwritten, authorship is never autofixed, the status is explicitly NOT the gate (so the old ban cannot creep back in beside the new rule), and an applied fix re-opens its proposition.",
+      "note": "Added 2026-08-03; re-axed 2026-09-21 (gate on fix class, not REFUTED status); rewritten 2026-10-26. The sibling `<plan>.autofix.md` was a second copy of the plan the reader had to diff by hand while git already held the original, and the 're-run steps 3-6 per fix' ritual re-verified transcriptions against the evidence that had just determined them. The rule 'a NO-GO whose refutations all need a decision does not move' froze a verdict even after the human decided and the fix landed. Now: edit in place, never choose a needs-decision repair for the human, re-adjudicate each fixed row against the evidence that settled it, and the verdict is whatever validate.mjs derives from the rows.",
       "mutations": [
         {
-          "why": "lets autofix overwrite the plan it audited, destroying the evidence for its own edits",
+          "why": "makes autofix run unasked",
           "env": "PLAN_CHECK_SKILL_MD",
           "file": "SKILL.md",
-          "find": "The input plan is **never modified** — write a sibling `<plan>.autofix.md`.",
-          "replace": "Apply the fixes to the plan."
+          "find": "10. **Offer autofix — never automatic.**",
+          "replace": "10. **Autofix.**"
         },
         {
-          "why": "removes the authorship exclusion, so autofix may rewrite a claim whose correct text is not established -- the failure mode with the worst blast radius",
+          "why": "reintroduces the sibling copy instead of an in-place edit",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "Edit the plan file **in place** — git is the record, so\n    say so first if it is untracked or dirty;",
+          "replace": "Write a sibling `<plan>.autofix.md`;"
+        },
+        {
+          "why": "removes the bullet that stops autofix choosing a new approach for the human -- the worst blast radius",
           "env": "PLAN_CHECK_AUTOFIX_MD",
           "file": "references/autofix.md",
-          "find": "- **A `REFUTED` row whose repair needs a new approach** — the plan's model of reality is\n  wrong and the evidence does not say what to do instead. Choosing that is design. Autofix\n  must not touch it, and must not let the plan read as if it had.",
+          "find": "- **A `REFUTED` row whose repair needs a new approach** — the plan's model of reality is\n  wrong and the evidence does not say what to do instead. Choosing that is design. Autofix\n  must not choose it, and must not let the plan read as if it had.",
           "replace": "- **Hard ones** — use judgement."
         },
         {
-          "why": "collapses the gate back onto the STATUS axis -- the original bug, which forbade the mechanical refutations the doc itself authorises",
+          "why": "collapses the gate back onto the REFUTED status",
           "env": "PLAN_CHECK_AUTOFIX_MD",
           "file": "references/autofix.md",
-          "find": "The gate is the **fix class**, never the status. `REFUTED` is not the line: a claim can be\nrefuted by evidence that also fully determines its correction (the symbol moved; the target\ndoes not exist), and transcribing that is not a decision. What is excluded is authorship —\nany repair where the correct text is not already established, whatever the row's status.",
-          "replace": "`REFUTED` is never autofixed."
+          "find": "The gate is the **fix class**, never the status. `REFUTED` is not the line: a claim can be\nrefuted by evidence that also fully determines its correction (the symbol moved; the target\ndoes not exist), and transcribing that is not a decision.",
+          "replace": "`REFUTED` rows are never autofixed."
         },
         {
-          "why": "drops the re-verification requirement, so an edited plan keeps a verdict that was never re-earned -- with the status ban gone, this sentence is the ONLY thing stopping laundering",
+          "why": "freezes the verdict after a fix -- the 'NO-GO never moves' rule",
           "env": "PLAN_CHECK_AUTOFIX_MD",
           "file": "references/autofix.md",
-          "find": "An autofixed row is UNVERIFIED again until re-checked. Applying a fix invalidates the\nreport that motivated it. Re-run steps 3–6 on every touched proposition and re-emit the\nreport before the verdict is recomputed.",
-          "replace": "Apply the fixes and note them in the report."
+          "find": "No verdict is frozen, and none moves without a row that moved first.",
+          "replace": "A NO-GO does not move after autofix, and must not be made to."
         },
         {
-          "why": "removes the verdict-moves-only-on-re-verification rule, the invariant that replaced the blanket ban",
+          "why": "drops re-adjudication against the evidence, so the verdict moves because text was edited",
           "env": "PLAN_CHECK_AUTOFIX_MD",
           "file": "references/autofix.md",
-          "find": "A verdict may improve ONLY because a row was re-checked against reality and came back\nclean — never because the plan's text now reads better. Recompute the verdict from\nre-verified rows alone. This is what stops laundering, and it is the whole of what stops\nit; no status is banned from repair to achieve it.",
-          "replace": "Recompute the verdict after applying fixes."
+          "find": "After editing, re-adjudicate each fixed row against the evidence that settled it — the\nMakefile that has `test`, the human's answer — update its status and cite that evidence, then\nre-run `validate.mjs`.",
+          "replace": "After editing, mark the fixed rows VERIFIED."
         }
       ]
     },
@@ -83,7 +90,7 @@
     },
     "fix-disposition": {
       "expect": "green",
-      "note": "Added 2026-08-05. SKILL.md step 7 has demanded a `fix:` disposition on every open row since #57 and the model largely ignored it: MEASURED at 4/10 in BOTH arms of a 20-trial paired Harbor run on execution-shape (2026-08-04), with a LENIENT grader that scored 1 for a single `fix:` string anywhere in the file -- six of ten reports per arm had none at all, in runs whose reports carried 6-12 open rows each. Every other element of the same contract sat at ~100% over the same runs (#dod 10/10, id=goal 20/20, data-goal-coverage 20/20, #taskgraph 10/10). The one thing they share and this lacked: a template slot and a validate.mjs rule. SKILL.md step 9 loops the model until validate.mjs exits 0, so a rule living only in prose never enters the loop. Guards the invariant PER ROW on purpose -- a file-level `fix:` grep is the exact leniency the Harbor grader had, and it lets one tagged row excuse ten untagged ones.",
+      "note": "Added 2026-08-05. SKILL.md step 7 has demanded a `fix:` disposition on every open row since #57 and the model largely ignored it: MEASURED at 4/10 in BOTH arms of a 20-trial paired Harbor run on execution-shape (2026-08-04), with a LENIENT grader that scored 1 for a single `fix:` string anywhere in the file -- six of ten reports per arm had none at all, in runs whose reports carried 6-12 open rows each. Every other element of the same contract sat at ~100% over the same runs (#dod 10/10, id=goal 20/20, data-goal-coverage 20/20, #taskgraph 10/10). The one thing they share and this lacked: a template slot and a validate.mjs rule. SKILL.md step 9 loops the model until validate.mjs exits 0, so a rule living only in prose never enters the loop. Guards the invariant PER ROW on purpose -- a file-level `fix:` grep is the exact leniency the Harbor grader had, and it lets one tagged row excuse ten untagged ones. 2026-10-26: widened to every non-VERIFIED row (UNSTATED-ASSUMPTION is now open); the REFUTED exemption mutation is gone because the row loop no longer has a separate tag set.",
       "mutations": [
         {
           "why": "removes the disposition slot from the claim-row specimen, so nothing reaches the model at the moment it writes the HTML -- the precise gap that measured 4/10",
@@ -96,7 +103,7 @@
           "why": "drops the restatement from step 8 (the step that writes the report), leaving it only in step 7 where it already measured 4/10",
           "env": "PLAN_CHECK_SKILL_MD",
           "file": "SKILL.md",
-          "find": "   Carry step 7's disposition onto **every `REFUTED` and open row** —\n   `<span class=\"fix\">fix: mechanical</span>` or `fix: needs-decision`; machine-checked, and drop\n   the span on `VERIFIED` / `UNSTATED-ASSUMPTION` rows.\n",
+          "find": "   Carry step 6's disposition onto **every non-`VERIFIED` row** —\n   `<span class=\"fix\">fix: mechanical</span>` or `fix: needs-decision`; machine-checked.\n",
           "replace": ""
         },
         {
@@ -107,13 +114,6 @@
           "replace": "if (false) {"
         },
         {
-          "why": "makes the rule per-FILE instead of per-row -- the leniency the Harbor grader had, where one tagged row excuses every untagged one",
-          "env": "PLAN_CHECK_VALIDATE",
-          "file": "assets/validate.mjs",
-          "find": "  .filter(({ i, s }) => NEEDS_FIX_TAG.has(s) && !FIX.test(fullRows[i - 1]));",
-          "replace": "  .filter(({ s }) => NEEDS_FIX_TAG.has(s) && !FIX.test(markup));"
-        },
-        {
           "why": "accepts any `fix:` value, so 'fix: later' or 'fix: TODO' passes as a disposition and the mechanical/needs-decision split stops meaning anything",
           "env": "PLAN_CHECK_VALIDATE",
           "file": "assets/validate.mjs",
@@ -121,79 +121,17 @@
           "replace": "const FIX = /\\bfix:/i;"
         },
         {
-          "why": "exempts REFUTED from the disposition rule -- the original bug, which made 'REFUTED + mechanical' inexpressible and structurally forced the status ban in autofix.md",
+          "why": "exempts UNSTATED-ASSUMPTION from the disposition rule, so an unchecked assumption carries no repair class",
           "env": "PLAN_CHECK_VALIDATE",
           "file": "assets/validate.mjs",
-          "find": "const NEEDS_FIX_TAG = new Set([...OPEN, 'REFUTED']);",
-          "replace": "const NEEDS_FIX_TAG = OPEN;"
-        }
-      ]
-    },
-    "task-graph": {
-      "expect": "green",
-      "note": "Added 2026-08-04. execution-shape taught plan-check to FIND a dishonest task graph, but the finding landed as prose in a claim row -- unreadable by anything downstream, and wrong about the one runner this repo ships: blind-spot.md called a file claimed by two tasks 'an undeclared serialization point' while conductor's own planner prompt says 'Touching the SAME file is NOT a dependency: every item runs in its OWN worktree on its OWN branch'. Acting on the old advice makes a plan MORE serial than the work is. Guards two halves, worthless apart: (a) levels are DERIVED -- validate.mjs re-layers the needs edges and rejects a mismatch, so a report can neither invent serialization nor claim parallelism its edges forbid; (b) needs and contention are different constraints, and a contention edge must NOT split its tasks across levels. Asserted by EXECUTING validate.mjs, not grepping it -- the three prior checks in this skill each shipped a FALSE-GREEN from a token surviving in a neighbour.",
-      "mutations": [
-        {
-          "why": "removes the taskgraph block from the report template, so there is nowhere to declare the execution shape",
-          "env": "PLAN_CHECK_TEMPLATE",
-          "file": "assets/template.html",
-          "find": "<script type=\"application/json\" id=\"taskgraph\">",
-          "replace": "<script type=\"application/json\" id=\"othergraph\">"
-        },
-        {
-          "why": "drops the SKILL.md instruction naming both edge kinds, so nothing tells the model contention differs from needs",
-          "env": "PLAN_CHECK_SKILL_MD",
-          "file": "SKILL.md",
-          "find": "Each edge is\n   `needs` (this task needs the other's *output*) or `contention` (both write one file: a merge\n   cost, not an order, since each task gets its own worktree) and carries a `why`.",
-          "replace": "Declare the edges."
-        },
-        {
-          "why": "deletes only the DERIVED clause, leaving the edge kinds -- proves the check is anchored to levels-are-computed and not merely to the word 'derive', which step 8 already uses for the DoD",
-          "env": "PLAN_CHECK_SKILL_MD",
-          "file": "SKILL.md",
-          "find": "`levels` is\n   **derived** — validate.mjs recomputes it from the `needs` edges — so you can neither invent\n   serialization nor claim parallelism the edges forbid.",
-          "replace": "State the levels."
-        },
-        {
-          "why": "reverts the blind-spot bullet to calling any shared file a serialization point -- the guidance that contradicts conductor and costs real parallelism",
-          "env": "PLAN_CHECK_BLIND_SPOT_MD",
-          "file": "references/blind-spot.md",
-          "find": "a collision, but classify it before you serialize\n  anything. Where each task gets its own worktree (`lirbox:conductor` does), it is `contention`:\n  a merge cost at integration, not an ordering constraint — recording it as a dependency\n  serializes work that has none. Where the tasks share one working tree it *is* an order.\n  Report the table either way; an unclassified collision is the finding.",
-          "replace": "an undeclared serialization point. Declaring the tasks serial is the author's call."
-        },
-        {
-          "why": "makes the taskgraph block optional, so a report can stay silent on what runs concurrently",
-          "env": "PLAN_CHECK_VALIDATE",
-          "file": "assets/validate.mjs",
-          "find": "if (tgBlocks.length !== 1) {",
-          "replace": "if (tgBlocks.length === 0) { /* optional */ } else if (tgBlocks.length !== 1) {"
-        },
-        {
-          "why": "stops levels being derived, so a report may assert any shape -- including a fully serial one no edge justifies",
-          "env": "PLAN_CHECK_VALIDATE",
-          "file": "assets/validate.mjs",
-          "find": "        if (!same) {",
-          "replace": "        if (false) {"
-        },
-        {
-          "why": "drops the unclassified-collision rule, so a plan whose tasks silently share a file reads as independent",
-          "env": "PLAN_CHECK_VALIDATE",
-          "file": "assets/validate.mjs",
-          "find": "          if (!linked.has(key)) {",
-          "replace": "          if (false) {"
-        },
-        {
-          "why": "lets a contention edge constrain levels -- the regression that hands a runner a needlessly serial plan while every other rule still passes",
-          "env": "PLAN_CHECK_VALIDATE",
-          "file": "assets/validate.mjs",
-          "find": "      if (e.kind === 'needs') needs.push([from, to]);",
-          "replace": "      needs.push([from, to]);"
+          "find": "  if (s === 'VERIFIED') continue;",
+          "replace": "  if (s === 'VERIFIED' || s === 'UNSTATED-ASSUMPTION') continue;"
         }
       ]
     },
     "execution-shape": {
       "expect": "green",
-      "note": "Added 2026-08-03. plan-check verified whether a plan was CORRECT but never whether its declared task graph was HONEST -- and an agentic runner dispatches from those declarations literally, so an undeclared edge runs concurrently what must not be. Found in two plans plan-check had itself reviewed: a task declaring 'Consumes: nothing' whose own step 6 said 'run it after Task 1 has landed', and one function claimed by five of eight tasks with no task declaring the overlap. Guards the invariant that the declared graph is tested against the file-level truth the plan itself states -- NOT that the plan be parallel. Parallelism is an output of an honest graph; asking for it directly produces a plan claiming independence it does not have.",
+      "note": "Added 2026-08-03. plan-check verified whether a plan was CORRECT but never whether its declared task graph was HONEST -- and an agentic runner dispatches from those declarations literally, so an undeclared edge runs concurrently what must not be. Found in two plans plan-check had itself reviewed: a task declaring 'Consumes: nothing' whose own step 6 said 'run it after Task 1 has landed', and one function claimed by five of eight tasks with no task declaring the overlap. Guards the invariant that the declared graph is tested against the file-level truth the plan itself states -- NOT that the plan be parallel. Parallelism is an output of an honest graph; asking for it directly produces a plan claiming independence it does not have. 2026-10-26: the #taskgraph block and its task-graph check were removed -- nothing in the repo consumed it (the conductor that dispatched DAGs is gone). The collision and undeclared-edge findings remain as claim rows.",
       "mutations": [
         {
           "why": "removes the file -> tasks inversion from decomposition, so an undeclared collision is never derived",
@@ -206,7 +144,7 @@
           "why": "deletes the collision test from the blind-spot checklist while leaving the section heading intact -- a check anchored to the heading would not notice",
           "env": "PLAN_CHECK_BLIND_SPOT_MD",
           "file": "references/blind-spot.md",
-          "find": "- **A file claimed by more than one task** — a collision, but classify it before you serialize\n  anything. Where each task gets its own worktree (`lirbox:conductor` does), it is `contention`:\n  a merge cost at integration, not an ordering constraint — recording it as a dependency\n  serializes work that has none. Where the tasks share one working tree it *is* an order.\n  Report the table either way; an unclassified collision is the finding.",
+          "find": "- **A file claimed by more than one task** — a collision, but classify it before you serialize\n  anything. In one shared working tree it *is* an order. In separate worktrees it is a merge\n  cost at integration, not an ordering constraint — recording it as a dependency serializes\n  work that has none. Say which runner you assumed; an unclassified collision is the finding.",
           "replace": "- **Files** — check them."
         },
         {
@@ -215,6 +153,67 @@
           "file": "references/blind-spot.md",
           "find": "- **Undeclared dependency edges** — stated in step prose, absent from the task's own\n  dependency block. The block is what a runner reads. `UNSTATED-ASSUMPTION`.",
           "replace": "- **Edges** — look at them."
+        }
+      ]
+    },
+    "verdict-by-fix-class": {
+      "expect": "green",
+      "note": "Added 2026-10-26. SKILL.md said NO-GO on a REFUTED 'critical path' while validate.mjs forced NO-GO on ANY refutation, so a wrong Makefile target blocked a whole plan and autofix grew a re-verification ritual to walk the typo back. UNSTATED-ASSUMPTION was not open at all. Now: REFUTED + needs-decision is NO-GO; REFUTED + mechanical and UNSTATED-ASSUMPTION are conditions.",
+      "mutations": [
+        {
+          "why": "any refutation forces NO-GO again, whatever its class",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "  if (s === 'REFUTED' && fix.toLowerCase() === 'needs-decision') blocking++;",
+          "replace": "  if (s === 'REFUTED') blocking++;"
+        },
+        {
+          "why": "mechanical refutations stop counting as conditions, so they pass silently",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "  if (!fix) { untagged.push(i + 1); continue; }",
+          "replace": "  if (!fix) { untagged.push(i + 1); continue; }\n  if (s === 'REFUTED' && fix.toLowerCase() === 'mechanical') continue;"
+        },
+        {
+          "why": "UNSTATED-ASSUMPTION stops being open -- an unchecked assumption never blocks GO",
+          "env": "PLAN_CHECK_VALIDATE",
+          "file": "assets/validate.mjs",
+          "find": "  else open++;",
+          "replace": "  else if (s !== 'UNSTATED-ASSUMPTION') open++;"
+        },
+        {
+          "why": "reverts step 7 to the 'critical path' wording that disagreed with the validator",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "7. **Verdict** — `NO-GO` if any `REFUTED` row needs a decision;",
+          "replace": "7. **Verdict** — `NO-GO` if any `REFUTED` on a critical path;"
+        }
+      ]
+    },
+    "go-reachable": {
+      "expect": "green",
+      "note": "Added 2026-10-26. A mandatory blind-spot pass + every BLIND-SPOT-RISK open made GO unreachable once generic risks were listed; the interview gate demanded every askable open row be asked while interrogation.md said to drop non-verdict-changing questions. Now blind spots are plan-specific and the gate blocks only on verdict-changing questions.",
+      "mutations": [
+        {
+          "why": "lets generic, every-plan risks count as blind spots",
+          "env": "PLAN_CHECK_BLIND_SPOT_MD",
+          "file": "references/blind-spot.md",
+          "find": "`BLIND-SPOT-RISK` row — specific to this plan, with the reason it applies. A risk that would\napply to every plan (\"what if the network fails?\") is not a finding; it is noise that buries one.",
+          "replace": "`BLIND-SPOT-RISK` row."
+        },
+        {
+          "why": "restores ask-every-askable-row before any verdict",
+          "env": "PLAN_CHECK_SKILL_MD",
+          "file": "SKILL.md",
+          "find": "(step 7) or the report (step 8) while an open row whose answer could change the verdict\nis still **askable of the human**.",
+          "replace": "(step 7) or the report (step 8) while any UNVERIFIED proposition is still **askable of the human**."
+        },
+        {
+          "why": "restores 'defer or drop it', contradicting the gate",
+          "env": "PLAN_CHECK_INTERROGATION_MD",
+          "file": "references/interrogation.md",
+          "find": "A question that can't change it is not asked — its\n   row stays open as a condition-to-clear.",
+          "replace": "A question that can't change the verdict is low value —\n   defer or drop it."
         }
       ]
     }
