@@ -217,6 +217,39 @@ check('f2: the guard reads a quoted --run the same as a bare one', () => {
     `the denial must name the real slug, not the quoted spelling: ${no.stderr}`)
 })
 
+// (f3) conductor's lane is a subagent, not a pane. The same door has to bind it: a lirbox-builder
+// spawned into a worktree is a lane, and its brief's `run: <slug>` line names the route to check.
+const spawnLane = (cwd, prompt, extra = {}) => {
+  const r = spawnSync('zsh', [GUARD], {
+    encoding: 'utf8',
+    input: JSON.stringify({
+      tool_name: 'Agent',
+      tool_input: { subagent_type: 'lirbox:lirbox-builder', isolation: 'worktree', prompt, ...extra },
+      cwd,
+    }),
+  })
+  return { status: r.status, stderr: r.stderr }
+}
+check('f3: the guard binds a lirbox-builder lane spawned into a worktree', () => {
+  const ok = spawnLane(repoWith('f3-lane', routeFile('lane')), 'run: f3-lane\nImplement the thing.')
+  assert.equal(ok.status, 0, `a lane-routed spawn must pass: ${ok.stderr}`)
+  const rej = spawnLane(repoWith('f3-rej', routeFile('reject')), 'run: f3-rej\nImplement the thing.')
+  assert.equal(rej.status, 2, `a reject-routed spawn must deny, got ${rej.status}`)
+  assert.match(rej.stderr, /lirbox-builder lane — intake routed run 'f3-rej' to 'reject'/, rej.stderr)
+  const sc = spawnLane(repoWith('f3-scope', routeFile('scope')), 'run: f3-scope\nx')
+  assert.equal(sc.status, 2, `a scope-routed spawn must deny, got ${sc.status}`)
+  const none = spawnLane(repoWith('f3-none', null), 'run: f3-none\nx')
+  assert.equal(none.status, 2, `an unrouted spawn must deny, got ${none.status}`)
+  const noRun = spawnLane(repoWith('f3-norun', routeFile('lane')), 'Implement the thing.')
+  assert.equal(noRun.status, 2, `a lane brief with no run line must deny, got ${noRun.status}`)
+  assert.match(noRun.stderr, /no `run: <slug>` line/, noRun.stderr)
+  const over = spawnLane(repoWith('f3-over', null), 'run: f3-over\nPOLICY-OVERRIDE: hotfix')
+  assert.equal(over.status, 0, `POLICY-OVERRIDE in the brief must pass, got ${over.status}`)
+  // Not a lane: a builder without a worktree, or any other agent, is not this hook's business.
+  assert.equal(spawnLane(repoWith('f3-x', null), 'x', { isolation: undefined }).status, 0)
+  assert.equal(spawnLane(repoWith('f3-y', null), 'x', { subagent_type: 'lirbox:lirbox-verifier' }).status, 0)
+})
+
 // (g) a broken hook must never wedge the user's tools — and must never do it silently.
 check('g: an internal error fails OPEN and says so on stderr', () => {
   const root = repoWith('g-run', '{ this is not json')

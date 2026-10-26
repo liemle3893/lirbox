@@ -5,12 +5,14 @@
  *
  *   node dod-gate.mjs freeze  --run <slug> --dod <file|-> --by WHO
  *   node dod-gate.mjs verdict --run <slug> --id <criterion> --met yes|no --evidence TEXT --by WHO
- *   node dod-gate.mjs gate    --run <slug>
+ *   node dod-gate.mjs gate    --run <slug> [--in <worktree>]
  *   node dod-gate.mjs status  --run <slug>
  *
  * Store: .orchestration/<slug>/{dod.json, verdicts.json, gate.json}, at the caller's repo root.
  * Docs the gate demands: docs/changes/<slug>/{summary.md, implementation-notes.md}. On a pass it
  * writes docs/changes/<slug>/dod.json — the frozen criteria with each one's verdict and evidence.
+ * `--in <worktree>`: a lane's work lives in its own worktree, so checks run there and docs are read
+ * and written there — while the store stays here, out of the implementor's checkout.
  *
  * Exit: 0 passed · 1 unmet, rounds left · 3 escalated, the budget is spent · 2 usage or refused.
  *
@@ -21,8 +23,8 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 // Three rounds, then stop and hand it to a human. A fourth round of the same loop against the same
 // criteria is the run that burns a day — the old conductor's fix-loop cap, kept.
@@ -52,13 +54,13 @@ const ROOT = (() => {
 })();
 
 const runDir = (slug) => join(ROOT, '.orchestration', slug);
-const docsDir = (slug) => join(ROOT, 'docs', 'changes', slug);
+const docsDir = (slug, base = ROOT) => join(base, 'docs', 'changes', slug);
 const readJson = (f, dflt) => (existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : dflt);
 const writeJson = (f, v) => writeFileSync(f, JSON.stringify(v, null, 2) + '\n');
 const hash = (criteria) => createHash('sha256').update(JSON.stringify(criteria)).digest('hex');
 
-function runCheck(check) {
-  const r = spawnSync('sh', ['-c', check], { cwd: ROOT, encoding: 'utf8' });
+function runCheck(check, cwd = ROOT) {
+  const r = spawnSync('sh', ['-c', check], { cwd, encoding: 'utf8' });
   const out = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').slice(-20).join('\n');
   return { met: r.status === 0, evidence: `exit ${r.status ?? 'signal ' + r.signal}${out ? '\n' + out : ''}` };
 }
@@ -134,10 +136,10 @@ function verdict(slug, args) {
   console.log(`recorded ${c.id}: ${args.met} (by ${args.by})`);
 }
 
-function docsProblems(slug) {
+function docsProblems(slug, base) {
   const problems = [];
-  const summary = join(docsDir(slug), 'summary.md');
-  const notes = join(docsDir(slug), 'implementation-notes.md');
+  const summary = join(docsDir(slug, base), 'summary.md');
+  const notes = join(docsDir(slug, base), 'implementation-notes.md');
   if (!existsSync(summary)) problems.push(`missing ${summary}`);
   else {
     const m = readFileSync(summary, 'utf8').match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
@@ -150,8 +152,10 @@ function docsProblems(slug) {
   return problems;
 }
 
-function gate(slug) {
+function gate(slug, args) {
   const dod = loadDod(slug);
+  const work = args.in ? resolve(args.in) : ROOT;
+  if (!existsSync(work) || !statSync(work).isDirectory()) die(`--in ${args.in} is not a directory`);
   const gf = join(runDir(slug), 'gate.json');
   const state = readJson(gf, { status: 'open', rounds: [] });
   if (state.status === 'passed') { report(slug, state); process.exit(0); }
@@ -164,7 +168,7 @@ function gate(slug) {
   const vf = join(runDir(slug), 'verdicts.json');
   const verdicts = readJson(vf, {});
   const results = dod.criteria.map((c) => {
-    if (c.tier === 'checkable') return { id: c.id, tier: c.tier, ...runCheck(c.check) };
+    if (c.tier === 'checkable') return { id: c.id, tier: c.tier, ...runCheck(c.check, work) };
     const v = verdicts[c.id];
     if (!v) return { id: c.id, tier: c.tier, met: false, evidence: 'no verdict from an independent verifier this round' };
     return { id: c.id, tier: c.tier, met: v.met, evidence: v.evidence, by: v.by };
@@ -173,14 +177,14 @@ function gate(slug) {
   // before the fix is a verdict on something that no longer exists.
   rmSync(vf, { force: true });
 
-  const docs = docsProblems(slug);
+  const docs = docsProblems(slug, work);
   const passed = results.every((r) => r.met) && docs.length === 0;
   state.rounds.push({ n: state.rounds.length + 1, passed, results, docs });
 
   if (passed) {
     state.status = 'passed';
-    mkdirSync(docsDir(slug), { recursive: true });
-    writeJson(join(docsDir(slug), 'dod.json'), {
+    mkdirSync(docsDir(slug, work), { recursive: true });
+    writeJson(join(docsDir(slug, work), 'dod.json'), {
       run: slug,
       rounds: state.rounds.length,
       criteria: dod.criteria.map((c) => {
@@ -227,6 +231,6 @@ if (!args.run) die('--run <slug> is required');
 if (!ID.test(args.run) || /^\.+$/.test(args.run)) die(`--run slug must match ${ID} and not be all dots`);
 if (args.cmd === 'freeze') freeze(args.run, args);
 else if (args.cmd === 'verdict') verdict(args.run, args);
-else if (args.cmd === 'gate') gate(args.run);
+else if (args.cmd === 'gate') gate(args.run, args);
 else if (args.cmd === 'status') status(args.run);
 else die('usage: dod-gate.mjs freeze|verdict|gate|status --run <slug> ...');

@@ -69,15 +69,15 @@
           "why": "the routes-table row is the first thing a reader checks per route; losing 'ask before running it' there means lane reads as fire-and-forget",
           "env": "CONDUCTOR_SKILL_OVERRIDE",
           "file": "SKILL.md",
-          "find": "Print the exact `orch-lane.sh start` command and **ask before running it.**",
-          "replace": "Print the exact `orch-lane.sh start` command and run it."
+          "find": "Freeze the DoD, print the `lirbox-builder` spawn and **ask before running it.**",
+          "replace": "Freeze the DoD and spawn `lirbox-builder`."
         },
         {
           "why": "losing the hard-rules restatement means only the table carries the rule, and printing the command could be read as already having acted",
           "env": "CONDUCTOR_SKILL_OVERRIDE",
           "file": "SKILL.md",
-          "find": "**`lane` always asks**, even though the command was already printed",
-          "replace": "**`lane` prints the command**, ready to run"
+          "find": "**`lane` always asks**, even though the spawn was already printed",
+          "replace": "**`lane` prints the spawn**, ready to run"
         },
         {
           "why": "the `### lane` prose is where the actual instruction lives; without 'then ask' the printed command has no next step attached to it at all",
@@ -275,7 +275,7 @@
           "why": "a pass no longer writes the scorecard, so the frozen DoD and its verdicts never reach docs/changes",
           "env": "DOD_GATE_OVERRIDE",
           "file": "scripts/dod-gate.mjs",
-          "find": "writeJson(join(docsDir(slug), 'dod.json'), {",
+          "find": "writeJson(join(docsDir(slug, work), 'dod.json'), {",
           "replace": "({"
         }
       ]
@@ -376,6 +376,32 @@
           "file": "SKILL.md",
           "find": "**You never write a verdict.**",
           "replace": "**Record verdicts promptly.**"
+        }
+      ]
+    },
+    "gate-runs-in-lane-worktree": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "checks run in the main checkout instead of the lane's worktree",
+          "env": "DOD_GATE_OVERRIDE",
+          "file": "scripts/dod-gate.mjs",
+          "find": "...runCheck(c.check, work) }",
+          "replace": "...runCheck(c.check) }"
+        },
+        {
+          "why": "docs are read from the main checkout, so a lane passes on docs it never wrote",
+          "env": "DOD_GATE_OVERRIDE",
+          "file": "scripts/dod-gate.mjs",
+          "find": "const docs = docsProblems(slug, work);",
+          "replace": "const docs = docsProblems(slug);"
+        },
+        {
+          "why": "--in is ignored entirely",
+          "env": "DOD_GATE_OVERRIDE",
+          "file": "scripts/dod-gate.mjs",
+          "find": "const work = args.in ? resolve(args.in) : ROOT;",
+          "replace": "const work = ROOT;"
         }
       ]
     }

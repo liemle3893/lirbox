@@ -1,5 +1,5 @@
 #!/bin/zsh
-# PreToolUse(Bash) — a lane does not start unrouted.
+# PreToolUse(Bash, Agent) — a lane does not start unrouted.
 #
 # Advisory guidance in this repo does not bind. Prose telling an orchestrator how to size work has
 # been walked past repeatedly, which is why intake.mjs on its own would change nothing: the hook is
@@ -7,9 +7,13 @@
 # OUTWARD door (nothing leaves ungated) was gate-guard.sh, retired with the orchestrator agent it
 # keyed on — it could never fire from an ordinary session. Nothing replaced it yet.
 #
-# What it refuses: `orch-lane.sh start` when .orchestration/<slug>/route.json is absent, or says
-# `reject`, or says `scope`. Nothing else. `restart`, `gate`, `brief` and `close` all
-# act on a lane that already exists — the decision they would be gating was made at `start`.
+# What it refuses, when .orchestration/<slug>/route.json is absent, or says `reject`, or `scope`:
+#   - a lane subagent: Agent with subagent_type lirbox-builder and isolation "worktree" — the lane
+#     conductor spawns. The run is the brief's `run: <slug>` line; a lane brief without one is
+#     refused, because there is no downstream step that would refuse it instead.
+#   - `orch-lane.sh start` (Bash), the herdr-pane lane. `restart`, `gate`, `brief` and `close` act
+#     on a lane that already exists — the decision they would be gating was made at `start`.
+# Nothing else.
 #
 # Parsing is pure zsh for one reason worth restating: `grep` is a shell function in
 # some contexts and ugrep in others, and an interpolated ERE through a pipeline returns EMPTY
@@ -20,7 +24,7 @@
 # silently passes is a known failure mode in this repo, so the reason is always printed.
 
 emulate -L zsh
-setopt no_nomatch
+setopt no_nomatch extended_glob
 
 pass_on_error() {
   print -u2 -r -- "route-guard: PASSING (fail-open) — $1"
@@ -30,15 +34,44 @@ pass_on_error() {
 IN=$(cat) || pass_on_error "could not read the hook payload from stdin"
 [[ -n "$IN" ]] || pass_on_error "empty hook payload on stdin"
 
-CMD=$(print -r -- "$IN" | jq -r '.tool_input.command // ""')
+TOOL=$(print -r -- "$IN" | jq -r '.tool_name // ""')
 (( $? == 0 )) || pass_on_error "jq could not parse the hook payload"
 
-# Deny is a demand to say it out loud, not a veto on judgement.
-[[ "$CMD" == *POLICY-OVERRIDE* ]] && exit 0
+local SLUG="" WHAT=""
 
-typeset -a TOK
-TOK=(${(z)CMD})
-(( $#TOK )) || exit 0
+if [[ "$TOOL" == (Agent|Task) ]]; then
+  # ---------------------------------------------------------------------------
+  # Is this a lane subagent, and for which run?
+  # ---------------------------------------------------------------------------
+  local ATYPE ISO PROMPT LINE
+  ATYPE=$(print -r -- "$IN" | jq -r '.tool_input.subagent_type // ""')
+  ISO=$(print -r -- "$IN" | jq -r '.tool_input.isolation // ""')
+  [[ "$ATYPE" == (lirbox-builder|*:lirbox-builder) && "$ISO" == worktree ]] || exit 0
+  PROMPT=$(print -r -- "$IN" | jq -r '.tool_input.prompt // ""')
+  [[ "$PROMPT" == *POLICY-OVERRIDE* ]] && exit 0
+  WHAT="a lirbox-builder lane"
+  for LINE in "${(@f)PROMPT}"; do
+    if [[ "$LINE" == [[:space:]]#run:* ]]; then
+      SLUG="${${LINE#*run:}//[[:space:]]/}"
+      break
+    fi
+  done
+  if [[ -z "$SLUG" ]]; then
+    print -u2 -r -- "DENIED: $WHAT — the brief carries no \`run: <slug>\` line, so no intake route can
+be checked. Put \`run: <slug>\` on its own line in the brief, the slug intake routed to \`lane\`.
+If this genuinely has to start unrouted, add POLICY-OVERRIDE and the reason to the brief."
+    exit 2
+  fi
+else
+  CMD=$(print -r -- "$IN" | jq -r '.tool_input.command // ""')
+  (( $? == 0 )) || pass_on_error "jq could not parse the hook payload"
+
+  # Deny is a demand to say it out loud, not a veto on judgement.
+  [[ "$CMD" == *POLICY-OVERRIDE* ]] && exit 0
+
+  typeset -a TOK
+  TOK=(${(z)CMD})
+  (( $#TOK )) || exit 0
 
 # ---------------------------------------------------------------------------
 # Is this `orch-lane.sh start`, and for which run?
@@ -47,7 +80,7 @@ TOK=(${(z)CMD})
 # `${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh start ...` and the hook sees that string
 # UNEXPANDED, so anchoring on an absolute path would match nothing.
 # ---------------------------------------------------------------------------
-local SLUG="" FOUND=0
+local FOUND=0
 integer i j
 for (( i = 1; i <= $#TOK; i++ )); do
   [[ "${TOK[i]}" == (orch-lane.sh|*/orch-lane.sh) ]] || continue
@@ -75,6 +108,8 @@ done
 # No --run at all: orch-lane.sh itself dies with "start needs --run <slug>", and duplicating that
 # refusal here would just be a second voice saying the same thing less well.
 [[ -n "$SLUG" ]] || exit 0
+WHAT="\`orch-lane.sh start\`"
+fi
 
 CWD=$(print -r -- "$IN" | jq -r '.cwd // ""')
 [[ -n "$CWD" ]] || pass_on_error "the hook payload carries no cwd, so no repo can be resolved"
@@ -85,7 +120,7 @@ local RF="$ROOT/.orchestration/$SLUG/route.json"
 local INTAKE='node ${CLAUDE_PLUGIN_ROOT}/scripts/intake.mjs --task <file> --run '"$SLUG"
 
 if [[ ! -f "$RF" ]]; then
-  print -u2 -r -- "DENIED: \`orch-lane.sh start\` — run '$SLUG' has no intake route.
+  print -u2 -r -- "DENIED: $WHAT — run '$SLUG' has no intake route.
 
   expected  $RF
 
@@ -96,7 +131,7 @@ started without it has already assumed the work should happen. Route it first:
 
 That call costs a fraction of a cent, always exits 0, and writes the route file
 even when it cannot reach the model. If this genuinely has to start unrouted,
-add POLICY-OVERRIDE and the reason to the command."
+add POLICY-OVERRIDE and the reason to the command or brief."
   exit 2
 fi
 
@@ -109,7 +144,7 @@ DECIDED_BY=$(jq -r '.decided_by // "?"' "$RF" 2>/dev/null)
 
 [[ "$ROUTE" == (reject|scope) ]] || exit 0
 
-print -u2 -r -- "DENIED: \`orch-lane.sh start\` — intake routed run '$SLUG' to '$ROUTE'.
+print -u2 -r -- "DENIED: $WHAT — intake routed run '$SLUG' to '$ROUTE'.
 
   route       $ROUTE
   decided_by  $DECIDED_BY
@@ -129,5 +164,5 @@ print -r -- "  Intake could not route this yet: 'done' has no command-plus-expec
 fi)
 
 Nothing here is a veto on your judgement. If this genuinely has to start, add
-POLICY-OVERRIDE and the reason to the command, and it passes."
+POLICY-OVERRIDE and the reason to the command or brief, and it passes."
 exit 2
