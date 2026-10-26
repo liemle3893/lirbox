@@ -16,8 +16,8 @@ COPY skill /root/.claude/skills/plan-check
 # the package reads that path) and the build context is this directory, so both come in here.
 #
 # ONE tracked source, TWO destinations for the plan: /app/plan.md is the agent's input,
-# /opt/fixture/plan.md is the pristine copy the verifier diffs against to prove autofix wrote a
-# sibling instead of mutating what it audited.
+# /opt/fixture/plan.md is the pristine copy the verifier diffs against to prove autofix edited the
+# plan in place.
 COPY plan.md /app/plan.md
 COPY plan.md /opt/fixture/plan.md
 COPY repo /app/repo

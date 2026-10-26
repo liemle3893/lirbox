@@ -39,10 +39,6 @@ th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vert
 th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
 tr:last-child td{border-bottom:none;}
 .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;padding:2px 8px;border-radius:999px;white-space:nowrap;}
-.q-known-known{background:#e6f0e6;color:var(--kk);}
-.q-known-unknown{background:#f6ecd4;color:var(--ku);}
-.q-unknown-known{background:#efe6d2;color:var(--uk);}
-.q-unknown-unknown{background:#f4dedb;color:var(--uu);}
 .s-VERIFIED{color:var(--go);font-weight:700;}
 .s-REFUTED{color:var(--nogo);font-weight:700;}
 .s-UNVERIFIED{color:var(--cond);font-weight:700;}
@@ -76,7 +72,8 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
   </div>
 
   <!-- LEAD WITH THE RISKS. Conditions-to-clear: one <li class="condition"> per
-       open item (UNVERIFIED or BLIND-SPOT-RISK). Count MUST equal open rows.
+       open row (UNVERIFIED, UNSTATED-ASSUMPTION, BLIND-SPOT-RISK, or REFUTED tagged
+       fix: mechanical). Count MUST equal open rows.
        The li is display:flex, so its body MUST be a single .cbody wrapper —
        putting bare text/inline <code> straight in the li fragments per word. -->
   <h2>Conditions to clear before GO</h2>
@@ -87,45 +84,32 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
   </ul>
 
   <h2>Blind spots &amp; unstated assumptions</h2>
-  <p class="lead">Unknown-unknowns found beyond the plan's own claims, and tacit assumptions surfaced by interrogation.</p>
+  <p class="lead">Risks found beyond the plan's own claims, and tacit assumptions surfaced by interrogation.</p>
   <ul class="risks">
-    <li><span class="q">unknown-unknown</span><br>{{BLIND_SPOT_1}}</li>
+    <li><span class="q">{{RISK_KIND}}</span><br>{{BLIND_SPOT_1}}</li>
     <!-- repeat per blind-spot / unstated assumption -->
   </ul>
 
   <h2>Definition of done</h2>
-  <p class="lead">The plan's success criteria, refined to checkable form — extracted from the plan's own ACs, or derived (and flagged) when the plan never stated any. Machine-readable copy in the <code>#dod</code> block for lirbox:conductor.</p>
+  <p class="lead">The plan's success criteria, refined to checkable form — extracted from the plan's own ACs, or derived (and flagged) when the plan never stated any. Machine-readable copy in the <code>#dod</code> block.</p>
   <ul class="risks">
     <li><span class="q">{{DOD_TIER}}</span><br>{{DOD_ID}} — {{DOD_TEXT}}{{DOD_CHECK_NOTE}}</li>
     <!-- repeat per criterion; for checkable add e.g. <code>the check command</code> in DOD_CHECK_NOTE -->
   </ul>
 
-  <!-- What may run CONCURRENTLY and what may not. Delete this section only when the plan declares
-       no task graph at all (then the #taskgraph block below is {"nodes":[],"edges":[],"levels":[]}). -->
-  <h2>Execution shape</h2>
-  <p class="lead">Levels derived from the plan's own dependency declarations — everything inside one level may run at the same time. A <em>needs</em> edge is a real ordering constraint; a <em>contention</em> edge is two tasks writing one file, which costs a merge, not an order, when each task gets its own worktree. Machine-readable copy in the <code>#taskgraph</code> block.</p>
-  <ul class="risks">
-    <li><span class="q">level {{LEVEL_N}}</span><br>{{LEVEL_TASKS}}{{LEVEL_NOTE}}</li>
-    <!-- repeat per level, in order; LEVEL_NOTE names the edge that holds this level back -->
-  </ul>
-
   <h2>Claim ledger</h2>
-  <p class="lead">Every proposition, tagged to its quadrant and adjudicated. Verified/mechanical rows last.</p>
+  <p class="lead">Every proposition, adjudicated. Verified rows last.</p>
   <table>
-    <thead><tr><th>Proposition</th><th>Quadrant</th><th>Status</th><th>Evidence</th><th>Conf.</th></tr></thead>
+    <thead><tr><th>Proposition</th><th>Status</th><th>Evidence</th><th>Conf.</th></tr></thead>
     <tbody>
-      <!-- One <tr class="claim"> per proposition. data-quadrant and data-status are REQUIRED
-           and machine-checked. Put "(needs: …)" detail in the Status cell text, not the attribute.
-           Every REFUTED / UNVERIFIED / BLIND-SPOT-RISK row MUST also carry a fix disposition —
-           <span class="fix">fix: mechanical</span> when the repair is fully determined by the
-           finding, <span class="fix">fix: needs-decision</span> when it is not. REFUTED is
-           included on purpose: it is the fix CLASS, not the status, that decides whether autofix
-           may act, and a REFUTED row can be either (a renamed symbol is transcription; a wrong
-           approach is authorship). Machine-checked; drop the span on VERIFIED /
-           UNSTATED-ASSUMPTION rows. -->
-      <tr class="claim" data-quadrant="{{QUADRANT}}" data-status="{{STATUS}}">
+      <!-- One <tr class="claim"> per proposition. data-status is REQUIRED and machine-checked.
+           Put "(needs: …)" detail in the Status cell text, not the attribute. Every row that is
+           not VERIFIED MUST carry a fix disposition — <span class="fix">fix: mechanical</span>
+           when the repair is fully determined by the finding, <span class="fix">fix:
+           needs-decision</span> when it is not. On a REFUTED row the class decides the verdict:
+           needs-decision is NO-GO, mechanical is a condition. Drop the span on VERIFIED rows. -->
+      <tr class="claim" data-status="{{STATUS}}">
         <td>{{PROPOSITION}}</td>
-        <td><span class="tag q-{{QUADRANT}}">{{QUADRANT}}</span></td>
         <td><span class="s-{{STATUS}}">{{STATUS}}</span>{{STATUS_DETAIL}} <span class="fix">fix: {{FIX_DISPOSITION}}</span></td>
         <td>{{EVIDENCE}}</td>
         <td>{{CONFIDENCE}}</td>
@@ -167,21 +151,9 @@ footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:v
   }
 })();
 </script>
-<!-- Machine-readable DoD consumed by lirbox:conductor (--dod-file seed). REQUIRED, exactly one.
+<!-- Machine-readable DoD. REQUIRED, exactly one.
      Shape: {"criteria":[{"id","text","tier":"checkable"|"judged","check"?}]} — check required
      for checkable. Must mirror the visible Definition-of-done section above. -->
 <script type="application/json" id="dod">{"criteria":[{"id":"{{DOD_ID}}","text":"{{DOD_TEXT}}","tier":"{{DOD_TIER}}","check":"{{DOD_CHECK}}"}]}</script>
-<!-- Machine-readable TASK GRAPH — the plan's declared execution shape. REQUIRED, exactly one.
-     Shape: {"nodes":[{"id","title"?,"files"?}],"edges":[{"from","to","kind","why"}],"levels":[[id]]}
-       kind "needs"      = this task needs the other's OUTPUT (decision, API, schema, code). Orders them.
-       kind "contention" = both write the same file. A merge cost at integration, NOT an order, when
-                           each task runs in its own worktree (lirbox:conductor does). A runner sharing
-                           one working tree must promote it to "needs".
-     `why` is required on every edge — an edge with no stated reason is an invented one.
-     `levels` is DERIVED, not chosen: validate.mjs recomputes it from the "needs" edges and rejects
-     a mismatch, so the report can neither invent serialization nor claim parallelism the edges forbid.
-     Every file claimed by two tasks needs an edge between them; an unclassified collision is rejected.
-     A plan that declares no task graph: {"nodes":[],"edges":[],"levels":[]}. -->
-<script type="application/json" id="taskgraph">{"nodes":[{"id":"{{TASK_ID}}","title":"{{TASK_TITLE}}","files":["{{TASK_FILES}}"]}],"edges":[],"levels":[["{{TASK_ID}}"]]}</script>
 </body>
 </html>

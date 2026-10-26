@@ -3,7 +3,8 @@
 The plan tells you what its author thought about. This pass finds what they
 didn't. Go beyond the plan's claims; use web + repo + domain knowledge to ask:
 **what could this road have that the plan never names?** Anything found here is a
-`BLIND-SPOT-RISK` row (unknown-unknown quadrant).
+`BLIND-SPOT-RISK` row — specific to this plan, with the reason it applies. A risk that would
+apply to every plan ("what if the network fails?") is not a finding; it is noise that buries one.
 
 Run the checklist for the plan's class. These are prompts to reason from, not a
 form to rubber-stamp — the goal is to generate risks the plan is silent on.
@@ -59,10 +60,9 @@ plan's own `Files:` lists into a file → tasks table; that table is the evidenc
 - **Undeclared dependency edges** — stated in step prose, absent from the task's own
   dependency block. The block is what a runner reads. `UNSTATED-ASSUMPTION`.
 - **A file claimed by more than one task** — a collision, but classify it before you serialize
-  anything. Where each task gets its own worktree (`lirbox:conductor` does), it is `contention`:
-  a merge cost at integration, not an ordering constraint — recording it as a dependency
-  serializes work that has none. Where the tasks share one working tree it *is* an order.
-  Report the table either way; an unclassified collision is the finding.
+  anything. In one shared working tree it *is* an order. In separate worktrees it is a merge
+  cost at integration, not an ordering constraint — recording it as a dependency serializes
+  work that has none. Say which runner you assumed; an unclassified collision is the finding.
 - **Ordering prose that hides a graph** — an "implementation order" section flattens a DAG
   into a line. Ask which edges are real.
 - **Repo rules that force collisions** — a convention obliging one change to touch N files

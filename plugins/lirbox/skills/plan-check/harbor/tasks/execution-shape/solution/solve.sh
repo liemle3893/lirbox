@@ -24,21 +24,18 @@ const fs = require('node:fs');
 const [tpl, out] = process.argv.slice(2);
 let html = fs.readFileSync(tpl, 'utf8');
 
-const row = (quadrant, status, proposition, evidence, detail, confidence) =>
-  `      <tr class="claim" data-quadrant="${quadrant}" data-status="${status}">
+const row = (status, proposition, evidence, detail, confidence) =>
+  `      <tr class="claim" data-status="${status}">
         <td>${proposition}</td>
-        <td><span class="tag q-${quadrant}">${quadrant}</span></td>
         <td><span class="s-${status}">${status}</span>${detail}</td>
         <td>${evidence}</td>
         <td>${confidence}</td>
       </tr>`;
 
-// Rows 1, 2 and 4 are UNSTATED-ASSUMPTION: none is "open" per the validator's OPEN set, so none
-// becomes a condition. Row 3 is the BLIND-SPOT-RISK that does. refuted=0, open=1
-// => derived verdict GO-WITH-CONDITIONS, and exactly one <li class="condition">.
+// All four rows are open (UNSTATED-ASSUMPTION and BLIND-SPOT-RISK both are), none is a REFUTED
+// needing a decision => derived verdict GO-WITH-CONDITIONS, and four <li class="condition">.
 const rows = [
   row(
-    'unknown-known',
     'UNSTATED-ASSUMPTION',
     'Task 2 and Task 3 both declare <code>server/internal/schedules/worker.go</code> under Files:, ' +
       'and neither states the overlap. It is <strong>contention, not an ordering constraint</strong>: ' +
@@ -50,7 +47,6 @@ const rows = [
     'high'
   ),
   row(
-    'unknown-known',
     'UNSTATED-ASSUMPTION',
     'Task 4 declares "Consumes: nothing" while its own Step 3 says to run it after Task 2 has landed. ' +
       'The dependency block is what a runner dispatches from; the step prose is invisible to it, so ' +
@@ -60,7 +56,6 @@ const rows = [
     'high'
   ),
   row(
-    'unknown-unknown',
     'BLIND-SPOT-RISK',
     'The "Implementation order" section flattens the task graph into a line (1 &rarr; 2 &rarr; 3 &rarr; 4), ' +
       'so a real edge is indistinguishable from an incidental one — and it hides that Task 2 and Task 3 ' +
@@ -70,7 +65,6 @@ const rows = [
     'medium'
   ),
   row(
-    'unknown-known',
     'UNSTATED-ASSUMPTION',
     'Task 3 declares "Consumes: nothing", but its Step 2 writes into <code>schedule_runs.error</code> — ' +
       'the column Task 1 creates. The edge Task 1 &rarr; Task 3 is real and undeclared.',
@@ -78,6 +72,13 @@ const rows = [
     ' <span class="fix">fix: mechanical</span>',
     'high'
   ),
+  // MANDATORY row (validate.mjs): does meeting every DoD criterion actually achieve the goal?
+  `      <tr class="claim" data-status="VERIFIED" data-goal-coverage="yes">
+        <td>Does meeting every DoD criterion achieve the goal? The goal is about runs stranded in <code>running</code>; the DoD here covers only the plan&rsquo;s own graph honesty, which is what this check adjudicates. No goal-level gap is found in the plan&rsquo;s stated ACs.</td>
+        <td><span class="s-VERIFIED">VERIFIED</span></td>
+        <td>plan.md Definition of done vs the stated goal</td>
+        <td>high</td>
+      </tr>`,
 ].join('\n');
 
 // Swap the template's single specimen claim row for the real ledger.
@@ -102,25 +103,6 @@ const dod = {
   ],
 };
 
-// The honest graph. Task 2 and Task 3 share worker.go with NO data dependency between them, so
-// they sit in ONE level joined by a contention edge; the plan's own "Implementation order" denies
-// that parallelism. Task 1 -> Task 3 and Task 2 -> Task 4 are real edges the plan never declares.
-const taskgraph = {
-  nodes: [
-    { id: 't1', title: 'Migration — add the run-error column', files: ['server/migrations/0018_run_error.sql'] },
-    { id: 't2', title: 'Bookkeeping survives cancellation', files: ['server/internal/schedules/worker.go', 'server/internal/schedules/worker_test.go'] },
-    { id: 't3', title: 'The run records its own failure reason', files: ['server/internal/schedules/worker.go', 'server/internal/schedules/worker_test.go'] },
-    { id: 't4', title: 'Expose the run error on the API', files: ['server/internal/api/runs.go', 'server/internal/api/runs_api_test.go'] },
-  ],
-  edges: [
-    { from: 't1', to: 't2', kind: 'needs', why: 'Task 2 Interfaces declares it: "Consumes: Task 1\'s column"' },
-    { from: 't1', to: 't3', kind: 'needs', why: 'UNDECLARED — Task 3 Step 2 writes into schedule_runs.error, the column Task 1 creates' },
-    { from: 't2', to: 't4', kind: 'needs', why: 'UNDECLARED in the Interfaces block — stated only in Task 4 Step 3, "run this after Task 2 has landed"' },
-    { from: 't2', to: 't3', kind: 'contention', why: 'both write worker.go and worker_test.go; no data dependency, so with per-task worktrees this is a merge at integration, not an order' },
-  ],
-  levels: [['t1'], ['t2', 't3'], ['t4']],
-};
-
 const fill = {
   PLAN_TITLE: 'Schedule Run Hang Fix — Implementation Plan',
   PLAN_CLASS: 'code',
@@ -133,32 +115,26 @@ const fill = {
     'The plan\'s account of the code is sound; its account of ITSELF is not. Three dependency ' +
     'declarations contradict the plan\'s own text, and the stated implementation order serializes ' +
     'two tasks that are independent.',
-  CONDITION_1:
-    'Declare the two missing edges (Task 1 &rarr; Task 3, Task 2 &rarr; Task 4) in the Interfaces ' +
-    'blocks, and record the Task 2 / Task 3 overlap on <code>worker.go</code> as contention — they ' +
-    'may still run concurrently in separate worktrees.',
 };
+
+// One condition per open row.
+const conditions = [
+  'Decide how Task 2 and Task 3 share <code>worker.go</code>: in separate worktrees they may run ' +
+    'concurrently and the overlap is a merge; in one working tree they must be serialized.',
+  'Declare Task 2 &rarr; Task 4 in Task 4\'s Interfaces block.',
+  'Replace the linear "Implementation order" with the declared edges, so Task 2 and Task 3 are ' +
+    'visibly independent.',
+  'Declare Task 1 &rarr; Task 3 in Task 3\'s Interfaces block.',
+];
+html = html.replace(
+  /<li class="condition"><div class="cbody">\{\{CONDITION_1\}\}<\/div><\/li>/,
+  conditions.map((c) => `<li class="condition"><div class="cbody">${c}</div></li>`).join('\n    ')
+);
 
 html = html.replace(
   /<script type="application\/json" id="dod">[\s\S]*?<\/script>/,
   `<script type="application/json" id="dod">${JSON.stringify(dod)}</script>`
 );
-html = html.replace(
-  /<script type="application\/json" id="taskgraph">[\s\S]*?<\/script>/,
-  `<script type="application/json" id="taskgraph">${JSON.stringify(taskgraph)}</script>`
-);
-
-// The visible Execution-shape list, mirroring the block above. Replaced wholesale because the
-// template ships one specimen <li> and this plan has three levels.
-html = html.replace(
-  /<li><span class="q">level \{\{LEVEL_N\}\}<\/span>[\s\S]*?<\/li>/,
-  [
-    '<li><span class="q">level 0</span><br><strong>t1</strong> — the migration. Nothing precedes it.</li>',
-    '    <li><span class="q">level 1</span><br><strong>t2</strong>, <strong>t3</strong> — both need t1\'s column, and they are independent of each other, so they run in parallel. They collide on <code>worker.go</code>: a merge at integration, not an ordering constraint.</li>',
-    '    <li><span class="q">level 2</span><br><strong>t4</strong> — needs t2, an edge the plan states only in step prose.</li>',
-  ].join('\n')
-);
-
 for (const [k, v] of Object.entries(fill)) {
   html = html.split(`{{${k}}}`).join(v);
 }

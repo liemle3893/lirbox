@@ -10,27 +10,29 @@
 #     transcription, not authorship.
 #
 # What is actually being graded is the BOUNDARY, not the repair:
-#   the input is never mutated · the mechanical row IS fixed · the REFUTED row is NOT
-#   (a laundered REFUTED makes the plan read as verified when its model of the code is wrong).
+#   the plan is edited IN PLACE (no sibling copy) · the mechanical row IS fixed · the REFUTED row
+#   is NOT (headless, nobody stated the decision it needs; choosing one for them makes the plan
+#   read as verified when its model of the code is wrong) · the verdict stays NO-GO.
 set -uo pipefail
 OUT=/logs/verifier; mkdir -p "$OUT"
 
 report_exists=0; validator_passes=0; verdict_no_go=0
-original_untouched=0; autofix_emitted=0; refuted_not_laundered=0; mechanical_fixed=0
+edited_in_place=0; no_sibling=0; refuted_not_laundered=0; mechanical_fixed=0
 
 F=$(ls /app/plan-check-*.html 2>/dev/null | head -1)
 [ -n "$F" ] && [ -f "$F" ] && report_exists=1
 
-# The input plan is evidence, not a workspace. Byte-compared against the pristine copy the
-# Dockerfile baked from the SAME tracked source, so there is no second copy to drift.
-if [ -f /opt/fixture/plan.md ] && cmp -s /opt/fixture/plan.md /app/plan.md; then
-  original_untouched=1
+# The repair lands in the plan itself. Compared against the pristine copy the Dockerfile baked
+# from the SAME tracked source; /app is also a git repo, so the original stays in its history.
+A=/app/plan.md
+if [ -f /opt/fixture/plan.md ] && [ -f "$A" ] && ! cmp -s /opt/fixture/plan.md "$A"; then
+  edited_in_place=1
 fi
 
-# The repair lands in a sibling. Any *.autofix.md counts — the skill names it
-# <plan>.autofix.md but the slug is not worth pinning.
-A=$(ls /app/*.autofix.md 2>/dev/null | head -1)
-[ -n "$A" ] && [ -f "$A" ] && autofix_emitted=1
+# No second copy of the plan: the old sibling convention, or any other *.md beside it.
+if [ -z "$(ls /app/*.autofix.md 2>/dev/null)" ] && [ "$(ls /app/*.md 2>/dev/null | wc -l)" -le 1 ]; then
+  no_sibling=1
+fi
 
 if [ "$report_exists" = 1 ]; then
   node /tests/skill-assets/validate.mjs "$F" >"$OUT/validate.log" 2>&1 && validator_passes=1
@@ -43,8 +45,8 @@ if [ "$report_exists" = 1 ]; then
   ' "$F" >>"$OUT/validate.log" 2>&1 && verdict_no_go=1
 fi
 
-if [ "$autofix_emitted" = 1 ]; then
-  # THE anti-laundering assertion. The refuted sentence must survive VERBATIM in the autofixed
+if [ "$edited_in_place" = 1 ]; then
+  # THE anti-laundering assertion. The refuted sentence must survive VERBATIM in the edited
   # plan: autofix may not quietly rewrite a claim whose model of the code was wrong, because the
   # result reads as a verified plan and nothing re-checked it. Matched as a fixed string.
   grep -qF 'already calls `w.recordDelivery(ctx, tg, status)` for every target' "$A" \
@@ -63,10 +65,10 @@ if [ "$autofix_emitted" = 1 ]; then
   ' "$A" >>"$OUT/validate.log" 2>&1 && mechanical_fixed=1
 fi
 
-partial=$(( report_exists + validator_passes + verdict_no_go + original_untouched + autofix_emitted + refuted_not_laundered + mechanical_fixed ))
+partial=$(( report_exists + validator_passes + verdict_no_go + edited_in_place + no_sibling + refuted_not_laundered + mechanical_fixed ))
 reward=0
 [ "$report_exists" = 1 ] && [ "$validator_passes" = 1 ] && [ "$verdict_no_go" = 1 ] \
-  && [ "$original_untouched" = 1 ] && [ "$autofix_emitted" = 1 ] \
+  && [ "$edited_in_place" = 1 ] && [ "$no_sibling" = 1 ] \
   && [ "$refuted_not_laundered" = 1 ] && [ "$mechanical_fixed" = 1 ] && reward=1
 
 cat > "$OUT/reward.json" <<JSON
@@ -74,8 +76,8 @@ cat > "$OUT/reward.json" <<JSON
   "report_exists": $report_exists,
   "validator_passes": $validator_passes,
   "verdict_no_go": $verdict_no_go,
-  "original_untouched": $original_untouched,
-  "autofix_emitted": $autofix_emitted,
+  "edited_in_place": $edited_in_place,
+  "no_sibling": $no_sibling,
   "refuted_not_laundered": $refuted_not_laundered,
   "mechanical_fixed": $mechanical_fixed,
   "partial": $partial,

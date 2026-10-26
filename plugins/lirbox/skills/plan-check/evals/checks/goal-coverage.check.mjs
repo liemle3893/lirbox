@@ -63,23 +63,19 @@ const someBlock = (t, ...res) => blocks(t).some((b) => res.every((re) => re.test
 const TMP = mkdtempSync(join(tmpdir(), 'plan-check-goal-'));
 const GOAL_EL = '<p id="goal"><strong>Goal:</strong> keep the service available during the upgrade</p>';
 const GOAL_ROW =
-  '<tr class="claim" data-goal-coverage="true" data-quadrant="known-known" data-status="VERIFIED"><td>DoD met achieves the goal</td></tr>';
+  '<tr class="claim" data-goal-coverage="true" data-status="VERIFIED"><td>DoD met achieves the goal</td></tr>';
 const DOD =
   '<script type="application/json" id="dod">{"criteria":[{"id":"a","text":"t","tier":"judged"}]}</script>';
-// Also mandatory since the task-graph change; empty is the legal "this plan declares no tasks"
-// shape. Present only so the report is well-formed — nothing here is under test by THIS check.
-const TASKGRAPH = '<script type="application/json" id="taskgraph">{"nodes":[],"edges":[],"levels":[]}</script>';
 
 const report = ({ goal = GOAL_EL, goalRow = GOAL_ROW } = {}) =>
   `<!DOCTYPE html><html><head><meta charset="utf-8"><title>t</title></head><body>
 <div class="verdict" data-verdict="GO"><span class="badge">GO</span></div>
 ${goal}
 <table><tbody>
-  <tr class="claim" data-quadrant="known-known" data-status="VERIFIED"><td>a claim</td></tr>
+  <tr class="claim" data-status="VERIFIED"><td>a claim</td></tr>
   ${goalRow}
 </tbody></table>
 ${DOD}
-${TASKGRAPH}
 </body></html>`;
 
 const validates = (name, html) => {

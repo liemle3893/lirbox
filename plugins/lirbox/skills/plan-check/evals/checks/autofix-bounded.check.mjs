@@ -1,24 +1,22 @@
-// ACCEPTANCE-CHECK (DOC concern) — FAILS on the unmodified baseline (fail-before / pass-after).
+// ACCEPTANCE-CHECK (DOC concern) — guards the autofix boundary, not the feature.
 //
-// Concern: plan-check adjudicates and stops. A finding whose repair is fully determined by the
-// finding itself (an edge the plan states in prose but omits from its dependency block; a
-// file:line verified as moved) still has to be re-applied by hand, and a NO-GO verdict arrives
-// with no route out of it.
+// Autofix turns rows whose repair is SETTLED into edits to the plan: settled by the evidence
+// (`fix: mechanical`) or by a decision the human stated (`fix: needs-decision`, answered). Ways it
+// goes wrong, one assertion each:
 //
-// Adding autofix is easy to get DANGEROUSLY wrong, so this check guards the boundary rather than
-// the feature. Three ways it goes wrong, one assertion each:
+//   1. It runs unasked.
+//   2. It writes a sibling copy instead of editing the plan — two plans, one stale, and the
+//      reader has to diff them by hand. Git is the record; the edit goes in place.
+//   3. It CHOOSES a repair that needs a decision — invents a new approach where the plan's model
+//      of reality was wrong, and the plan then READS as verified.
+//   4. The gate collapses back onto the REFUTED *status*, forbidding the mechanical refutations
+//      (a moved symbol, a Makefile target that does not exist) the doc itself lists.
+//   5. The verdict is frozen — "a NO-GO never moves" — so a plan whose blockers were decided and
+//      applied still reads NO-GO. The verdict must follow the rows, whatever it was.
 //
-//   1. It overwrites the plan it audited — destroying the evidence that justified the edits.
-//   2. It "fixes" a REFUTED row, i.e. invents a new approach where the plan's model of reality
-//      was wrong, and the plan then READS as verified. That is verdict laundering.
-//   3. It edits, then leaves the old report standing — so the verdict improved because the map
-//      was redrawn, not because the territory was re-checked.
-//
-// The invariant: autofix is bounded to mechanically-determined repairs, never mutates the input,
-// and no edit is trusted until the touched propositions are re-verified.
-//
-// RED on baseline: SKILL.md has no autofix step and references/autofix.md does not exist, so all
-// four assertions fail. We do NOT edit either doc here.
+// History: 2026-08-03 added with a sibling `<plan>.autofix.md` and a re-run of steps 3–6 per
+// fix; 2026-10-26 replaced both — edit in place, re-adjudicate each fixed row against the
+// evidence that settled it, verdict re-derived by validate.mjs.
 //
 // Locked (evals/**): the fixer may never edit this file.
 import { readFileSync } from 'node:fs';
@@ -42,92 +40,73 @@ const read = (p) => {
 const skill = read(SKILL_MD);
 const autofix = read(AUTOFIX_MD);
 
-if (!skill) {
-  console.error(`FAIL check: cannot read ${SKILL_MD}`);
+if (!skill || !autofix) {
+  console.error(`FAIL check: cannot read ${!skill ? SKILL_MD : AUTOFIX_MD}`);
   process.exit(1);
 }
 
-// Whole-file token tests false-green here: "autofix" and "verify" recur everywhere once the
-// feature exists, so a deleted rule stays satisfied by its neighbours. Assert on BLOCKS — a
-// paragraph / bullet / directive — so the concepts must co-occur in one stated rule.
+// Assert on BLOCKS — a paragraph / bullet — so the concepts must co-occur in one stated rule.
+// Whole-file token tests false-green: "autofix" and "verdict" recur everywhere.
 const blocks = (t) => t.split(/\n\s*\n|\n(?=\s*[-*]\s)/);
 const someBlock = (t, ...res) => blocks(t).some((b) => res.every((re) => re.test(b)));
+const autofixStep = skill.split(/\n(?=\s*\d+\.\s+\*\*)/).find((s) => /^\s*\d+\.\s+\*\*Offer autofix/.test(s)) || '';
 
 const assertions = [
   {
     id: 'skill-offers-autofix',
     where: 'SKILL.md',
-    ok: /autofix/i.test(skill) && /offer|opt-in|never automatic|not automatic/i.test(skill),
-    want: 'the workflow must offer autofix explicitly, and never run it automatically',
+    ok: /never automatic|not automatic|opt-in/i.test(autofixStep),
+    want: 'the autofix step must be offered, never run automatically',
   },
   {
-    id: 'input-plan-never-modified',
-    where: 'SKILL.md',
-    // Must be in SKILL.md, the always-loaded surface — a rule that lives only in a reference is
-    // one an agent can act without ever reading. autofix.md restates it; this asserts the copy
-    // that is always in context.
-    ok: someBlock(skill, /never (be )?modif|not modif|never touch|never overwrit/i, /input|original|sibling/i),
-    want: 'SKILL.md itself must state that the input plan is never modified — the repair lands in a sibling artifact',
+    id: 'edits-plan-in-place',
+    where: 'SKILL.md autofix step',
+    ok: /in place/i.test(autofixStep),
+    want: 'SKILL.md must say the plan file is edited in place — the always-loaded surface, not only the reference',
   },
   {
-    id: 'authorship-never-autofixed',
+    id: 'no-sibling-copy',
+    where: 'SKILL.md + references/autofix.md',
+    ok: !/\.autofix\.md|sibling/i.test(skill) && !/\.autofix\.md|sibling/i.test(autofix),
+    want: 'no sibling `<plan>.autofix.md` — a second copy of the plan is the thing this replaced',
+  },
+  {
+    id: 'decision-never-chosen',
     where: 'references/autofix.md',
-    // The bright line, stated on the axis that actually carries it: the FIX CLASS. It was written
-    // as a ban on the REFUTED *status*, which is a different axis — the doc's own mechanical list
-    // holds refutations (a moved symbol, a command form proven not to work), so it forbade the
-    // repairs it had just authorised, and made "REFUTED + mechanical" inexpressible downstream.
-    // The REASON must travel with the exclusion: an assertion matching only "needs-decision" would
-    // not notice the rule collapsing back into a status ban.
-    // Anchored to the enumerated exclusion LIST, not to the section prose. The section opens with
-    // a paragraph stating the fix-class rule, and an assertion scanning the whole section stayed
-    // green when the bullet was deleted (prove-checks caught exactly that false-green) — the
-    // paragraph covered for the missing item. The bullets are what an agent reads to decide a
-    // specific row, so the bullets are what this asserts on.
+    // Anchored to the exclusion BULLETS, not the section prose: a section paragraph must not be
+    // able to cover for a deleted item.
     ok: (() => {
       const section = (autofix.split(/^## What needs a decision[^\n]*$/m)[1] || '').split(/^## /m)[0];
-      const bullets = section.split(/^- /m).slice(1);
-      return bullets.some(
-        (b) => /must not touch|never autofix|not autofixed|excluded/i.test(b) &&
-               /design|authorship|not (say|establish)|new approach/i.test(b)
+      return section.split(/^- /m).slice(1).some(
+        (b) => /must not (choose|touch)|never (choose|pick)/i.test(b) && /design|new approach/i.test(b)
       );
     })(),
-    want: 'the exclusion list must carry a BULLET excluding authorship-class repair WITH the reason — a section paragraph must not be able to cover for a deleted item',
+    want: 'the needs-decision list must carry a bullet saying autofix never chooses a new approach, with the reason',
   },
   {
     id: 'status-is-not-the-gate',
     where: 'references/autofix.md',
-    // Guards the re-axing itself. Without this, restoring "REFUTED is never autofixed" alongside
-    // the new prose would leave every other assertion green while the contradiction returned.
-    ok: /REFUTED/.test(autofix) && /not the (line|gate)|never the status|not the status|fix class, never/i.test(autofix),
-    want: 'the doc must say explicitly that REFUTED is NOT the line — otherwise the status ban can creep back in beside the fix-class rule',
+    ok: /REFUTED/.test(autofix) && /fix class\*{0,2}, never the status|not the status|status is not the gate/i.test(autofix),
+    want: 'the doc must say explicitly that the fix class, not the REFUTED status, is the gate',
   },
   {
-    id: 'verdict-improves-only-on-re-verification',
-    where: 'references/autofix.md',
-    // The invariant the old status ban was a blunt proxy for, now carrying the weight alone: a
-    // verdict may move because a row was re-checked, never because the text was edited.
-    ok: someBlock(autofix, /verdict/i, /only|never/i, /re-?verif|re-?check/i),
-    want: 'the verdict must be stated as improvable ONLY by re-verification, never by the edit — this is what replaces the blanket ban',
-  },
-  {
-    id: 'autofix-forces-reverification',
-    where: 'references/autofix.md',
-    // Anchored on INVALIDATION, not on the word "re-verify": the doc also says the verdict is
-    // "recomputed from re-verified rows", which is a consequence, not the rule. Only the
-    // invalidation sentence establishes that an edit re-opens what was already checked.
-    ok: someBlock(autofix, /re-?verif|re-?check|re-?run/i, /invalidat/i),
+    id: 'verdict-follows-rows',
+    where: 'references/autofix.md + SKILL.md',
+    ok:
+      someBlock(autofix, /re-?adjudicat/i, /validate\.mjs/i, /verdict is whatever the rows/i) &&
+      /verdict is whatever the rows now derive/i.test(autofixStep) &&
+      !/(does|must) not (move|be made to)|never moves? (after|once)|cannot move/i.test(skill + autofix),
     want:
-      'an applied fix must invalidate the report and force re-verification before the verdict is recomputed',
+      'after a fix the row is re-adjudicated, validate.mjs re-run, and the verdict is whatever the rows derive — ' +
+      'no rule freezing a NO-GO',
   },
 ];
 
 const failed = assertions.filter((a) => !a.ok);
 if (!failed.length) {
-  console.log(
-    `PASS check: autofix is bounded, non-destructive and re-verified (${assertions.length}/${assertions.length} assertions).`
-  );
+  console.log(`PASS check: autofix edits in place, never chooses a decision, and the verdict follows the rows (${assertions.length}/${assertions.length}).`);
   process.exit(0);
 }
-console.error('FAIL check: plan-check autofix is missing or its safety boundary is not stated.');
+console.error('FAIL check: plan-check autofix boundary is not stated.');
 for (const a of failed) console.error(`  - [${a.id}] ${a.where}: ${a.want}`);
 process.exit(1);

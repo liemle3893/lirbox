@@ -1,7 +1,7 @@
 [task]
 name = "lirbox/plan-check__autofix-bounded"
 version = "1.0.0"
-description = "plan-check skill task: verify a plan with one refutable claim and one mechanically-fixable undeclared edge, then autofix only the mechanical one without mutating the input"
+description = "plan-check skill task: verify a plan with one refutable claim and one mechanically-fixable undeclared edge, then autofix only the mechanical one, in place, leaving the one that needs a decision as written"
 
 [metadata]
 skill = "plan-check"

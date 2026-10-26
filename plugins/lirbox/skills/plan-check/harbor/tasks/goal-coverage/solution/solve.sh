@@ -17,10 +17,9 @@ const fs = require('node:fs');
 const [tpl, out] = process.argv.slice(2);
 let html = fs.readFileSync(tpl, 'utf8');
 
-const row = (attrs, q, s, prop, ev, detail, conf) =>
-  `      <tr class="claim"${attrs} data-quadrant="${q}" data-status="${s}">
+const row = (attrs, s, prop, ev, detail, conf) =>
+  `      <tr class="claim"${attrs} data-status="${s}">
         <td>${prop}</td>
-        <td><span class="tag q-${q}">${q}</span></td>
         <td><span class="s-${s}">${s}</span>${detail}</td>
         <td>${ev}</td>
         <td>${conf}</td>
@@ -31,7 +30,6 @@ const rows = [
   // actually measures, and the end-to-end 2s threshold the goal is about.
   row(
     ' data-goal-coverage="true"',
-    'unknown-known',
     'UNSTATED-ASSUMPTION',
     'If every DoD criterion were met, would the goal be achieved? <strong>No.</strong> The goal is ' +
       'end-to-end checkout responsiveness against a ~2s confirm-button threshold. Every DoD criterion ' +
@@ -44,12 +42,11 @@ const rows = [
   ),
   row(
     '',
-    'known-unknown',
     'UNVERIFIED',
     'Tax lookup and inventory reservation are actually the dominant contributors to checkout latency. ' +
       'The plan optimises both without stating what share of the ~4s they account for.',
     'plan.md names no profile or trace; needs: a latency breakdown of the checkout path at peak',
-    '',
+    ' <span class="fix">fix: needs-decision</span>',
     'medium'
   ),
 ].join('\n');
@@ -80,10 +77,16 @@ const fill = {
   VERDICT_SUMMARY:
     'Both optimisations are sound in isolation, but the plan cannot tell you whether it worked. Its ' +
     'definition of done measures two microbenchmarks and never the user-visible latency the goal is about.',
-  CONDITION_1:
-    'Add a DoD criterion that measures confirm-button latency end to end at peak against the 2s ' +
-    'threshold, and a latency breakdown showing tax lookup and reservation are the dominant contributors.',
 };
+
+// One condition per open row: the goal-coverage gap and the unattributed latency.
+html = html.replace(
+  /<li class="condition"><div class="cbody">\{\{CONDITION_1\}\}<\/div><\/li>/,
+  [
+    'Add a DoD criterion that measures confirm-button latency end to end at peak against the 2s threshold.',
+    'Show, with a latency breakdown, that tax lookup and reservation are the dominant contributors.',
+  ].map((c) => `<li class="condition"><div class="cbody">${c}</div></li>`).join('\n    ')
+);
 
 html = html.replace(
   /<script type="application\/json" id="dod">[\s\S]*?<\/script>/,
