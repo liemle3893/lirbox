@@ -1,5 +1,11 @@
 # Components & section selection
 
+## Contents
+- Section catalogue
+- Adapting by PR type
+- Snippets (copy into the template)
+- Design rules (do not violate)
+
 The write-up adapts to the PR. Pick sections from what the PR actually contains —
 never invent a rollout plan or a metric that does not exist. Read [adapting](#adapting-by-pr-type)
 first, then copy snippets as needed.

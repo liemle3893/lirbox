@@ -4,13 +4,13 @@
 // smaller one that slips through. Softening a rejection defeats the only route here whose
 // answer can be "no".
 //
-// DO_SKILL_OVERRIDE points at the SKILL.md under test (set by prove-checks for mutation-testing).
+// CONDUCTOR_SKILL_OVERRIDE points at the SKILL.md under test (set by prove-checks for mutation-testing).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const skillPath = process.env.DO_SKILL_OVERRIDE || join(here, '..', '..', 'SKILL.md');
+const skillPath = process.env.CONDUCTOR_SKILL_OVERRIDE || join(here, '..', '..', 'SKILL.md');
 const text = readFileSync(skillPath, 'utf8').replace(/\s+/g, ' ');
 
 const need = (s, why) => { if (!text.includes(s)) fail(why); };

@@ -4,13 +4,13 @@
 // lane is the one route whose cost (branch, worktree, an agent running for hours) is not cheaply
 // undone. Printing the start command is not the same as asking to run it.
 //
-// DO_SKILL_OVERRIDE points at the SKILL.md under test (set by prove-checks for mutation-testing).
+// CONDUCTOR_SKILL_OVERRIDE points at the SKILL.md under test (set by prove-checks for mutation-testing).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const skillPath = process.env.DO_SKILL_OVERRIDE || join(here, '..', '..', 'SKILL.md');
+const skillPath = process.env.CONDUCTOR_SKILL_OVERRIDE || join(here, '..', '..', 'SKILL.md');
 const text = readFileSync(skillPath, 'utf8').replace(/\s+/g, ' ');
 
 const failures = [];

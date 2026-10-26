@@ -11,7 +11,7 @@ const fm = skill.match(/^---\n([\s\S]*?)\n---/);
 if (!fm) throw new Error('SKILL.md: no frontmatter block');
 const name = fm[1].match(/^name:\s*(.+)$/m);
 const desc = fm[1].match(/^description:\s*(.+)$/m);
-if (!name || name[1].trim() !== 'do') throw new Error(`SKILL.md: name must be 'do' (got ${name && name[1]})`);
+if (!name || name[1].trim() !== 'conductor') throw new Error(`SKILL.md: name must be 'conductor' (got ${name && name[1]})`);
 if (!desc || desc[1].trim().length < 40) throw new Error('SKILL.md: description missing/too short — it is the trigger');
 
 // The description decides when Claude invokes this. A trigger with no user phrasing in it fires
@@ -23,14 +23,15 @@ if (!/do this|take this task|handle this|what should I do/i.test(desc[1])) {
 const machine = skill.match(/\/Users\/[a-z]/i);
 if (machine) throw new Error(`SKILL.md: absolute machine path (${machine[0]}…) — use \${CLAUDE_PLUGIN_ROOT}`);
 
-for (const tag of ['purpose', 'flow', 'routes', 'hard-rules', 'multi-slice']) {
+for (const tag of ['purpose', 'flow', 'routes', 'gated-run', 'hard-rules', 'multi-slice']) {
   const open = (skill.match(new RegExp(`<${tag}>`, 'g')) || []).length;
   const close = (skill.match(new RegExp(`</${tag}>`, 'g')) || []).length;
   if (open !== 1 || close !== 1) throw new Error(`SKILL.md: <${tag}> unbalanced (${open} open, ${close} close)`);
 }
 
-const words = skill.trim().split(/\s+/).length;
-if (words > 800) throw new Error(`SKILL.md: ${words} words — over the 800-word budget for this skill`);
+// skill-lint's budget: body lines, not words (Anthropic's guide sizes SKILL.md in lines; 100 is ours).
+const bodyLines = skill.slice(fm[0].length).replace(/^\n/, '').replace(/\n+$/, '').split('\n').length;
+if (bodyLines > 100) throw new Error(`SKILL.md: ${bodyLines} body lines — over the 100-line budget`);
 
 // All four routes intake.mjs can return must actually be covered.
 for (const route of ['reject', 'scope', 'inline', 'lane']) {

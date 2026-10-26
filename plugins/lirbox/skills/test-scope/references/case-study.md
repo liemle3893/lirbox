@@ -1,5 +1,16 @@
 # Case study — a graph that selected everything, and what proved it wrong
 
+## Contents
+- Symptom 1: a manifest edit selected 146 of 150 test files
+- Symptom 2: a two-line fix selected 90 of 161 files
+- Does the route matter? A mutation test settled it
+- Two remedies
+- Success metrics were defined BEFORE the refactor (commands with expected values)
+- Operations lessons that are now rules
+- What the method took from it
+- Second round (2026-10-06): the p90 target was the wrong metric
+- Third round: a workspace monorepo where the graph stopped at a package boundary
+
 A 160-file vitest server. The selection had three layers (import graph, parts, backstop). Two
 symptoms, one cause each, and one decision that the method now encodes.
 

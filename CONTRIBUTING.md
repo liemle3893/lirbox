@@ -147,8 +147,10 @@ claude plugin validate .                      # schema-check marketplace + all p
 claude --plugin-dir ./plugins/lirbox         # load the plugin in a throwaway session and try the skill/agent
 ```
 
-Then run `/lirbox:skill-lint` — it audits word budget, XML structure and weak frontmatter
-triggers. Advisory only: it reports, it does not edit.
+Then run `/lirbox:skill-lint` — it audits the SKILL.md budget (≤100 body lines, ≤~5000 tokens),
+frontmatter limits (Anthropic's skill-authoring guide + the agentskills.io spec), XML structure,
+reference depth and tables of contents. It reports, it does not edit; CI runs it with `--strict`, so
+a ● finding fails the build.
 
 ### Tier 2 — evals (REQUIRED — this is the real release gate)
 

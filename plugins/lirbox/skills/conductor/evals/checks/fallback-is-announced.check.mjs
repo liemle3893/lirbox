@@ -10,13 +10,13 @@
 // This guards the SKILL.md half only. The `route.json` field it names is asserted by the sibling
 // check reject-outranks-capability's import of the real router, and by intake-selfcheck c1/c2.
 //
-// DO_SKILL_OVERRIDE points at the SKILL.md under test (set by prove-checks for mutation-testing).
+// CONDUCTOR_SKILL_OVERRIDE points at the SKILL.md under test (set by prove-checks for mutation-testing).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const skillPath = process.env.DO_SKILL_OVERRIDE || join(here, '..', '..', 'SKILL.md');
+const skillPath = process.env.CONDUCTOR_SKILL_OVERRIDE || join(here, '..', '..', 'SKILL.md');
 const text = readFileSync(skillPath, 'utf8').replace(/\s+/g, ' ');
 
 const failures = [];

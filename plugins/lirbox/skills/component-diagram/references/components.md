@@ -1,5 +1,13 @@
 # Component-diagram authoring guide
 
+## Contents
+- When a component diagram is the right tool
+- Writing the graph (Mermaid `flowchart LR` + `subgraph`)
+- Filling the detail panel (`STEPS`)
+- Grounding
+- Offline / CDN note
+- Verify checklist
+
 This skill renders a system's **static structure** as a Mermaid `flowchart` with `subgraph`
 boundaries plus a clickable detail panel. You write the graph in Mermaid text (reliable) —
 Mermaid does the layout. You fill a `STEPS` map for the per-component narrative. Keep the

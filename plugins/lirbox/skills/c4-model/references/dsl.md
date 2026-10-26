@@ -1,5 +1,12 @@
 # LikeC4 DSL — condensed reference
 
+## Contents
+- specification
+- model
+- views
+- Pitfalls
+- Validate loop
+
 A `.c4` file has three top-level blocks, in this order:
 
 ```likec4

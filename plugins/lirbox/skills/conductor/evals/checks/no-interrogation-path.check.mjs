@@ -4,13 +4,13 @@
 // — not a set of clarifying questions asked in this skill. Three independent anchors: the flow's
 // first step, the hard-rules ban, and the `scope` section naming the handoff instead of questions.
 //
-// DO_SKILL_OVERRIDE points at the SKILL.md under test (set by prove-checks for mutation-testing).
+// CONDUCTOR_SKILL_OVERRIDE points at the SKILL.md under test (set by prove-checks for mutation-testing).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const skillPath = process.env.DO_SKILL_OVERRIDE || join(here, '..', '..', 'SKILL.md');
+const skillPath = process.env.CONDUCTOR_SKILL_OVERRIDE || join(here, '..', '..', 'SKILL.md');
 const text = readFileSync(skillPath, 'utf8').replace(/\s+/g, ' ');
 
 const failures = [];

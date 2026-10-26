@@ -5,10 +5,9 @@ description: This skill should be used to rigorously VERIFY a plan before it is 
 
 # plan-check
 
-A plan is a **map**; the codebase, cluster and real world are the **territory**. plan-check
-is an unknowns-finder, not a reviewer: it interrogates each claim, checks it against real
-evidence, hunts what the plan never named, and ends with a self-contained HTML report and a
-**GO / GO-WITH-CONDITIONS / NO-GO** verdict.
+A plan is a **map**; the codebase, cluster and real world are the **territory**. plan-check is an
+unknowns-finder, not a reviewer: it checks each claim against evidence, hunts what the plan never
+named, and ends with a self-contained HTML report and a **GO / GO-WITH-CONDITIONS / NO-GO** verdict.
 
 Every gap is tagged to one quadrant (`data-quadrant`):
 
@@ -19,19 +18,8 @@ Every gap is tagged to one quadrant (`data-quadrant`):
 | **unknown-known** | tacit assumptions never written | **interrogate them out of you** |
 | **unknown-unknown** | potholes nobody considered | **blind-spot pass** (highest value) |
 
-## When to use
-
-Before running a runbook, migration, infra fix, or code-change plan where being
-wrong is costly, and you want the holes found — not the plan rewritten.
-
-**Not for:** writing a plan (→ `plan-deck`), executing one, or posting PR review
-comments. If the request is "do the plan," this is the wrong skill.
-
-## Inputs
-
-- **The plan** — pasted text, a file path, or a `plan-deck` HTML file. Ask if missing.
-- **Optional environment** — a sandbox path + commands + docs, ONLY if you want
-  local dry-runs. Never assumed, never auto-detected.
+**Inputs:** the plan (pasted text, a file path, or a `plan-deck` HTML file — ask if missing), and
+optionally an environment (sandbox path + commands + docs) for local dry-runs — never assumed.
 
 <non-negotiable>
 Read-only + web by default. NEVER run commands against a live system. Local
@@ -49,9 +37,8 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
 
 ## Workflow
 
-1. **Ingest & classify** the plan: `ops` / `code` / `mixed`. State it back — it routes §3.
-   Capture the plan's **goal** in its own terms (what it is trying to achieve, not what it does);
-   if it states none, say so and adjudicate that as an `UNSTATED-ASSUMPTION`.
+1. **Ingest & classify** the plan: `ops` / `code` / `mixed` — it routes §3. Capture its **goal** in
+   its own terms (what it is trying to achieve, not what it does); none stated → `UNSTATED-ASSUMPTION`.
 2. **Decompose** into atomic checkable propositions — not the plan as a blob:
    preconditions, each step's claimed effect, ordering & hidden dependencies,
    expected outcomes, rollback, and the **unstated assumptions** it drags in.
@@ -59,46 +46,36 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
    file → tasks table and test the declared edges against it: a file claimed by two
    tasks, or an edge stated only in step prose, is a proposition (see
    `references/blind-spot.md` → *Execution shape*).
-3. **Verify from evidence — demand references, not assertions** ("show me the doc /
-   the state / the code," never "trust me"). *Ops:* web docs, version release notes,
-   deprecations, known-issue/CVE trackers for the stated version. *Code:* repo
-   read/grep/AST — do the referenced files/funcs/APIs exist, fit the real types and
-   callers, and match the plan's model of current behavior?
-4. **Blind-spot pass** — go beyond the plan's claims; hunt unknown-unknowns via the
-   per-type checklists in `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/references/blind-spot.md`.
-   Highest-value step; don't skip.
-5. **Interrogation gate (BLOCKS the verdict).** Before step 7, enumerate every
-   proposition still `UNVERIFIED`. For each one that is **askable** — resolvable by the
-   human, i.e. NOT tagged `needs: run on target` — you MUST stop and ask, one question at
-   a time, hardest first where the answer flips the verdict. **Do not proceed to the
-   verdict while an askable `UNVERIFIED` remains open.** Only `needs: run on target` items
-   (answerable solely by touching a live system you weren't given) pass unasked, as
-   conditions-to-clear. Rules in
+3. **Verify from evidence — demand references, not assertions.** *Ops:* web docs, version release
+   notes, deprecations, known-issue/CVE trackers for the stated version. *Code:* repo read/grep/AST —
+   do the referenced files/funcs/APIs exist, fit the real types and callers, and match the plan's
+   model of current behavior?
+4. **Blind-spot pass** (highest value; never skip) — hunt unknown-unknowns beyond the plan's claims
+   via the per-type checklists in `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/references/blind-spot.md`.
+5. **Interrogation gate (BLOCKS the verdict).** Enumerate every `UNVERIFIED` proposition and ask
+   each **askable** one (not tagged `needs: run on target`) — one at a time, hardest first where
+   the answer flips the verdict. Rules in
    `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/references/interrogation.md`.
 6. **Adjudicate** — every proposition gets a **quadrant** + **status**: `VERIFIED` ·
    `REFUTED` · `UNVERIFIED` (name what would resolve it) · `UNSTATED-ASSUMPTION` ·
    `BLIND-SPOT-RISK`. **One row is mandatory** (`data-goal-coverage`, machine-checked): *if every
    DoD criterion were met, would the stated goal be achieved?*
-7. **Verdict** — `NO-GO` if any `REFUTED` on a critical path; else
-   `GO-WITH-CONDITIONS` if any open item (`UNVERIFIED` / `BLIND-SPOT-RISK`) remains;
-   else `GO`. Every open item becomes a condition-to-clear. Tag each `REFUTED` and open row
-   `fix: mechanical` (the repair is determined by the finding) or `fix: needs-decision`.
-   `REFUTED` is tagged too: the fix **class** decides what autofix may touch, never the status,
-   and a refutation can be either — a renamed symbol is transcription, a wrong approach is not.
-   A `NO-GO` must state, per `REFUTED` row, **what would have to change to clear it** —
-   a verdict with no route is a dead end, not a finding.
-8. **Emit the report** — copy `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/assets/template.html`
-   to `./plan-check-<slug>.html` and fill it. **Lead with the verdict-changing risks**
-   (refutations, blind-spots, conditions); mechanically-verified rows last. Keep the
-   `<style>` block unchanged.
+7. **Verdict** — `NO-GO` if any `REFUTED` on a critical path; else `GO-WITH-CONDITIONS` if any open
+   item (`UNVERIFIED` / `BLIND-SPOT-RISK`) remains; else `GO`. Every open item becomes a
+   condition-to-clear. Tag each `REFUTED` and open row `fix: mechanical` (the finding determines the
+   repair — a renamed symbol) or `fix: needs-decision` (a wrong approach); the class, never the
+   status, decides what autofix may touch. A `NO-GO` states, per `REFUTED` row, **what would have
+   to change to clear it** — a verdict with no route is a dead end, not a finding.
+8. **Emit the report** — copy `${CLAUDE_PLUGIN_ROOT}/skills/plan-check/assets/template.html` to
+   `./plan-check-<slug>.html` and fill it, `<style>` unchanged. **Lead with the verdict-changing
+   risks** (refutations, blind-spots, conditions); mechanically-verified rows last.
    Carry step 7's disposition onto **every `REFUTED` and open row** —
    `<span class="fix">fix: mechanical</span>` or `fix: needs-decision`; machine-checked, and drop
    the span on `VERIFIED` / `UNSTATED-ASSUMPTION` rows.
-   Fill the **Definition of done** section AND its machine-readable twin
-   (`<script type="application/json" id="dod">`): extract the plan's success criteria, refine
-   each to `checkable` (a concrete command, exit 0 = met) or `judged` (needs cited evidence),
-   never dropping plan-stated ACs. If the plan stated none, derive them — and the missing DoD
-   is a `BLIND-SPOT-RISK` (so the verdict can be at best GO-WITH-CONDITIONS).
+   Fill the **Definition of done** section AND its twin `<script type="application/json" id="dod">`:
+   the plan's success criteria, each refined to `checkable` (a command, exit 0 = met) or `judged`
+   (cited evidence), never dropping a plan-stated AC. None stated → derive them; the missing DoD is
+   a `BLIND-SPOT-RISK`, so the verdict is at best GO-WITH-CONDITIONS.
    Fill **`#taskgraph`** the same way — the plan's execution shape, machine-checked. Each edge is
    `needs` (this task needs the other's *output*) or `contention` (both write one file: a merge
    cost, not an order, since each task gets its own worktree) and carries a `why`. `levels` is
@@ -116,16 +93,12 @@ as conditions-to-clear. A verdict emitted with an unasked askable question is in
     - `fix: needs-decision` is never autofixed — **the fix class is the gate, not the status**.
       A `fix: mechanical` `REFUTED` row IS repaired, and if re-verification then clears it the
       verdict moves honestly; a `NO-GO` whose refutations all need a decision does not move.
-11. **Offer the handoff** — offer to launch `deep-understanding` on the risky
-    assumptions so you internalize what could break, or `plan-deck` to re-author against
-    the `REFUTED` rows. Don't auto-run either.
+11. **Offer the handoff** — `deep-understanding` on the risky assumptions, or `plan-deck` to
+    re-author against the `REFUTED` rows. Don't auto-run either.
 
 ## Quality bar
 
-- **Unknowns-first.** Lead with the unknown-knowns and unknown-unknowns, not the checklist.
 - **Evidence, not vibes.** Every `VERIFIED` cites a source (doc URL, `file:line`, command
   output). No source → `UNVERIFIED`, which is a valid answer.
 - **Honest verdict.** One `REFUTED` critical path is `NO-GO` — don't soften it.
-- **A DoD or no clean GO.** Every report carries the `#dod` block (validate.mjs enforces it);
-  a plan that stated no success criteria gets a `BLIND-SPOT-RISK`.
-- **Self-contained report.** No external CSS/JS/fonts/images; opens offline.
+- **A DoD or no clean GO.** Every report carries the `#dod` block (validate.mjs enforces it).
