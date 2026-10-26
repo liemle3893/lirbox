@@ -5,7 +5,7 @@ Personal Claude Code **plugin marketplace**. One plugin, `lirbox`, under `plugin
 `agents/<name>.md` (9 subagents), `hooks/` (1 registered hook), `scripts/` (the orchestration
 runtime), `.claude-plugin/marketplace.json` (skills are auto-discovered, not listed).
 
-**13 skills**: 12 plus `do`. There is no Workflow tool here and no `conductor` / `loom` /
+**14 skills**: 13 plus `do`. There is no Workflow tool here and no `conductor` / `loom` /
 `prospector` / `whetstone` / `arena` — those were deleted. Anything still referring to them is stale.
 
 Skill catalog → [README.md](./README.md). Adding a skill/agent/plugin, and all testing detail →
@@ -19,7 +19,9 @@ Skill catalog → [README.md](./README.md). Adding a skill/agent/plugin, and all
 `plan-check`); run it on the output (`node .../validate.mjs <file>.html`) — it catches Mermaid
 label-escaping bugs and structural holes.
 
-**The rest**: `do` (entrypoint, below), `deep-understanding` (interactive tutor, no artifact),
+**The rest**: `do` (entrypoint, below), `deep-understanding` (interactive tutor, no artifact), `prompt-improve`
+(prompt interview graded by Jev, Haiku subagent fallback; `scripts/engine.mjs` + `catalog.mjs` are
+copies of daily-news `src/lib/brief/`),
 `lane-config` (per-repo lane/harness/model config), `skill-lint` (analyzer over the SKILL.md files),
 `feedback` (user-invoked only; files a scrubbed GitHub issue).
 

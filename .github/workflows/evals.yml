@@ -42,6 +42,19 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
       - name: Regression gate
         run: node scripts/evals-all.mjs --fast
+      # The orchestration runtime (intake, jev, board, …) is not a skill, so evals-all never runs
+      # its self-checks — they gated nothing unless someone ran them by hand.
+      - name: Runtime self-checks
+        run: |
+          fails=0
+          for f in plugins/lirbox/scripts/*-selfcheck.mjs; do
+            echo "── $f"
+            node "$f" || { echo "FAIL $f"; fails=$((fails+1)); }
+          done
+          node plugins/lirbox/scripts/board-selfcheck.mjs --mutations || { echo "FAIL board --mutations"; fails=$((fails+1)); }
+          echo "---"
+          if [ "$fails" -gt 0 ]; then echo "GATE RED — $fails runtime self-check(s) failed"; exit 1; fi
+          echo "GATE GREEN — every runtime self-check passed"
 
       # Mutation-proof the frozen checks. evals-all only proves a green check EXITS 0 — it cannot
       # tell "the behaviour is present" from "the check stopped looking". Both false-green and
