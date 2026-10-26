@@ -15,7 +15,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 
 | Skill | What it does |
 |-------|--------------|
-| **`conductor`** | The single entrypoint. Hand it any task — "do this", "handle this" — and it routes the task through `intake.mjs` before anything happens to it: `reject` (say no, stop), `scope` (hand to `lirbox-planner` for one slice), `inline` (do it now, the routing decision is the approval) or `lane` (print the `orch-lane.sh start` command and ask). Non-trivial work then runs in ONE session loop against a definition of done frozen before the code is touched: `dod-gate.mjs` runs the checkable criteria, one `lirbox-verifier` rules on the judged ones, `docs/changes/<slug>/` is enforced, and three failed rounds escalate to you. Uncertainty never buys the expensive route. |
+| **`conductor`** | The single entrypoint. Hand it any task — "do this", "handle this" — and it routes the task through `intake.mjs` before anything happens to it: `reject` (say no, stop), `scope` (hand to `lirbox-planner` for one slice), `inline` (do it now, the routing decision is the approval) or `lane` (freeze the DoD, then ask before spawning a `lirbox-builder` subagent in its own worktree, gated from the main session). Non-trivial work then runs in ONE session loop against a definition of done frozen before the code is touched: `dod-gate.mjs` runs the checkable criteria, one `lirbox-verifier` rules on the judged ones, `docs/changes/<slug>/` is enforced, and three failed rounds escalate to you. Uncertainty never buys the expensive route. |
 | **`pr-writeup`** | Turn any pull request into a self-contained HTML write-up (TL;DR, motivation, file-by-file tour, where-to-focus, test plan, rollout). Features, bugfixes, refactors, docs. |
 | **`plan-deck`** | Turn a spec or task into a self-contained HTML implementation plan (milestone timeline, data-flow, mockups, key code, risks, open questions). Feature, backend, infra/migration, refactor. |
 | **`codewalk`** | Trace one path through a real codebase into a self-contained HTML walkthrough (path diagram, numbered steps with verified `file:line` + code excerpts, key files, gotchas). For onboarding or auditing a flow/subsystem. |
@@ -34,7 +34,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 ### Agents
 
 Generic, public-ready subagents (in `plugins/lirbox/agents/`). Nine standalone subagents — invoke
-any of them directly, or let `conductor` route a `lane` through `orch-lane.sh`:
+any of them directly, or let `conductor` spawn `lirbox-builder` as a `lane` (`orch-lane.sh` still runs herdr-pane lanes by hand):
 
 | Agent | Role |
 |-------|------|

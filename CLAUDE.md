@@ -49,14 +49,17 @@ to the cheapest route rather than failing. Four routes:
 | `reject` | Say no, verbatim reason, stop. Not a negotiation, and never re-scoped smaller. |
 | `scope` | `done` isn't stateable as a command + expected value → hand to `lirbox-planner`. |
 | `inline` | Do it now. The routing decision *is* the approval — no confirmation round-trip. |
-| `lane` | Print the `orch-lane.sh start` command and **ask** before running it. |
+| `lane` | Freeze the DoD, print the `lirbox-builder` spawn (`isolation: "worktree"`) and **ask** before running it. |
 
 Cheapest is `inline`, not `reject` — `reject` and `scope` both *block* the lane door. Uncertainty
 never buys the expensive route: a low-confidence `lane` downgrades to `inline`, a low-confidence
 `reject` becomes `scope`.
 
-**`route-guard.sh`** (PreToolUse/Bash) is the half that binds: it refuses `orch-lane.sh start` when
-`route.json` is absent, or says `reject` or `scope`. It fails open, loudly, on any internal error.
+**`route-guard.sh`** (PreToolUse/Bash + Agent) is the half that binds: it refuses a lane — a
+`lirbox-builder` spawned with `isolation: "worktree"` (run from the brief's `run: <slug>` line; no
+such line → refused), or `orch-lane.sh start` — when `route.json` is absent, or says `reject` or
+`scope`. It fails open, loudly, on any internal error. `orch-lane.sh` / `lane-config` (herdr-pane
+lanes) still work, but conductor no longer calls them.
 
 > **`route-guard.sh` is the only hook.** The other five (`pane-guard`, `gate-guard`,
 > `model-policy`, `lane-ledger`, `lane-gate`) gated on

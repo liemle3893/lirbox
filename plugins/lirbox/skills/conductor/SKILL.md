@@ -10,11 +10,10 @@ by a script, with one context-isolated verifier for what a command cannot decide
 </purpose>
 
 <flow>
-1. **Run intake first. Ask the user nothing before this.**
+1. **Run intake first. Ask the user nothing before this.** `<slug>`: yours, short, kebab-case.
    ```
    echo "<task text>" | node ${CLAUDE_PLUGIN_ROOT}/scripts/intake.mjs --task - --run <slug>
    ```
-   Pick `<slug>` yourself (short, kebab-case). Intake always exits 0.
 2. **Announce the route in ONE line**: route, reason, and for `scope` the missing done-criterion.
    **Read `decided_by` and say which it is.** `jev` means the route was measured; `fallback` means
    nothing was. Both print `inline`, so a dead API key and a confident go-ahead are the same word on
@@ -28,7 +27,7 @@ by a script, with one context-isolated verifier for what a command cannot decide
 | `reject` | Say no. State intake's reason verbatim. **STOP.** Do not implement, do not offer a smaller version. |
 | `scope` | Hand off to `lirbox-planner` for exactly ONE slice; its criteria seed the gated run. |
 | `inline` | Triage, then do it now, this session. No "should I proceed?", no approval round-trip. |
-| `lane` | Print the exact `orch-lane.sh start` command and **ask before running it.** |
+| `lane` | Freeze the DoD, print the `lirbox-builder` spawn and **ask before running it.** |
 
 ### reject
 Not a negotiation. The failure mode this route exists to catch is turning a rejected task into a
@@ -46,11 +45,13 @@ against what the task states as done, report the result. Anything more → the g
 this skill by name selects it; it does not skip triage.
 
 ### lane
-```
-${CLAUDE_PLUGIN_ROOT}/scripts/orch-lane.sh start <name> --profile <p> --run <slug>
-```
-Print that command with `<name>`/`<p>` filled in, then ask. `route-guard.sh` refuses the start
-anyway unless `route.json` says `lane` — asking is this route's own rule, not a backstop.
+A long job in its own context and worktree. Do gated-run steps 1–2 here with `--by lirbox-builder`,
+then print the spawn — `lirbox-builder`, `isolation: "worktree"`, a brief whose first line is
+`run: <slug>`, then the task, the frozen criteria, and "keep the notes, write `docs/changes/<slug>/`,
+commit as you go" — filled in, then ask. `route-guard.sh` refuses the spawn unless `route.json` says
+`lane`; asking is this route's own rule, not a backstop. Steps 5–6 then run from here: the verifier
+gets the worktree, the gate takes `--in <worktree>`, and an unmet round goes back to the builder
+(`SendMessage`) with only the unmet rows.
 </routes>
 
 <gated-run>
@@ -87,7 +88,7 @@ anyway unless `route.json` says `lane` — asking is this route's own rule, not 
 <hard-rules>
 - **Never interrogate.** An unstateable "done" is the `scope` route — hand off to the planner.
 - **`inline` executes immediately.** No confirmation step; the route already is the approval.
-- **`lane` always asks**, even though the command was already printed — printing isn't starting.
+- **`lane` always asks**, even though the spawn was already printed — printing isn't starting.
 - **A `reject` is not a negotiation.** No softened re-scope, no smaller version offered.
 - **An unmeasured route says so.** `decided_by: fallback` is not a verdict.
 - **Only gate exit 0 is done.** Not "tests pass", not the verifier's prose. Exit 3 is reported as

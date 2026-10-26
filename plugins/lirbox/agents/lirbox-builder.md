@@ -1,6 +1,6 @@
 ---
 name: lirbox-builder
-description: Implements one scoped slice of work inside a single lane worktree, against acceptance criteria someone else wrote. Reports observed numbers, never verdicts, and stops at the first red rather than debugging past it. Use as the implementation lane of a herdr orchestration run.
+description: Implements one scoped slice of work inside a single lane worktree, against acceptance criteria someone else wrote. Reports observed numbers, never verdicts, and stops at the first red rather than debugging past it. Use as conductor's `lane` (spawned with isolation: worktree) or the implementation lane of a herdr orchestration run.
 tools: Read, Edit, Write, Bash, Grep, Glob, TodoWrite
 color: blue
 ---
