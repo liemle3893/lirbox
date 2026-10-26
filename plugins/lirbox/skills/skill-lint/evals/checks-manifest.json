@@ -1,0 +1,159 @@
+{
+  "_comment": [
+    "Expectation manifest for skill-lint's frozen acceptance-checks.",
+    "Enforced repo-wide by scripts/evals-all.mjs on every push and PR.",
+    "",
+    "expect \"green\" = a past fix that must not regress. MUST exit 0.",
+    "expect \"red\"   = a known-failing check (open concern). MUST exit 0 or 1.",
+    "",
+    "A check file missing from this manifest FAILS the gate."
+  ],
+  "checks": {
+    "line-budget": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the cap drifts back to the guide's 500, so a 101-line SKILL.md passes",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "LINES_MAX: 100,",
+          "replace": "LINES_MAX: 500,"
+        },
+        {
+          "why": "an off-by-one makes exactly 100 lines a violation",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "const overLines = lines > T.LINES_MAX;",
+          "replace": "const overLines = lines >= T.LINES_MAX;"
+        },
+        {
+          "why": "the word budget creeps back in beside the line budget",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "const overLines = lines > T.LINES_MAX;",
+          "replace": "const overLines = lines > T.LINES_MAX || words > 500;"
+        }
+      ]
+    },
+    "frontmatter-limits": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "name length stops being checked",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (n.length > T.NAME_MAX) add(",
+          "replace": "if (false) add("
+        },
+        {
+          "why": "name charset stops being checked",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (!/^[a-z0-9-]+$/.test(n)) add(",
+          "replace": "if (false) add("
+        },
+        {
+          "why": "reserved words in a name pass",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (RESERVED.test(n)) add(",
+          "replace": "if (false) add("
+        },
+        {
+          "why": "description length stops being checked",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (desc.length > T.DESC_MAX) add(",
+          "replace": "if (false) add("
+        },
+        {
+          "why": "an XML tag in the description passes",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (XML_TAG.test(desc)) add(",
+          "replace": "if (false) add("
+        },
+        {
+          "why": "leading/trailing/double hyphens in a name pass",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (/^-|-$|--/.test(n)) add(",
+          "replace": "if (false) add("
+        },
+        {
+          "why": "a name that does not match its directory passes",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (n !== name) add(",
+          "replace": "if (false) add("
+        },
+        {
+          "why": "compatibility length stops being checked",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (compat && compat[1].trim().length > T.COMPAT_MAX) add(",
+          "replace": "if (false) add("
+        }
+      ]
+    },
+    "refs-one-level": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "nested references stop being warned",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (MD_LINK.test(stripFenced(r.src).stripped)) {",
+          "replace": "if (false) {"
+        },
+        {
+          "why": "a long reference with no table of contents passes",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (r.lines > T.REF_TOC_LINES && !TOC.test(head)",
+          "replace": "if (false && !TOC.test(head)"
+        },
+        {
+          "why": "the TOC is ignored, so every long reference is warned on size alone — the rule the guide contradicts",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "!TOC.test(head) && (head.match(TOC_LINKS) || []).length < 3",
+          "replace": "true"
+        }
+      ]
+    },
+    "token-budget": {
+      "expect": "green",
+      "mutations": [
+        {
+          "why": "the budget is loosened past the spec's 5000 tokens",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "TOKENS_MAX: 5000,",
+          "replace": "TOKENS_MAX: 10000,"
+        },
+        {
+          "why": "an off-by-one makes exactly ~5000 tokens a violation",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "const overTokens = tokens > T.TOKENS_MAX;",
+          "replace": "const overTokens = tokens >= T.TOKENS_MAX;"
+        },
+        {
+          "why": "tokens stop counting toward the flag — the long-line dodge is back",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "if (overLines || overTokens) {",
+          "replace": "if (overLines) {"
+        },
+        {
+          "why": "the estimate is skewed, so ~6000 real tokens read as under budget",
+          "env": "SKILL_LINT_OVERRIDE",
+          "file": "scripts/analyze.cjs",
+          "find": "CHARS_PER_TOKEN: 4,",
+          "replace": "CHARS_PER_TOKEN: 8,"
+        }
+      ]
+    }
+  }
+}

@@ -15,7 +15,7 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 
 | Skill | What it does |
 |-------|--------------|
-| **`do`** | The single entrypoint. Hand it any task — "do this", "handle this" — and it routes the task through `intake.mjs` before anything happens to it: `reject` (say no, stop), `scope` (hand to `lirbox-planner` for one slice), `inline` (do it now, the routing decision is the approval) or `lane` (print the `orch-lane.sh start` command and ask). Uncertainty never buys the expensive route. |
+| **`conductor`** | The single entrypoint. Hand it any task — "do this", "handle this" — and it routes the task through `intake.mjs` before anything happens to it: `reject` (say no, stop), `scope` (hand to `lirbox-planner` for one slice), `inline` (do it now, the routing decision is the approval) or `lane` (print the `orch-lane.sh start` command and ask). Non-trivial work then runs in ONE session loop against a definition of done frozen before the code is touched: `dod-gate.mjs` runs the checkable criteria, one `lirbox-verifier` rules on the judged ones, `docs/changes/<slug>/` is enforced, and three failed rounds escalate to you. Uncertainty never buys the expensive route. |
 | **`pr-writeup`** | Turn any pull request into a self-contained HTML write-up (TL;DR, motivation, file-by-file tour, where-to-focus, test plan, rollout). Features, bugfixes, refactors, docs. |
 | **`plan-deck`** | Turn a spec or task into a self-contained HTML implementation plan (milestone timeline, data-flow, mockups, key code, risks, open questions). Feature, backend, infra/migration, refactor. |
 | **`codewalk`** | Trace one path through a real codebase into a self-contained HTML walkthrough (path diagram, numbered steps with verified `file:line` + code excerpts, key files, gotchas). For onboarding or auditing a flow/subsystem. |
@@ -29,12 +29,12 @@ The **`lirbox`** plugin — a growing collection of skills (and agents). Skills 
 | **`feedback`** | User-invoked only: turns a concern about a lirbox skill into a scrubbed, structured GitHub issue on `liemle3893/lirbox`. Never auto-invoked. |
 | **`lane-config`** | Set up or change the per-project orchestration config that decides which harness, model and reasoning effort each lane profile runs on, plus lane caps, timeouts and the setup commands every brief carries. Stored per repo (keyed like the lane ledger), written only through validating subcommands — `detect` measures, `init` scaffolds with **no** profiles, `validate` refuses a config that cannot decide a lane. Profiles are the user's judgement, asked once, never guessed per spawn. |
 | **`test-scope`** | Set up and continuously improve path-aware test selection for a repo whose full suite or CI is too slow: run only what a change can affect — import graph first (`vitest related` / jest / pytest / go), explicit `parts` for the links imports cannot see — with an uncovered-file gate (exit 3), `replay` numbers, a backstop-`misses` loop that turns missed failures into new rules, a `measure` phase (metrics record + lift) around every change to the selection, per-change `changecov` / `mutate` / `doctor` checks that the selected tests execute and would notice the change, `hubs` / `trace` / `graphCuts` for over-broad import graphs, and optional OpenCodeReview rule routing. Dependency-free node scripts. |
-| **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over the word budget or dense with long prose), unbalanced/missing XML structural tags, weak frontmatter triggers, and oversized inline flowcharts or reference files. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
+| **`skill-lint`** | Deterministic analyzer for the skills themselves: flags SKILL.md files that "read like a book" (over 100 body lines or ~5000 tokens, or dense with long prose), frontmatter that breaks Anthropic's skill-authoring limits or the agentskills.io spec, unbalanced/missing XML structural tags, weak triggers, nested or untabled reference files, and oversized inline flowcharts. CI runs it with `--strict`. Reports ranked findings; does not edit. Run it or ask "which skills are too long". |
 
 ### Agents
 
 Generic, public-ready subagents (in `plugins/lirbox/agents/`). Nine standalone subagents — invoke
-any of them directly, or let `do` route a `lane` through `orch-lane.sh`:
+any of them directly, or let `conductor` route a `lane` through `orch-lane.sh`:
 
 | Agent | Role |
 |-------|------|
@@ -60,7 +60,7 @@ In Claude Code:
 Then use a skill — just describe the task:
 
 ```text
-do this: <task>                     # do (routes it first — reject/scope/inline/lane)
+do this: <task>                     # conductor (routes it first — reject/scope/inline/lane)
 write up PR 1059                    # pr-writeup
 write up PR 1059 verbose            # snippet on every non-trivial file
 make a plan-deck for <spec/task>    # plan-deck
@@ -74,7 +74,7 @@ verify this migration plan          # plan-check (pressure-tests it, GO/NO-GO re
 which skills are too long?          # skill-lint (deterministic scan; reports, never edits)
 ```
 
-Skills resolve under the `lirbox:` namespace (e.g. `lirbox:do`, `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:prompt-improve`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
+Skills resolve under the `lirbox:` namespace (e.g. `lirbox:conductor`, `lirbox:pr-writeup`, `lirbox:plan-deck`, `lirbox:codewalk`, `lirbox:flowchart`, `lirbox:component-diagram`, `lirbox:sequence-diagram`, `lirbox:c4-model`, `lirbox:deep-understanding`, `lirbox:prompt-improve`, `lirbox:plan-check`, `lirbox:lane-config`, `lirbox:skill-lint`, `lirbox:feedback`).
 
 ## Test locally (no install)
 
@@ -104,8 +104,9 @@ pushing new commits is enough for installed users to pick up updates on
 Getting a skill to Tier 2 (floor + acceptance-checks) and the check-gate discipline for changing
 one afterward are covered in [CONTRIBUTING.md](./CONTRIBUTING.md#testing).
 
-The `conductor` / `loom` / `prospector` / `whetstone` / `arena` loops that used to automate parts of
-this were **deleted** along with the Workflow tool they were built on; that discipline is now done by
+The Workflow-tool `conductor` / `loom` / `prospector` / `whetstone` / `arena` loops that used to automate parts of
+this were **deleted** along with the Workflow tool they were built on (today's `conductor` is a rebuild
+with the same name and none of that machinery); that discipline is now done by
 hand. Their guides under `docs/` (`arena-guide.md`, `arena-handoff.md`, `whetstone-ready.md`,
 `skill-improvement-cookbook.md`, `skillopt-exploration.md`, `loop-consolidation.md`, `docs/plans/`)
 are kept as **historical records of what was measured** — the scripts and skills they instruct you to

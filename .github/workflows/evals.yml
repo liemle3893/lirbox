@@ -42,6 +42,10 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
       - name: Regression gate
         run: node scripts/evals-all.mjs --fast
+      # Every SKILL.md within the size/frontmatter limits (Anthropic's skill-authoring guide, the
+      # agentskills.io spec, this repo's 100-line cap). --strict fails on any ● finding.
+      - name: Skill lint
+        run: node plugins/lirbox/skills/skill-lint/scripts/analyze.cjs --strict
       # The orchestration runtime (intake, jev, board, …) is not a skill, so evals-all never runs
       # its self-checks — they gated nothing unless someone ran them by hand.
       - name: Runtime self-checks

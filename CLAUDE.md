@@ -5,8 +5,10 @@ Personal Claude Code **plugin marketplace**. One plugin, `lirbox`, under `plugin
 `agents/<name>.md` (9 subagents), `hooks/` (1 registered hook), `scripts/` (the orchestration
 runtime), `.claude-plugin/marketplace.json` (skills are auto-discovered, not listed).
 
-**14 skills**: 13 plus `do`. There is no Workflow tool here and no `conductor` / `loom` /
-`prospector` / `whetstone` / `arena` — those were deleted. Anything still referring to them is stale.
+**14 skills**: 13 plus `conductor`. There is no Workflow tool here and no `loom` / `prospector` /
+`whetstone` / `arena` — those were deleted, as was the Workflow-tool conductor. Today's `conductor`
+is a single-loop rebuild; anything describing phase workers, `scaffold-workflow.cjs` or
+`.workflows/` is the old one and stale.
 
 Skill catalog → [README.md](./README.md). Adding a skill/agent/plugin, and all testing detail →
 [CONTRIBUTING.md](./CONTRIBUTING.md).
@@ -19,16 +21,20 @@ Skill catalog → [README.md](./README.md). Adding a skill/agent/plugin, and all
 `plan-check`); run it on the output (`node .../validate.mjs <file>.html`) — it catches Mermaid
 label-escaping bugs and structural holes.
 
-**The rest**: `do` (entrypoint, below), `deep-understanding` (interactive tutor, no artifact), `prompt-improve`
+**The rest**: `conductor` (entrypoint, below), `deep-understanding` (interactive tutor, no artifact), `prompt-improve`
 (prompt interview graded by Jev, Haiku subagent fallback; `scripts/engine.mjs` + `catalog.mjs` are
 copies of daily-news `src/lib/brief/`),
 `lane-config` (per-repo lane/harness/model config), `skill-lint` (analyzer over the SKILL.md files),
 `feedback` (user-invoked only; files a scrubbed GitHub issue).
 
-## `/do` — the single entrypoint
+## `/conductor` — the single entrypoint
 
-Every task goes through one door. `do` runs `intake.mjs`, says the route out loud, and acts on it in
-the same turn. It replaces nothing the scripts already do; it is the thing that calls them.
+Every task goes through one door. `conductor` runs `intake.mjs`, says the route out loud, and acts on
+it in the same turn. Non-trivial `inline` work and planner slices then take the **gated run**: one
+session loop, a DoD frozen before code is touched, `skills/conductor/scripts/dod-gate.mjs` as the
+gate (exit 0 passed · 1 unmet · 3 escalated after 3 rounds · 2 refused), one `lirbox-verifier` for
+judged criteria, and `docs/changes/<slug>/{summary.md,implementation-notes.md}` required. No phase
+workers — that is what made the old conductor lose to a plain session on wall-clock.
 
 ```
 echo "<task>" | node plugins/lirbox/scripts/intake.mjs --task - --run <slug>
@@ -115,7 +121,8 @@ keep it specific; it decides when Claude invokes it. Skills resolve as `lirbox:<
 
 ## Shipping a skill — three tiers (detail: [CONTRIBUTING.md](./CONTRIBUTING.md#testing))
 
-**Tier 1** validate + smoke-test + `skill-lint`. **Tier 2** evals (`evals/floor/`, `evals/checks/`,
+**Tier 1** validate + smoke-test + `skill-lint` (CI runs `--strict`: SKILL.md body ≤100 lines and
+≤~5000 tokens, frontmatter within spec limits). **Tier 2** evals (`evals/floor/`, `evals/checks/`,
 `evals/checks-manifest.json`, green under `node scripts/evals-all.mjs --fast`). **Tiers 1–2 are
 required** — a skill with no floor is ungated forever.
 
@@ -125,7 +132,7 @@ behaviour did. Run it **paired** — same task, same model, two skill trees (bas
 `git HEAD`, pruned the same way; after = the working tree) — and **report the lift, not the score**:
 a bare "1.000" says nothing without the arm it is compared against.
 
-> **Status: nothing shipped in the `do` / `intake` / `jev` / `board` / one-slice-planner change has
+> **Status: nothing shipped in the `do` (now `conductor`) / `intake` / `jev` / `board` / one-slice-planner change has
 > a Tier 3 Harbor run — the owner skipped it. Those behavioural claims are UNVERIFIED.** Tier 1 and
 > Tier 2 are green; that is all that has been measured.
 

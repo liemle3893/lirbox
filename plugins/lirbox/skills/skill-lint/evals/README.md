@@ -24,5 +24,5 @@ Current floor:
 
 `checks/*.check.mjs` are the per-concern checks drafted during setup (by hand, or by a future
 improvement loop), one per `feedback/skill-lint.jsonl` item. Each MUST fail on the unmodified skill
-(the discrimination gate) and pass once the fix lands. Run one-at-a-time, never by `run.mjs`. None
-are committed yet.
+(the discrimination gate) and pass once the fix lands. Run one-at-a-time, never by `run.mjs`. Committed: `line-budget`, `token-budget`, `frontmatter-limits`,
+`refs-one-level` — each mutation-proven via `checks-manifest.json`.

@@ -1,5 +1,13 @@
 # Sequence-diagram authoring guide
 
+## Contents
+- When a sequence diagram is the right tool
+- Writing the diagram (Mermaid `sequenceDiagram`)
+- Filling the step list (`STEPLIST`)
+- Grounding
+- Offline / CDN note
+- Verify checklist
+
 This skill renders a time-ordered **interaction** as a Mermaid `sequenceDiagram` plus a
 **numbered step list** that drives a clickable detail panel. You write the diagram in Mermaid
 text (which is reliable) — Mermaid does the layout. You fill a `STEPLIST` array for the

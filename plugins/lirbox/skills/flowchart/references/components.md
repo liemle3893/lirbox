@@ -1,5 +1,13 @@
 # Flowchart authoring guide
 
+## Contents
+- When a flowchart is the right tool
+- Writing the graph (Mermaid `flowchart TD`)
+- Filling the detail panel (`STEPS`)
+- Grounding
+- Offline / CDN note
+- Verify checklist
+
 This skill renders a branching **process** as a Mermaid `flowchart` plus a clickable
 detail panel. You write the graph in Mermaid text (which is reliable) — Mermaid does the
 layout. You fill a `STEPS` map for the per-node narrative. Keep the `<style>` block and

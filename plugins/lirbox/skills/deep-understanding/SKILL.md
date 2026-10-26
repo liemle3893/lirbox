@@ -1,6 +1,6 @@
 ---
 name: deep-understanding
-description: This skill should be used to teach a human to deeply understand a change, PR, subsystem, or session — interactively, by assessing what they already know, filling gaps, and quizzing them until mastery is verified. It does not just explain; it confirms understanding incrementally before moving on. Triggers when the user asks to "help me understand this PR/change/codebase deeply", "teach me how this works", "quiz me on X", "make sure I understand X", "walk me through and test me", or "deep understanding of <topic>". Runs as an interactive tutoring loop — not a one-shot explanation, and not an HTML document.
+description: This skill should be used to teach a human to deeply understand a change, PR, subsystem, or session — interactively, by assessing what they already know, filling gaps, and quizzing them until mastery is verified. It does not just explain; it confirms understanding incrementally before moving on. Triggers when the user asks to "help me understand this PR/change/codebase deeply", "teach me how this works", "quiz me on X", "make sure I understand X", "walk me through and test me", or "deep understanding of a topic". Runs as an interactive tutoring loop — not a one-shot explanation, and not an HTML document.
 ---
 
 # deep-understanding
