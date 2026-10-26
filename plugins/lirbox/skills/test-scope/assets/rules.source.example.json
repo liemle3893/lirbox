@@ -1,0 +1,21 @@
+{
+  "_comment": "Prose source for .opencodereview/rule.json. `test-scope.mjs rules --write` appends one `Test parts:` line per rule from the parts whose `paths` intersect the rule's path. OCR globs do not support nested braces.",
+  "include": ["server/src/**/*.test.ts", "web/src/**/*.test.{ts,tsx}"],
+  "exclude": ["**/node_modules/**", "**/dist/**", "**/*.png"],
+  "testPartsFooter": "The reviewer may add parts beyond this list with evidence (file:line of a consumer the listed parts do not cover) and runs them with `test-scope.mjs run --part a,b`.",
+  "rules": [
+    {
+      "path": "server/migrations/**",
+      "rule": "SQL MIGRATION. Hidden consumers: raw SQL in server/src/domains/*.ts naming the table, generated db types, seed data. The diff must carry the regenerated types."
+    },
+    {
+      "path": "{web/src/data/types/**,server/src/http/**}",
+      "rule": "API CONTRACT. Hidden consumers: generated handlers, web fakes, contract tests."
+    },
+    {
+      "path": "**/*",
+      "rule": "Normal code review. Check non-import consumers of anything renamed or removed.",
+      "testParts": "decided by `test-scope.mjs select --changed --list`"
+    }
+  ]
+}
